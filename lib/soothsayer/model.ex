@@ -1,12 +1,30 @@
 defmodule Soothsayer.Model do
-  @moduledoc """
-  Represents a Soothsayer model with its parameters and state.
-  """
+  import Axon
 
-  defstruct [:params, :state]
+  defstruct [:params, :state, :nn_model]
 
-  @type t :: %__MODULE__{
-          params: map(),
-          state: map()
-        }
+  def build(input_shape) do
+    inputs = Axon.input("input", shape: input_shape)
+
+    trend =
+      inputs
+      |> dense(32, activation: :relu)
+      |> dense(16, activation: :relu)
+      |> dense(1, name: "trend")
+
+    seasonality =
+      inputs
+      |> dense(64, activation: :relu)
+      |> dense(32, activation: :relu)
+      |> dense(1, name: "seasonality")
+
+    ar =
+      inputs
+      |> dense(32, activation: :relu)
+      |> dense(16, activation: :relu)
+      |> dense(1, name: "ar")
+
+    Axon.add([trend, seasonality, ar])
+    |> dense(1, name: "output")
+  end
 end

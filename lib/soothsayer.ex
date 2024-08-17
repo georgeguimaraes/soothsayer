@@ -1,40 +1,17 @@
 defmodule Soothsayer do
-  @moduledoc """
-  Soothsayer is an Elixir port of NeuralProphet, providing time series forecasting capabilities.
-  """
-
   alias Explorer.DataFrame
   alias Explorer.Series
 
-  @doc """
-  Creates a new Soothsayer model with the given options.
-  """
-  def new(opts \\ []) do
-    params =
-      %{
-        # Add default parameters here
-      }
-
-    %Soothsayer.Model{params: params, state: %{}}
+  def new do
+    %Soothsayer.Model{}
   end
 
-  def fit(%Soothsayer.Model{} = model, %DataFrame{} = data, freq) when is_binary(freq) do
-    # Extract Series from DataFrame
-    date_series = DataFrame.pull(data, "date")
-    target_series = DataFrame.pull(data, "y")
+  def fit(model, data, freq) when is_binary(freq) do
+    prepared_data = Soothsayer.Preprocessor.prepare_data(data, "y", "date")
 
-    # Convert Series to tensors
-    date_tensor = Series.to_tensor(date_series)
-    target_tensor = Series.to_tensor(target_series)
-
-    # Cast target_tensor to float32
-    target_tensor = Nx.as_type(target_tensor, {:f, 32})
-
-    # Placeholder for model training
-    # In reality, this would involve complex calculations using Nx and Axon
+    # For now, we'll just store the prepared data in the model
     trained_state = %{
-      date_tensor: date_tensor,
-      target_tensor: target_tensor,
+      prepared_data: prepared_data,
       freq: freq
     }
 
@@ -50,23 +27,19 @@ defmodule Soothsayer do
     {updated_model, metrics}
   end
 
-  def predict(%Soothsayer.Model{state: state} = model, %DataFrame{} = data) do
-    # Extract Series from DataFrame
-    date_series = DataFrame.pull(data, "date")
+  def predict(%Soothsayer.Model{state: state}, future_df) do
+    # Extract date column
+    dates = DataFrame.pull(future_df, "date")
 
-    # Get the last value from the target tensor
-    last_value = state.target_tensor |> Nx.to_flat_list() |> List.last()
+    # Generate placeholder predictions
+    num_predictions = DataFrame.n_rows(future_df)
+    last_value = state.prepared_data["y"] |> Series.last()
+    yhat = Series.from_list(List.duplicate(last_value, num_predictions))
 
-    # Create a new tensor with the same shape as the target, filled with the last value
-    predictions = Nx.broadcast(Nx.tensor(last_value), Nx.shape(state.target_tensor))
-
-    # Convert predictions back to a DataFrame
-    forecast =
-      DataFrame.new(%{
-        "date" => date_series,
-        "yhat" => Series.from_tensor(predictions)
-      })
-
-    forecast
+    # Create forecast DataFrame
+    DataFrame.new(%{
+      "date" => dates,
+      "yhat" => yhat
+    })
   end
 end
