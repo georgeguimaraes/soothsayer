@@ -19,7 +19,11 @@ defmodule Soothsayer.Preprocessor do
         df
       end
 
-    DataFrame.select(df, [y_column | df.names -- [y_column]])
+    if y_column do
+      DataFrame.select(df, [y_column | df.names -- [y_column]])
+    else
+      df
+    end
   end
 
   defp add_fourier_terms(df, ds_column, period_type, fourier_terms) do

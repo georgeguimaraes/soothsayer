@@ -46,7 +46,7 @@ defmodule Soothsayer do
 
     trained_params =
       nn_model
-      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam())
+      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam(learning_rate: 0.001))
       |> Axon.Loop.run(train_data, initial_params,
         epochs: 10,
         iterations: Nx.shape(x) |> elem(0),
@@ -77,9 +77,9 @@ defmodule Soothsayer do
         %Series{} = x
       ) do
     processed_x =
-      Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), "y", "ds", seasonality_config)
+      Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", seasonality_config)
 
-    x_columns = processed_x.names -- ["y", "ds"]
+    x_columns = processed_x.names -- ["ds"]
 
     x_tensor =
       processed_x[x_columns]
