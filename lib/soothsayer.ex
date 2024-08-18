@@ -7,30 +7,28 @@ defmodule Soothsayer do
     Model.new()
   end
 
-  def fit(%Model{} = model, %{} = data) do
-    x_series = data["x"]
-    y_series = data["y"]
+  def fit(%Model{} = model, %DataFrame{} = data) do
+    x = data["x"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
+    y = data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
 
-    # Create a stream that generates fresh tensors for each iteration
+    {init_fn, predict_fn} = Axon.build(model.nn_model)
+    initial_params = init_fn.(Nx.template({Nx.size(x), 1}, {:f, 32}), %{})
+
     train_data =
       Stream.repeatedly(fn ->
-        x = x_series |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(0)
-        y = y_series |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(0)
         {x, y}
       end)
 
     trained_model =
       model.nn_model
       |> Axon.Loop.trainer(:mean_squared_error, :adam)
-      |> Axon.Loop.run(train_data, %{}, iterations: 100)
-
-    IO.inspect(trained_model)
+      |> Axon.Loop.run(train_data, initial_params, epochs: 10, iterations: Nx.size(x))
 
     %{model | nn_model: trained_model}
   end
 
-  def predict(%Model{nn_model: model}, x) do
-    x_tensor = x |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(0)
-    Axon.predict(model, %{}, x_tensor)
+  def predict(%Model{nn_model: trained_model}, %Series{} = x) do
+    x_tensor = x |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
+    Axon.predict(trained_model, x_tensor, %{})
   end
 end
