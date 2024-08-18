@@ -33,7 +33,7 @@ defmodule Soothsayer.Model do
 
   defp build_seasonality(%{enabled: true, fourier_terms: terms}, name) do
     input = Axon.input("#{name}_input", shape: {nil, 2 * terms})
-    Axon.dense(input, 1, activation: :linear)
+    Axon.dense(input, 1, activation: :relu)
   end
 
   defp build_seasonality(%{enabled: false}, _name), do: nil
