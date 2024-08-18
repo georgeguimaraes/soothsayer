@@ -1,31 +1,46 @@
 defmodule Soothsayer.Model do
-  defstruct [:nn_model, :params, :trend_config, :seasonality_config]
+  defstruct [
+    :nn_model,
+    :params,
+    trend_config: %{enabled: true, hidden_sizes: [64, 32]},
+    seasonality_config: %{
+      yearly: %{enabled: true, fourier_terms: 6},
+      weekly: %{enabled: true, fourier_terms: 3}
+    }
+  ]
 
-  def build(config) do
-    input = Axon.input("input", shape: {nil, 1})
-    trend = build_trend(input, config.trend_config)
-    seasonality = build_seasonality(input, config.seasonality_config)
-
-    Axon.add(trend, seasonality)
+  def new(config) do
+    model = struct(__MODULE__, config)
+    %{model | nn_model: build(model)}
   end
 
-  def new(config \\ %{}) do
-    trend_config = Map.get(config, :trend, %{hidden_sizes: [64, 32]})
+  def build(%{trend_config: trend_config, seasonality_config: seasonality_config}) do
+    input = Axon.input("input", shape: {nil, nil})
 
-    seasonality_config =
-      Map.get(config, :seasonality, %{
-        yearly: %{enabled: true, fourier_terms: 6},
-        weekly: %{enabled: true, fourier_terms: 3}
-      })
+    trend =
+      if trend_config.enabled do
+        build_trend(input, trend_config)
+      else
+        Axon.constant(0)
+      end
 
-    nn_model = build(%{trend_config: trend_config, seasonality_config: seasonality_config})
+    seasonality =
+      if seasonality_config.yearly.enabled or seasonality_config.weekly.enabled do
+        build_seasonality(input, seasonality_config)
+      else
+        Axon.constant(0)
+      end
 
-    %__MODULE__{
-      nn_model: nn_model,
-      params: nil,
-      trend_config: trend_config,
-      seasonality_config: seasonality_config
-    }
+    output = Axon.add(trend, seasonality)
+
+    # Ensure we always have a valid Axon model
+    if trend_config.enabled or seasonality_config.yearly.enabled or
+         seasonality_config.weekly.enabled do
+      output
+    else
+      # If both trend and seasonality are disabled, create a dummy model
+      Axon.dense(input, 1)
+    end
   end
 
   defp build_trend(input, trend_config) do

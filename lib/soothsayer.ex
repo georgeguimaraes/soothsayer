@@ -18,19 +18,25 @@ defmodule Soothsayer do
       |> DataFrame.to_series()
       |> Map.values()
       |> Enum.map(&Series.to_tensor/1)
-      |> Nx.stack(axis: 1)
-      |> Nx.as_type({:f, 32})
+
+    x =
+      if Enum.empty?(x) do
+        # If no features (trend and seasonality disabled), use a dummy feature
+        [Nx.tensor(List.duplicate(1, Series.size(processed_data["y"])))]
+      else
+        x
+      end
+
+    x = Nx.stack(x, axis: 1) |> Nx.as_type({:f, 32})
 
     y = processed_data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
-
-    IO.puts("x shape: #{inspect(Nx.shape(x))}")
-    IO.puts("y shape: #{inspect(Nx.shape(y))}")
 
     # Normalize input
     {x_normalized, x_mean, x_std} = normalize(x)
     {y_normalized, y_mean, y_std} = normalize(y)
 
-    {init_fn, predict_fn} = Axon.build(model.nn_model)
+    nn_model = Model.build(model)
+    {init_fn, predict_fn} = Axon.build(nn_model)
     initial_params = init_fn.(x_normalized, %{})
 
     train_data =
@@ -38,12 +44,9 @@ defmodule Soothsayer do
         {x_normalized, y_normalized}
       end)
 
-    require IEx
-    IEx.pry()
-
     trained_params =
-      model.nn_model
-      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam(0.001))
+      nn_model
+      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam())
       |> Axon.Loop.run(train_data, initial_params,
         epochs: 10,
         iterations: Nx.shape(x) |> elem(0),
@@ -52,7 +55,7 @@ defmodule Soothsayer do
 
     %{
       model
-      | nn_model: model.nn_model,
+      | nn_model: nn_model,
         params: trained_params,
         trend_config:
           Map.put(model.trend_config, :normalization, %{
@@ -83,8 +86,16 @@ defmodule Soothsayer do
       |> DataFrame.to_series()
       |> Map.values()
       |> Enum.map(&Series.to_tensor/1)
-      |> Nx.stack(axis: 1)
-      |> Nx.as_type({:f, 32})
+
+    x_tensor =
+      if Enum.empty?(x_tensor) do
+        # If no features (trend and seasonality disabled), use a dummy feature
+        [Nx.tensor(List.duplicate(1, Series.size(x)))]
+      else
+        x_tensor
+      end
+
+    x_tensor = Nx.stack(x_tensor, axis: 1) |> Nx.as_type({:f, 32})
 
     x_normalized =
       Nx.subtract(x_tensor, trend_config.normalization.x_mean)
@@ -103,6 +114,7 @@ defmodule Soothsayer do
   defp normalize(tensor) do
     mean = Nx.mean(tensor, axes: [0])
     std = Nx.standard_deviation(tensor, axes: [0])
+    std = Nx.select(Nx.equal(std, 0), Nx.tensor(1), std)
     {Nx.divide(Nx.subtract(tensor, mean), std), mean, std}
   end
 end
