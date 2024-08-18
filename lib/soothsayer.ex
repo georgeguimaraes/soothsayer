@@ -19,16 +19,17 @@ defmodule Soothsayer do
         {x, y}
       end)
 
-    trained_model =
+    trained_params =
       model.nn_model
       |> Axon.Loop.trainer(:mean_squared_error, :adam)
       |> Axon.Loop.run(train_data, initial_params, epochs: 10, iterations: Nx.size(x))
 
-    %{model | nn_model: trained_model}
+    %{model | nn_model: model.nn_model, params: trained_params}
   end
 
-  def predict(%Model{nn_model: trained_model}, %Series{} = x) do
+  def predict(%Model{nn_model: model, params: params}, %Series{} = x) do
     x_tensor = x |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
-    Axon.predict(trained_model, x_tensor, %{})
+    {_init_fn, predict_fn} = Axon.build(model)
+    predict_fn.(params, x_tensor)
   end
 end

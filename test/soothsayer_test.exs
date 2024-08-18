@@ -22,6 +22,7 @@ defmodule SoothsayerTest do
 
       # Check predictions
       predictions_list = Nx.to_flat_list(predictions)
+      IO.inspect(predictions_list)
       assert length(predictions_list) == 3
 
       # Check if predictions are close to expected values
