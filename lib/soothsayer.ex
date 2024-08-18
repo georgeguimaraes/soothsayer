@@ -22,7 +22,7 @@ defmodule Soothsayer do
     trained_params =
       model.nn_model
       |> Axon.Loop.trainer(:mean_squared_error, :adam)
-      |> Axon.Loop.run(train_data, initial_params, epochs: 10, iterations: Nx.size(x))
+      |> Axon.Loop.run(train_data, initial_params, epochs: 100, iterations: Nx.size(x))
 
     %{model | nn_model: model.nn_model, params: trained_params}
   end

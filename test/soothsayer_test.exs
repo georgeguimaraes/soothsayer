@@ -8,7 +8,7 @@ defmodule SoothsayerTest do
   describe "Soothsayer" do
     test "simple linear regression" do
       # Create sample data
-      x = Enum.to_list(1..100)
+      x = Enum.to_list(1..1000)
       y = Enum.map(x, fn x -> 2 * x + 1 + :rand.normal(0, 0.1) end)
       df = DataFrame.new(%{"x" => x, "y" => y})
 

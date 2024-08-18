@@ -3,6 +3,9 @@ defmodule Soothsayer.Model do
 
   def build do
     Axon.input("input", shape: {nil, 1})
+    |> Axon.dense(16, activation: :linear)
+    |> Axon.dense(16, activation: :linear)
+    |> Axon.dense(16, activation: :linear)
     |> Axon.dense(1, activation: :linear)
   end
 
