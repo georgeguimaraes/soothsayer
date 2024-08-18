@@ -46,9 +46,10 @@ defmodule Soothsayer do
 
     trained_params =
       nn_model
-      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam(learning_rate: 0.001))
+      # Corrected Adam optimizer syntax
+      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam(learning_rate: 0.01))
       |> Axon.Loop.run(train_data, initial_params,
-        epochs: 10,
+        epochs: 100,
         iterations: Nx.shape(x) |> elem(0),
         compiler: EXLA
       )

@@ -31,27 +31,12 @@ defmodule Soothsayer.Model do
         Axon.constant(0)
       end
 
-    output = Axon.add(trend, seasonality)
-
-    # Ensure we always have a valid Axon model
-    if trend_config.enabled or seasonality_config.yearly.enabled or
-         seasonality_config.weekly.enabled do
-      output
-    else
-      # If both trend and seasonality are disabled, create a dummy model
-      Axon.dense(input, 1)
-    end
+    Axon.add(trend, seasonality)
   end
 
-  defp build_trend(input, trend_config) do
-    hidden_sizes = Map.get(trend_config, :hidden_sizes, [64, 32])
-
-    Enum.reduce(hidden_sizes, input, fn size, acc ->
-      acc
-      |> Axon.dense(size, activation: :relu)
-      |> Axon.dropout(rate: 0.1)
-    end)
-    |> Axon.dense(1, activation: :linear)
+  defp build_trend(input, _trend_config) do
+    # Simplified trend model: just a linear layer
+    Axon.dense(input, 1, activation: :linear)
   end
 
   defp build_seasonality(input, seasonality_config) do

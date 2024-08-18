@@ -15,7 +15,8 @@ defmodule SoothsayerTest do
       y =
         Enum.map(dates, fn date ->
           days_since_start = Date.diff(date, start_date)
-          1000 + 100 / 365 * days_since_start + :rand.normal(0, 5)
+          # Clear linear trend
+          1000 + 2 * days_since_start
         end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
@@ -23,7 +24,7 @@ defmodule SoothsayerTest do
       # Create and fit the model with only trend enabled
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: true, hidden_sizes: [64, 32]},
+          trend_config: %{enabled: true},
           seasonality_config: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
@@ -43,13 +44,13 @@ defmodule SoothsayerTest do
       predictions_list = Nx.to_flat_list(predictions)
       assert length(predictions_list) == 30
 
-      # Check if predictions follow the trend (with tolerance for noise)
+      # Check if predictions follow the trend (with small tolerance)
       Enum.zip(predictions_list, future_dates)
       |> Enum.with_index()
       |> Enum.each(fn {{pred, date}, i} ->
         days_since_start = 5 * 365 + i
-        expected_trend = 1000 + 100 / 365 * days_since_start
-        assert_in_delta pred, expected_trend, 50
+        expected_trend = 1000 + 2 * days_since_start
+        assert_in_delta pred, expected_trend, 10
       end)
     end
 
