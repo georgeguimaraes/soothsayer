@@ -44,7 +44,7 @@ defmodule Soothsayer.Model do
 
     trained_params =
       model
-      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam(learning_rate: 0.001))
+      |> Axon.Loop.trainer(:huber, Polaris.Optimizers.adam(learning_rate: 0.01))
       |> Axon.Loop.run(Stream.repeatedly(fn -> {x, y} end), initial_params,
         epochs: epochs,
         iterations: elem(Nx.shape(y), 0),
