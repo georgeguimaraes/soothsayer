@@ -1,30 +1,13 @@
 defmodule Soothsayer.Model do
-  import Axon
+  defstruct [:nn_model]
 
-  defstruct [:params, :state, :nn_model]
+  def build do
+    Axon.input("input", shape: {nil, 1})
+    |> Axon.dense(1)
+  end
 
-  def build(input_shape) do
-    inputs = Axon.input("input", shape: input_shape)
-
-    trend =
-      inputs
-      |> dense(32, activation: :relu)
-      |> dense(16, activation: :relu)
-      |> dense(1, name: "trend")
-
-    seasonality =
-      inputs
-      |> dense(64, activation: :relu)
-      |> dense(32, activation: :relu)
-      |> dense(1, name: "seasonality")
-
-    ar =
-      inputs
-      |> dense(32, activation: :relu)
-      |> dense(16, activation: :relu)
-      |> dense(1, name: "ar")
-
-    Axon.add([trend, seasonality, ar])
-    |> dense(1, name: "output")
+  def new do
+    nn_model = build()
+    %__MODULE__{nn_model: nn_model}
   end
 end

@@ -1,45 +1,36 @@
 defmodule Soothsayer do
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.Model
 
   def new do
-    %Soothsayer.Model{}
+    Model.new()
   end
 
-  def fit(model, data, freq) when is_binary(freq) do
-    prepared_data = Soothsayer.Preprocessor.prepare_data(data, "y", "date")
+  def fit(%Model{} = model, %{} = data) do
+    x_series = data["x"]
+    y_series = data["y"]
 
-    # For now, we'll just store the prepared data in the model
-    trained_state = %{
-      prepared_data: prepared_data,
-      freq: freq
-    }
+    # Create a stream that generates fresh tensors for each iteration
+    train_data =
+      Stream.repeatedly(fn ->
+        x = x_series |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(0)
+        y = y_series |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(0)
+        {x, y}
+      end)
 
-    metrics = %{
-      # placeholder metric
-      mse: 0.5,
-      # placeholder metric
-      mae: 0.3
-    }
+    trained_model =
+      model.nn_model
+      |> Axon.Loop.trainer(:mean_squared_error, :adam)
+      |> Axon.Loop.run(train_data, %{}, iterations: 100)
 
-    updated_model = %{model | state: trained_state}
+    IO.inspect(trained_model)
 
-    {updated_model, metrics}
+    %{model | nn_model: trained_model}
   end
 
-  def predict(%Soothsayer.Model{state: state}, future_df) do
-    # Extract date column
-    dates = DataFrame.pull(future_df, "date")
-
-    # Generate placeholder predictions
-    num_predictions = DataFrame.n_rows(future_df)
-    last_value = state.prepared_data["y"] |> Series.last()
-    yhat = Series.from_list(List.duplicate(last_value, num_predictions))
-
-    # Create forecast DataFrame
-    DataFrame.new(%{
-      "date" => dates,
-      "yhat" => yhat
-    })
+  def predict(%Model{nn_model: model}, x) do
+    x_tensor = x |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(0)
+    Axon.predict(model, %{}, x_tensor)
   end
 end
