@@ -4,8 +4,8 @@ defmodule Soothsayer.Model do
     :yearly_seasonality_model,
     :weekly_seasonality_model,
     :params,
-    :y_normalization,
     :epochs,
+    :y_normalization,
     trend_config: %{enabled: true},
     seasonality_config: %{
       yearly: %{enabled: true, fourier_terms: 6},
