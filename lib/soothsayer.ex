@@ -26,28 +26,28 @@ defmodule Soothsayer do
     {y_normalized, y_mean, y_std} = normalize(y)
 
     # Fit trend
-    {trend_predict_fn, trend_params, trend_norm} =
+    {trend_params, trend_norm} =
       if model.trend_config.enabled do
         trend_input =
           processed_data["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
 
         {trend_input_normalized, trend_mean, trend_std} = normalize(trend_input)
 
-        {predict_fn, params} =
+        {_, params} =
           Model.fit_model(model.trend_model, trend_input_normalized, y_normalized, model.epochs)
 
-        {predict_fn, params, %{input_mean: trend_mean, input_std: trend_std}}
+        {params, %{input_mean: trend_mean, input_std: trend_std}}
       else
-        {nil, nil, nil}
+        {nil, nil}
       end
 
     # Fit yearly seasonality
-    {yearly_predict_fn, yearly_params, yearly_norm} =
+    {yearly_params, yearly_norm} =
       if model.seasonality_config.yearly.enabled do
         yearly_input = get_seasonality_input(processed_data, :yearly)
         {yearly_input_normalized, yearly_mean, yearly_std} = normalize(yearly_input)
 
-        {predict_fn, params} =
+        {_, params} =
           Model.fit_model(
             model.yearly_seasonality_model,
             yearly_input_normalized,
@@ -55,18 +55,18 @@ defmodule Soothsayer do
             model.epochs
           )
 
-        {predict_fn, params, %{input_mean: yearly_mean, input_std: yearly_std}}
+        {params, %{input_mean: yearly_mean, input_std: yearly_std}}
       else
-        {nil, nil, nil}
+        {nil, nil}
       end
 
     # Fit weekly seasonality
-    {weekly_predict_fn, weekly_params, weekly_norm} =
+    {weekly_params, weekly_norm} =
       if model.seasonality_config.weekly.enabled do
         weekly_input = get_seasonality_input(processed_data, :weekly)
         {weekly_input_normalized, weekly_mean, weekly_std} = normalize(weekly_input)
 
-        {predict_fn, params} =
+        {_, params} =
           Model.fit_model(
             model.weekly_seasonality_model,
             weekly_input_normalized,
@@ -74,9 +74,9 @@ defmodule Soothsayer do
             model.epochs
           )
 
-        {predict_fn, params, %{input_mean: weekly_mean, input_std: weekly_std}}
+        {params, %{input_mean: weekly_mean, input_std: weekly_std}}
       else
-        {nil, nil, nil}
+        {nil, nil}
       end
 
     %{
