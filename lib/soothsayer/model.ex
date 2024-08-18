@@ -1,8 +1,12 @@
 defmodule Soothsayer.Model do
   defstruct [
-    :nn_model,
+    :trend_model,
+    :yearly_seasonality_model,
+    :weekly_seasonality_model,
     :params,
-    trend_config: %{enabled: true, hidden_sizes: [64, 32]},
+    :y_normalization,
+    :epochs,
+    trend_config: %{enabled: true},
     seasonality_config: %{
       yearly: %{enabled: true, fourier_terms: 6},
       weekly: %{enabled: true, fourier_terms: 3}
@@ -11,54 +15,51 @@ defmodule Soothsayer.Model do
 
   def new(config) do
     model = struct(__MODULE__, config)
-    %{model | nn_model: build(model)}
+
+    %{
+      model
+      | trend_model: build_trend(model.trend_config),
+        yearly_seasonality_model: build_seasonality(model.seasonality_config.yearly, :yearly),
+        weekly_seasonality_model: build_seasonality(model.seasonality_config.weekly, :weekly)
+    }
   end
 
-  def build(%{trend_config: trend_config, seasonality_config: seasonality_config}) do
-    input = Axon.input("input", shape: {nil, nil})
-
-    trend =
-      if trend_config.enabled do
-        build_trend(input, trend_config)
-      else
-        Axon.constant(0)
-      end
-
-    seasonality =
-      if seasonality_config.yearly.enabled or seasonality_config.weekly.enabled do
-        build_seasonality(input, seasonality_config)
-      else
-        Axon.constant(0)
-      end
-
-    Axon.add(trend, seasonality)
-  end
-
-  defp build_trend(input, _trend_config) do
-    # Simplified trend model: just a linear layer
+  defp build_trend(%{enabled: true}) do
+    input = Axon.input("trend_input", shape: {nil, 1})
     Axon.dense(input, 1, activation: :linear)
   end
 
-  defp build_seasonality(input, seasonality_config) do
-    yearly =
-      if seasonality_config.yearly.enabled do
-        build_fourier_layer(input, 365.25, seasonality_config.yearly.fourier_terms)
-      else
-        Axon.constant(0)
-      end
+  defp build_trend(%{enabled: false}), do: nil
 
-    weekly =
-      if seasonality_config.weekly.enabled do
-        build_fourier_layer(input, 7, seasonality_config.weekly.fourier_terms)
-      else
-        Axon.constant(0)
-      end
-
-    Axon.add(yearly, weekly)
+  defp build_seasonality(%{enabled: true, fourier_terms: terms}, name) do
+    input = Axon.input("#{name}_input", shape: {nil, 2 * terms})
+    Axon.dense(input, 1, activation: :linear)
   end
 
-  defp build_fourier_layer(input, period, fourier_terms) do
-    fourier_input = Axon.dense(input, 2 * fourier_terms)
-    Axon.dense(fourier_input, 1)
+  defp build_seasonality(%{enabled: false}, _name), do: nil
+
+  def fit_model(model, x, y, epochs) when not is_nil(model) do
+    {init_fn, predict_fn} = Axon.build(model)
+    initial_params = init_fn.(x, %{})
+
+    trained_params =
+      model
+      |> Axon.Loop.trainer(:mean_squared_error, Polaris.Optimizers.adam(learning_rate: 0.01))
+      |> Axon.Loop.run(Stream.repeatedly(fn -> {x, y} end), initial_params,
+        epochs: epochs,
+        iterations: elem(Nx.shape(y), 0),
+        compiler: EXLA
+      )
+
+    {predict_fn, trained_params}
   end
+
+  def fit_model(nil, _x, _y, _epochs), do: {nil, nil}
+
+  def predict(model, params, x) when not is_nil(model) do
+    {_init_fn, predict_fn} = Axon.build(model)
+    predict_fn.(params, x)
+  end
+
+  def predict(nil, _params, x), do: Nx.broadcast(0, {elem(Nx.shape(x), 0), 1})
 end

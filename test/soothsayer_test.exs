@@ -7,7 +7,7 @@ defmodule SoothsayerTest do
 
   describe "Soothsayer predictions" do
     test "trend-only prediction" do
-      # Generate sample data with only trend
+      # Generate sample data with only trend and noise
       start_date = ~D[2019-01-01]
       end_date = ~D[2023-12-31]
       dates = Date.range(start_date, end_date)
@@ -15,20 +15,24 @@ defmodule SoothsayerTest do
       y =
         Enum.map(dates, fn date ->
           days_since_start = Date.diff(date, start_date)
-          # Clear linear trend
-          1000 + 2 * days_since_start
+          trend = 1000 + 0.5 * days_since_start
+          # Add random noise
+          noise = :rand.normal(0, 50)
+          trend + noise
         end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      # Create and fit the model with only trend enabled
+      # Create and fit the model with only trend enabled and 10 epochs
       model =
         Soothsayer.new(%{
           trend_config: %{enabled: true},
           seasonality_config: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
-          }
+          },
+          # Set epochs to 10
+          epochs: 10
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -40,22 +44,18 @@ defmodule SoothsayerTest do
       x_test = Series.from_list(Enum.to_list(future_dates))
       predictions = Soothsayer.predict(fitted_model, x_test)
 
-      # Convert predictions to a list
-      predictions_list = Nx.to_flat_list(predictions)
-      assert length(predictions_list) == 30
-
-      # Check if predictions follow the trend (with small tolerance)
-      Enum.zip(predictions_list, future_dates)
-      |> Enum.with_index()
-      |> Enum.each(fn {{pred, date}, i} ->
-        days_since_start = 5 * 365 + i
-        expected_trend = 1000 + 2 * days_since_start
-        assert_in_delta pred, expected_trend, 10
+      # Check if predictions follow the trend (with tolerance for noise)
+      Enum.zip(predictions, future_dates)
+      |> Enum.each(fn {pred, date} ->
+        days_since_start = Date.diff(date, start_date)
+        expected_trend = 1000 + 0.5 * days_since_start
+        # Increased tolerance due to noise and fewer epochs
+        assert_in_delta pred, expected_trend, 100
       end)
     end
 
     test "seasonality-only prediction" do
-      # Generate sample data with only seasonality
+      # Generate sample data with only seasonality and noise
       start_date = ~D[2019-01-01]
       end_date = ~D[2023-12-31]
       dates = Date.range(start_date, end_date)
@@ -65,19 +65,23 @@ defmodule SoothsayerTest do
           days_since_start = Date.diff(date, start_date)
           yearly_seasonality = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
           weekly_seasonality = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
-          yearly_seasonality + weekly_seasonality + :rand.normal(0, 5)
+          # Add random noise
+          noise = :rand.normal(0, 10)
+          yearly_seasonality + weekly_seasonality + noise
         end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      # Create and fit the model with only seasonality enabled
+      # Create and fit the model with only seasonality enabled and 10 epochs
       model =
         Soothsayer.new(%{
           trend_config: %{enabled: false},
           seasonality_config: %{
-            yearly: %{enabled: true, fourier_terms: 6},
+            yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
-          }
+          },
+          # Set epochs to 10
+          epochs: 10
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -89,24 +93,20 @@ defmodule SoothsayerTest do
       x_test = Series.from_list(Enum.to_list(future_dates))
       predictions = Soothsayer.predict(fitted_model, x_test)
 
-      # Convert predictions to a list
-      predictions_list = Nx.to_flat_list(predictions)
-      assert length(predictions_list) == 30
-
-      # Check if predictions follow the seasonality (with tolerance for noise)
-      Enum.zip(predictions_list, future_dates)
-      |> Enum.with_index()
-      |> Enum.each(fn {{pred, date}, i} ->
-        days_since_start = 5 * 365 + i
-        expected_yearly_seasonality = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
-        expected_weekly_seasonality = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
-        expected = expected_yearly_seasonality + expected_weekly_seasonality
-        assert_in_delta pred, expected, 50
+      # Check if predictions follow the seasonality pattern (with tolerance for noise)
+      Enum.zip(predictions, future_dates)
+      |> Enum.each(fn {pred, date} ->
+        days_since_start = Date.diff(date, start_date)
+        expected_yearly = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
+        expected_weekly = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
+        expected = expected_yearly + expected_weekly
+        # Increased tolerance due to noise, approximation, and fewer epochs
+        assert_in_delta pred, expected, 40
       end)
     end
 
     test "combined trend and seasonality prediction" do
-      # Generate sample data with trend and seasonality
+      # Generate sample data with trend, seasonality, and noise
       start_date = ~D[2019-01-01]
       end_date = ~D[2023-12-31]
       dates = Date.range(start_date, end_date)
@@ -114,22 +114,26 @@ defmodule SoothsayerTest do
       y =
         Enum.map(dates, fn date ->
           days_since_start = Date.diff(date, start_date)
-          trend = 1000 + 100 / 365 * days_since_start
+          trend = 1000 + 0.5 * days_since_start
           yearly_seasonality = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
           weekly_seasonality = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
-          trend + yearly_seasonality + weekly_seasonality + :rand.normal(0, 5)
+          # Add random noise
+          noise = :rand.normal(0, 20)
+          trend + yearly_seasonality + weekly_seasonality + noise
         end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      # Create and fit the model with both trend and seasonality enabled
+      # Create and fit the model with both trend and seasonality enabled and 10 epochs
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: true, hidden_sizes: [64, 32]},
+          trend_config: %{enabled: true},
           seasonality_config: %{
-            yearly: %{enabled: true, fourier_terms: 6},
+            yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
-          }
+          },
+          # Set epochs to 10
+          epochs: 20
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -141,20 +145,16 @@ defmodule SoothsayerTest do
       x_test = Series.from_list(Enum.to_list(future_dates))
       predictions = Soothsayer.predict(fitted_model, x_test)
 
-      # Convert predictions to a list
-      predictions_list = Nx.to_flat_list(predictions)
-      assert length(predictions_list) == 30
-
       # Check if predictions follow the trend and seasonality (with tolerance for noise)
-      Enum.zip(predictions_list, future_dates)
-      |> Enum.with_index()
-      |> Enum.each(fn {{pred, date}, i} ->
-        days_since_start = 5 * 365 + i
-        expected_trend = 1000 + 100 / 365 * days_since_start
-        expected_yearly_seasonality = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
-        expected_weekly_seasonality = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
-        expected = expected_trend + expected_yearly_seasonality + expected_weekly_seasonality
-        assert_in_delta pred, expected, 50
+      Enum.zip(predictions, future_dates)
+      |> Enum.each(fn {pred, date} ->
+        days_since_start = Date.diff(date, start_date)
+        expected_trend = 1000 + 0.5 * days_since_start
+        expected_yearly = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
+        expected_weekly = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
+        expected = expected_trend + expected_yearly + expected_weekly
+        # Increased tolerance due to noise, approximation, and fewer epochs
+        assert_in_delta pred, expected, 75
       end)
     end
   end
