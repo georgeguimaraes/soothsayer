@@ -98,8 +98,11 @@ defmodule Soothsayer do
 
   def predict(%Model{} = model, %Series{} = x) do
     components = predict_components(model, x)
+    combined = combine_components(components)
+    denormalize(Nx.tensor(combined), model.y_normalization) |> Nx.to_flat_list()
+  end
 
-    # Combine all components
+  defp combine_components(components) do
     Enum.zip_with(
       [components.trend, components.yearly_seasonality, components.weekly_seasonality],
       fn values -> Enum.sum(values) end
@@ -122,7 +125,7 @@ defmodule Soothsayer do
           normalize_with_params(trend_input, model.trend_config.normalization)
 
         pred = Model.predict(model.trend_model, model.params.trend, trend_input_normalized)
-        denormalize(pred, model.y_normalization) |> Nx.to_flat_list()
+        pred |> Nx.to_flat_list()
       else
         List.duplicate(0, x_size)
       end
@@ -142,7 +145,7 @@ defmodule Soothsayer do
             yearly_input_normalized
           )
 
-        denormalize(pred, model.y_normalization) |> Nx.to_flat_list()
+        pred |> Nx.to_flat_list()
       else
         List.duplicate(0, x_size)
       end
@@ -162,7 +165,7 @@ defmodule Soothsayer do
             weekly_input_normalized
           )
 
-        denormalize(pred, model.y_normalization) |> Nx.to_flat_list()
+        pred |> Nx.to_flat_list()
       else
         List.duplicate(0, x_size)
       end
