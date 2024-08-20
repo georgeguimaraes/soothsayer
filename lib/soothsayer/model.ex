@@ -1,5 +1,5 @@
 defmodule Soothsayer.Model do
-  defstruct [:network, :params, :config, :y_normalization]
+  defstruct [:network, :params, :config]
 
   def new(config) do
     %__MODULE__{
@@ -8,35 +8,56 @@ defmodule Soothsayer.Model do
     }
   end
 
-  defp build_network(config) do
+  def build_network(config) do
     trend_input = Axon.input("trend", shape: {nil, 1})
+    yearly_input = Axon.input("yearly", shape: {nil, 2 * config.seasonality.yearly.fourier_terms})
+    weekly_input = Axon.input("weekly", shape: {nil, 2 * config.seasonality.weekly.fourier_terms})
 
-    yearly_input =
-      Axon.input("yearly", shape: {nil, seasonality_input_size(config.seasonality.yearly)})
+    trend =
+      if config.trend.enabled do
+        Axon.dense(trend_input, 1, activation: :linear)
+      else
+        Axon.constant(0)
+      end
 
-    weekly_input =
-      Axon.input("weekly", shape: {nil, seasonality_input_size(config.seasonality.weekly)})
+    yearly_seasonality =
+      if config.seasonality.yearly.enabled do
+        Axon.dense(yearly_input, 1, activation: :linear)
+      else
+        Axon.constant(0)
+      end
 
-    trend = if config.trend.enabled, do: Axon.dense(trend_input, 1), else: Axon.constant(0)
+    weekly_seasonality =
+      if config.seasonality.weekly.enabled do
+        Axon.dense(weekly_input, 1, activation: :linear)
+      else
+        Axon.constant(0)
+      end
 
-    yearly =
-      if config.seasonality.yearly.enabled,
-        do: Axon.dense(yearly_input, 1),
-        else: Axon.constant(0)
-
-    weekly =
-      if config.seasonality.weekly.enabled,
-        do: Axon.dense(weekly_input, 1),
-        else: Axon.constant(0)
-
-    Axon.add([trend, yearly, weekly])
+    Axon.add([trend, yearly_seasonality, weekly_seasonality])
   end
 
-  defp seasonality_input_size(seasonality_config) do
-    if seasonality_config.enabled do
-      2 * Map.get(seasonality_config, :fourier_terms, 3)
-    else
-      1
-    end
+  def fit(model, x, y, epochs) do
+    {init_fn, predict_fn} = Axon.build(model.network)
+    initial_params = init_fn.(x, %{})
+
+    trained_params =
+      model.network
+      |> Axon.Loop.trainer(
+        :mean_squared_error,
+        Polaris.Optimizers.adam(learning_rate: model.config.learning_rate)
+      )
+      |> Axon.Loop.run(Stream.repeatedly(fn -> {x, y} end), initial_params,
+        epochs: epochs,
+        iterations: elem(Nx.shape(y), 0),
+        compiler: EXLA
+      )
+
+    %{model | params: trained_params}
+  end
+
+  def predict(model, x) do
+    {_init_fn, predict_fn} = Axon.build(model.network)
+    predict_fn.(model.params, x)
   end
 end
