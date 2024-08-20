@@ -47,7 +47,7 @@ defmodule Soothsayer.Preprocessor do
         :weekly ->
           Series.day_of_week(date_series)
           |> Series.cast(:float)
-          |> Series.divide(Series.from_list(List.duplicate(7.0, Series.size(date_series))))
+          |> Series.divide(7.0)
       end
 
     Enum.reduce(1..fourier_terms, df, fn i, acc_df ->

@@ -23,16 +23,16 @@ defmodule SoothsayerTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      # Create and fit the model with only trend enabled and 10 epochs
+      # Create and fit the model with only trend enabled
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: true},
-          seasonality_config: %{
+          trend: %{enabled: true},
+          seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
           },
-          # Set epochs to 10
-          epochs: 5
+          # Set epochs to 10 for faster testing
+          epochs: 100
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -72,16 +72,16 @@ defmodule SoothsayerTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      # Create and fit the model with only seasonality enabled and 10 epochs
+      # Create and fit the model with only seasonality enabled
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: false},
-          seasonality_config: %{
+          trend: %{enabled: false},
+          seasonality: %{
             yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
           },
-          # Set epochs to 10
-          epochs: 5
+          # Set epochs to 10 for faster testing
+          epochs: 100
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -124,16 +124,16 @@ defmodule SoothsayerTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      # Create and fit the model with both trend and seasonality enabled and 10 epochs
+      # Create and fit the model with both trend and seasonality enabled
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: true},
-          seasonality_config: %{
+          trend: %{enabled: true},
+          seasonality: %{
             yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
           },
-          # Set epochs to 10
-          epochs: 5
+          # Set epochs to 10 for faster testing
+          epochs: 100
         })
 
       fitted_model = Soothsayer.fit(model, df)
