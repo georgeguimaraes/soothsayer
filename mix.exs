@@ -12,7 +12,11 @@ defmodule Soothsayer.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       package: package(),
-      docs: docs()
+      docs: docs(),
+      preferred_cli_env: [
+        docs: :docs,
+        "hex.publish": :docs
+      ]
     ]
   end
 
@@ -28,7 +32,8 @@ defmodule Soothsayer.MixProject do
       {:explorer, "~> 0.9.1"},
       {:nx, "~> 0.7.3"},
       {:axon, "~> 0.6.1"},
-      {:exla, "~> 0.7.3"}
+      {:exla, "~> 0.7.3"},
+      {:ex_doc, ">= 0.0.0", only: :docs}
     ]
   end
 
