@@ -12,7 +12,6 @@ Add `soothsayer` to your list of dependencies in `mix.exs`:
 def deps do
   [
     {:soothsayer, "~> 0.1.0"},
-    {:exla, "~> 0.5.0"}  # Optional: Add this line for EXLA support
   ]
 end
 ```
