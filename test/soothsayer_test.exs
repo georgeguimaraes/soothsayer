@@ -31,7 +31,7 @@ defmodule SoothsayerTest do
             yearly: %{enabled: false},
             weekly: %{enabled: false}
           },
-          epochs: 5
+          epochs: 10
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -79,7 +79,7 @@ defmodule SoothsayerTest do
             yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
           },
-          epochs: 5
+          epochs: 10
         })
 
       fitted_model = Soothsayer.fit(model, df)
@@ -130,7 +130,7 @@ defmodule SoothsayerTest do
             yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
           },
-          epochs: 5
+          epochs: 10
         })
 
       fitted_model = Soothsayer.fit(model, df)
