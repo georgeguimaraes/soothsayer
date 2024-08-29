@@ -45,7 +45,7 @@ defmodule Soothsayer.Model do
   end
 
   def fit(model, x, y, epochs) do
-    {init_fn, predict_fn} = Axon.build(model.network)
+    {init_fn, _predict_fn} = Axon.build(model.network)
     initial_params = init_fn.(x, %{})
 
     trained_params =

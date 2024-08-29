@@ -28,8 +28,8 @@ defmodule Soothsayer do
     x = %{
       "trend" =>
         processed_data["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1),
-      "yearly" => get_seasonality_input(processed_data, :yearly, model.config),
-      "weekly" => get_seasonality_input(processed_data, :weekly, model.config)
+      "yearly" => get_seasonality_input(processed_data, :yearly),
+      "weekly" => get_seasonality_input(processed_data, :weekly)
     }
 
     {x_normalized, x_norm} = normalize_inputs(x)
@@ -55,8 +55,8 @@ defmodule Soothsayer do
     x_input = %{
       "trend" =>
         processed_x["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1),
-      "yearly" => get_seasonality_input(processed_x, :yearly, model.config),
-      "weekly" => get_seasonality_input(processed_x, :weekly, model.config)
+      "yearly" => get_seasonality_input(processed_x, :yearly),
+      "weekly" => get_seasonality_input(processed_x, :weekly)
     }
 
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
@@ -68,7 +68,7 @@ defmodule Soothsayer do
     end)
   end
 
-  defp get_seasonality_input(data, seasonality, config) do
+  defp get_seasonality_input(data, seasonality) do
     columns = data.names |> Enum.filter(&String.starts_with?(&1, Atom.to_string(seasonality)))
 
     data[columns]

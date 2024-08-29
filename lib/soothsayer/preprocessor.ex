@@ -2,9 +2,7 @@ defmodule Soothsayer.Preprocessor do
   alias Explorer.DataFrame
   alias Explorer.Series
 
-  def prepare_data(data, y_column, ds_column, seasonality_config) do
-    df = data
-
+  def prepare_data(df, y_column, ds_column, seasonality_config) do
     df =
       if seasonality_config.yearly.enabled do
         add_fourier_terms(df, ds_column, :yearly, seasonality_config.yearly.fourier_terms)
