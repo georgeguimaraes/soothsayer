@@ -34,7 +34,14 @@ defmodule Soothsayer.Model do
         Axon.constant(0)
       end
 
-    Axon.add([trend, yearly_seasonality, weekly_seasonality])
+    combined = Axon.add([trend, yearly_seasonality, weekly_seasonality])
+
+    Axon.container(%{
+      combined: combined,
+      trend: trend,
+      yearly_seasonality: yearly_seasonality,
+      weekly_seasonality: weekly_seasonality
+    })
   end
 
   def fit(model, x, y, epochs) do
@@ -44,7 +51,7 @@ defmodule Soothsayer.Model do
     trained_params =
       model.network
       |> Axon.Loop.trainer(
-        :mean_squared_error,
+        &Axon.Losses.huber(&1, &2.combined, reduction: :mean),
         Polaris.Optimizers.adam(learning_rate: model.config.learning_rate)
       )
       |> Axon.Loop.run(Stream.repeatedly(fn -> {x, y} end), initial_params,

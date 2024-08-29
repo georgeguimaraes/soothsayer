@@ -44,6 +44,11 @@ defmodule Soothsayer do
   end
 
   def predict(%Model{} = model, %Series{} = x) do
+    %{combined: combined} = predict_components(model, x)
+    combined
+  end
+
+  def predict_components(%Model{} = model, %Series{} = x) do
     processed_x =
       Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", model.config.seasonality)
 
@@ -57,9 +62,10 @@ defmodule Soothsayer do
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
 
     predictions = Model.predict(model, x_normalized)
-    denormalized_predictions = denormalize(predictions, model.config.normalization.y)
 
-    Nx.to_flat_list(denormalized_predictions)
+    Map.new(predictions, fn {key, node} ->
+      {key, denormalize(node, model.config.normalization.y)}
+    end)
   end
 
   defp get_seasonality_input(data, seasonality, config) do

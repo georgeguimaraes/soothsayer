@@ -41,7 +41,7 @@ defmodule SoothsayerTest do
       future_end = Date.add(future_start, 29)
       future_dates = Date.range(future_start, future_end)
       x_test = Series.from_list(Enum.to_list(future_dates))
-      predictions = Soothsayer.predict(fitted_model, x_test)
+      predictions = Soothsayer.predict(fitted_model, x_test) |> Nx.to_flat_list()
 
       # Check if predictions follow the trend (with tolerance for noise)
       Enum.zip(predictions, future_dates)
@@ -89,7 +89,7 @@ defmodule SoothsayerTest do
       future_end = Date.add(future_start, 29)
       future_dates = Date.range(future_start, future_end)
       x_test = Series.from_list(Enum.to_list(future_dates))
-      predictions = Soothsayer.predict(fitted_model, x_test)
+      predictions = Soothsayer.predict(fitted_model, x_test) |> Nx.to_flat_list()
 
       # Check if predictions follow the seasonality pattern (with tolerance for noise)
       Enum.zip(predictions, future_dates)
@@ -140,7 +140,7 @@ defmodule SoothsayerTest do
       future_end = Date.add(future_start, 29)
       future_dates = Date.range(future_start, future_end)
       x_test = Series.from_list(Enum.to_list(future_dates))
-      predictions = Soothsayer.predict(fitted_model, x_test)
+      predictions = Soothsayer.predict(fitted_model, x_test) |> Nx.to_flat_list()
 
       # Check if predictions follow the trend and seasonality (with tolerance for noise)
       Enum.zip(predictions, future_dates)
