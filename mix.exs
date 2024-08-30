@@ -22,8 +22,7 @@ defmodule Soothsayer.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
-      mod: {Soothsayer.Application, []}
+      extra_applications: [:logger]
     ]
   end
 
