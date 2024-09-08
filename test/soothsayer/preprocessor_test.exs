@@ -2,8 +2,6 @@ defmodule Soothsayer.PreprocessorTest do
   use ExUnit.Case, async: true
   alias Soothsayer.Preprocessor
   alias Explorer.DataFrame
-  alias Explorer.Series
-
   describe "prepare_data/4" do
     test "prepares data with yearly and weekly seasonality" do
       df = DataFrame.new(%{
@@ -24,8 +22,8 @@ defmodule Soothsayer.PreprocessorTest do
 
       result = Preprocessor.prepare_data(df, "y", "ds", seasonality_config)
 
-      assert result["y"] == df["y"]
-      assert result["ds"] == df["ds"]
+      assert Series.to_list(result["y"]) == Series.to_list(df["y"])
+      assert Series.to_list(result["ds"]) == Series.to_list(df["ds"])
       assert "yearly_sin_1" in DataFrame.names(result)
       assert "yearly_cos_1" in DataFrame.names(result)
       assert "yearly_sin_3" in DataFrame.names(result)
@@ -55,8 +53,8 @@ defmodule Soothsayer.PreprocessorTest do
 
       result = Preprocessor.prepare_data(df, "y", "ds", seasonality_config)
 
-      assert result["y"] == df["y"]
-      assert result["ds"] == df["ds"]
+      assert Series.to_list(result["y"]) == Series.to_list(df["y"])
+      assert Series.to_list(result["ds"]) == Series.to_list(df["ds"])
       assert "yearly_sin_1" in DataFrame.names(result)
       assert "yearly_cos_1" in DataFrame.names(result)
       assert "yearly_sin_3" in DataFrame.names(result)
@@ -84,8 +82,8 @@ defmodule Soothsayer.PreprocessorTest do
 
       result = Preprocessor.prepare_data(df, "y", "ds", seasonality_config)
 
-      assert result["y"] == df["y"]
-      assert result["ds"] == df["ds"]
+      assert Series.to_list(result["y"]) == Series.to_list(df["y"])
+      assert Series.to_list(result["ds"]) == Series.to_list(df["ds"])
       assert DataFrame.names(result) == ["y", "ds"]
     end
   end
