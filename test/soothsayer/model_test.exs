@@ -2,7 +2,6 @@ defmodule Soothsayer.ModelTest do
   use ExUnit.Case, async: true
   alias Soothsayer.Model
   import Nx, only: [is_tensor: 1]
-  import Axon
 
   test "new/1 creates a new model with the given config" do
     config = %{
