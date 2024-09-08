@@ -16,3 +16,28 @@ jobs:
       - uses: googleapis/release-please-action@v4
         with:
           release-type: elixir
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.release_created }}
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          otp-version: "26"
+          elixir-version: "1.17"
+      - name: Restore dependencies cache
+        uses: actions/cache@v3
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.release_created }}
+        run: mix deps.get
+      - name: Run tests
+        if: ${{ steps.release.outputs.release_created }}
+        run: mix test
+      - name: Publish to Hex.pm
+        if: ${{ steps.release.outputs.release_created }}
+        run: HEX_API_KEY={{secrets.HEX_API_KEY}} mix hex.publish --yes
