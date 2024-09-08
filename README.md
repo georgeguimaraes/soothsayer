@@ -52,6 +52,14 @@ predictions = Soothsayer.predict(fitted_model, Series.from_list(Enum.to_list(fut
 IO.inspect(predictions)
 ```
 
+You can also get the components of the forecast:
+
+```elixir
+components = Soothsayer.predict_components(fitted_model, Series.from_list(Enum.to_list(future_dates)))
+
+#> %{comboned: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ...}
+```
+
 ### Customizing the Model
 
 You can customize various aspects of the model:
