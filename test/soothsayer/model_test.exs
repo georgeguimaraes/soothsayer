@@ -38,18 +38,21 @@ defmodule Soothsayer.ModelTest do
     assert Map.has_key?(inputs, "weekly")
 
     # Check network structure by verifying the output shape
-    assert Axon.get_output_shape(network, %{
+    output_shape = Axon.get_output_shape(network, %{
       "trend" => {1, 1},
       "yearly" => {1, 8},
       "weekly" => {1, 4}
-    }) == {1, 1}
+    })
+    assert output_shape == {1, 1}
 
-    # Check output shape
-    assert Axon.get_output_shape(network, %{
-      "trend" => {1, 1},
-      "yearly" => {1, 8},
-      "weekly" => {1, 4}
-    }) == {1, 1}
+    # Verify that the network can be initialized without errors
+    {init_fn, _predict_fn} = Axon.build(network)
+    input = %{
+      "trend" => Nx.tensor([[1.0]]),
+      "yearly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]),
+      "weekly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0]])
+    }
+    assert is_map(init_fn.(input, %{}))
   end
 
   test "fit/4 trains the model" do
