@@ -36,7 +36,7 @@ defmodule Soothsayer.ModelTest do
     assert Map.has_key?(inputs, "weekly")
 
     # Check network structure
-    assert Axon.nodes(network) > 0
+    assert map_size(Axon.get_nodes(network)) > 0
 
     # Check output shape
     assert Axon.get_output_shape(network, %{
@@ -100,7 +100,7 @@ defmodule Soothsayer.ModelTest do
     trained_model = Model.fit(model, x, y, 1)
     predictions = Model.predict(trained_model, x)
     
-    assert is_struct(predictions, Nx.Tensor)
+    assert Nx.is_tensor(predictions)
     assert Nx.shape(predictions) == {3, 1}
   end
 end
