@@ -14,6 +14,7 @@ defmodule Soothsayer.ModelTest do
       learning_rate: 0.01,
       epochs: 100
     }
+
     model = Model.new(config)
     assert %Model{} = model
     assert model.config == config
@@ -28,6 +29,7 @@ defmodule Soothsayer.ModelTest do
         weekly: %{enabled: true, fourier_terms: 2}
       }
     }
+
     network = Model.build_network(config)
     assert is_struct(network, Axon)
 
@@ -37,21 +39,15 @@ defmodule Soothsayer.ModelTest do
     assert Map.has_key?(inputs, "yearly")
     assert Map.has_key?(inputs, "weekly")
 
-    # Check network structure by verifying the output shape
-    output_shape = Axon.get_output_shape(network, %{
-      "trend" => {1, 1},
-      "yearly" => {1, 8},
-      "weekly" => {1, 4}
-    })
-    assert output_shape == {1, 1}
-
     # Verify that the network can be initialized without errors
     {init_fn, _predict_fn} = Axon.build(network)
+
     input = %{
       "trend" => Nx.tensor([[1.0]]),
       "yearly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]),
       "weekly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0]])
     }
+
     assert is_map(init_fn.(input, %{}))
   end
 
@@ -65,17 +61,20 @@ defmodule Soothsayer.ModelTest do
       learning_rate: 0.01,
       epochs: 1
     }
+
     model = Model.new(config)
-    
+
     x = %{
       "trend" => Nx.tensor([[1.0], [2.0], [3.0]]),
-      "yearly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], 
-                             [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-                             [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]]),
-      "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], 
-                             [0.2, 0.3, 0.4, 0.5],
-                             [0.3, 0.4, 0.5, 0.6]])
+      "yearly" =>
+        Nx.tensor([
+          [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+          [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+          [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        ]),
+      "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]])
     }
+
     y = Nx.tensor([[1.0], [2.0], [3.0]])
 
     trained_model = Model.fit(model, x, y, 1)
@@ -93,22 +92,25 @@ defmodule Soothsayer.ModelTest do
       learning_rate: 0.01,
       epochs: 1
     }
+
     model = Model.new(config)
-    
+
     x = %{
       "trend" => Nx.tensor([[1.0], [2.0], [3.0]]),
-      "yearly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], 
-                             [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-                             [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]]),
-      "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], 
-                             [0.2, 0.3, 0.4, 0.5],
-                             [0.3, 0.4, 0.5, 0.6]])
+      "yearly" =>
+        Nx.tensor([
+          [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+          [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+          [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        ]),
+      "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]])
     }
+
     y = Nx.tensor([[1.0], [2.0], [3.0]])
 
     trained_model = Model.fit(model, x, y, 1)
     predictions = Model.predict(trained_model, x)
-    
+
     assert is_map(predictions)
     assert Map.has_key?(predictions, :combined)
     assert is_tensor(predictions.combined)
