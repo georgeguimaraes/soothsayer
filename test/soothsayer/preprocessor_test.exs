@@ -2,6 +2,7 @@ defmodule Soothsayer.PreprocessorTest do
   use ExUnit.Case, async: true
   alias Soothsayer.Preprocessor
   alias Explorer.DataFrame
+  alias Explorer.Series
   describe "prepare_data/4" do
     test "prepares data with yearly and weekly seasonality" do
       df = DataFrame.new(%{
