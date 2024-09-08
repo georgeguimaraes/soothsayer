@@ -1,7 +1,6 @@
 defmodule Soothsayer.ModelTest do
   use ExUnit.Case, async: true
   alias Soothsayer.Model
-  import Nx, only: :macros
 
   test "new/1 creates a new model with the given config" do
     config = %{
@@ -101,7 +100,9 @@ defmodule Soothsayer.ModelTest do
     trained_model = Model.fit(model, x, y, 1)
     predictions = Model.predict(trained_model, x)
     
-    assert Nx.is_tensor(predictions)
-    assert Nx.shape(predictions) == {3, 1}
+    assert is_map(predictions)
+    assert Map.has_key?(predictions, :combined)
+    assert Nx.is_tensor(predictions.combined)
+    assert Nx.shape(predictions.combined) == {3, 1}
   end
 end
