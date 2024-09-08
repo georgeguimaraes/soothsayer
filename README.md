@@ -60,6 +60,10 @@ components = Soothsayer.predict_components(fitted_model, Series.from_list(Enum.t
 #> %{comboned: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ...}
 ```
 
+### Livebook Example
+
+You can check the `livebook` dir with some examples on how to use Soothsayer.
+
 ### Customizing the Model
 
 You can customize various aspects of the model:
