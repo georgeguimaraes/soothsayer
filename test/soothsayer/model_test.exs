@@ -1,6 +1,7 @@
 defmodule Soothsayer.ModelTest do
   use ExUnit.Case, async: true
   alias Soothsayer.Model
+  import Nx, only: [is_tensor: 1]
 
   test "new/1 creates a new model with the given config" do
     config = %{
@@ -36,7 +37,7 @@ defmodule Soothsayer.ModelTest do
     assert Map.has_key?(inputs, "weekly")
 
     # Check network structure
-    assert map_size(Axon.nodes(network)) > 0
+    assert Enum.count(Axon.nodes(network)) > 0
 
     # Check output shape
     assert Axon.get_output_shape(network, %{
@@ -102,7 +103,7 @@ defmodule Soothsayer.ModelTest do
     
     assert is_map(predictions)
     assert Map.has_key?(predictions, :combined)
-    assert Nx.is_tensor(predictions.combined)
+    assert is_tensor(predictions.combined)
     assert Nx.shape(predictions.combined) == {3, 1}
   end
 end
