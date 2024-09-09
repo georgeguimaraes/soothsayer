@@ -28,6 +28,7 @@ defmodule Soothsayer.Preprocessor do
       #Explorer.DataFrame<...>
 
   """
+  @spec prepare_data(Explorer.DataFrame.t(), String.t() | nil, String.t(), map()) :: Explorer.DataFrame.t()
   def prepare_data(df, y_column, ds_column, seasonality_config) do
     df =
       if seasonality_config.yearly.enabled do

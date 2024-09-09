@@ -23,6 +23,7 @@ defmodule Soothsayer.Model do
       %Soothsayer.Model{network: ..., params: nil, config: ^config}
 
   """
+  @spec new(map()) :: t()
   def new(config) do
     %__MODULE__{
       network: build_network(config),
@@ -48,6 +49,7 @@ defmodule Soothsayer.Model do
       #Axon.Node<...>
 
   """
+  @spec build_network(map()) :: Axon.t()
   def build_network(config) do
     trend_input = Axon.input("trend", shape: {nil, 1})
     yearly_input = Axon.input("yearly", shape: {nil, 2 * config.seasonality.yearly.fourier_terms})
@@ -107,6 +109,7 @@ defmodule Soothsayer.Model do
       %Soothsayer.Model{...}
 
   """
+  @spec fit(t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer()) :: t()
   def fit(model, x, y, epochs) do
     {init_fn, _predict_fn} = Axon.build(model.network)
     initial_params = init_fn.(x, %{})
@@ -151,6 +154,12 @@ defmodule Soothsayer.Model do
       }
 
   """
+  @spec predict(t(), %{String.t() => Nx.Tensor.t()}) :: %{
+          combined: Nx.Tensor.t(),
+          trend: Nx.Tensor.t(),
+          yearly_seasonality: Nx.Tensor.t(),
+          weekly_seasonality: Nx.Tensor.t()
+        }
   def predict(model, x) do
     {_init_fn, predict_fn} = Axon.build(model.network)
     predict_fn.(model.params, x)

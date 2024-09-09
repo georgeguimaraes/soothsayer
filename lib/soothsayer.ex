@@ -28,6 +28,7 @@ defmodule Soothsayer do
       %Soothsayer.Model{...}
 
   """
+  @spec new(map()) :: Soothsayer.Model.t()
   def new(config \\ %{}) do
     default_config = %{
       trend: %{enabled: true},
@@ -63,6 +64,7 @@ defmodule Soothsayer do
       %Soothsayer.Model{...}
 
   """
+  @spec fit(Soothsayer.Model.t(), Explorer.DataFrame.t()) :: Soothsayer.Model.t()
   def fit(%Model{} = model, %DataFrame{} = data) do
     processed_data = Preprocessor.prepare_data(data, "y", "ds", model.config.seasonality)
 
@@ -110,6 +112,7 @@ defmodule Soothsayer do
       >
 
   """
+  @spec predict(Soothsayer.Model.t(), Explorer.Series.t()) :: Explorer.Series.t()
   def predict(%Model{} = model, %Series{} = x) do
     %{combined: combined} = predict_components(model, x)
     combined
@@ -140,6 +143,12 @@ defmodule Soothsayer do
       }
 
   """
+  @spec predict_components(Soothsayer.Model.t(), Explorer.Series.t()) :: %{
+          combined: Nx.Tensor.t(),
+          trend: Nx.Tensor.t(),
+          yearly_seasonality: Nx.Tensor.t(),
+          weekly_seasonality: Nx.Tensor.t()
+        }
   def predict_components(%Model{} = model, %Series{} = x) do
     processed_x =
       Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", model.config.seasonality)
