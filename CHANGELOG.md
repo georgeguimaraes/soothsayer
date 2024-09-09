@@ -11,5 +11,3 @@
 ### Bug Fixes
 
 * remove duplicated test action yml key ([be0d144](https://github.com/georgeguimaraes/soothsayer/commit/be0d1444bbe55b3b5e9d2777db20306efa869adb))
-
-## Changelog
