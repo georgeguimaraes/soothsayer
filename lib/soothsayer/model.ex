@@ -5,6 +5,12 @@ defmodule Soothsayer.Model do
 
   defstruct [:network, :params, :config]
 
+  @type t :: %__MODULE__{
+    network: Axon.t(),
+    params: term() | nil,
+    config: map()
+  }
+
   @doc """
   Creates a new Soothsayer.Model struct with the given configuration.
 
