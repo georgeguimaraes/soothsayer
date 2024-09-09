@@ -1,9 +1,33 @@
 defmodule Soothsayer do
+  @moduledoc """
+  The main module for the Soothsayer library, providing functions for creating, fitting, and using time series forecasting models.
+  """
+
   alias Explorer.DataFrame
   alias Explorer.Series
   alias Soothsayer.Model
   alias Soothsayer.Preprocessor
 
+  @doc """
+  Creates a new Soothsayer model with the given configuration.
+
+  ## Parameters
+
+    * `config` - A map containing the model configuration. Defaults to an empty map.
+
+  ## Returns
+
+    A new `Soothsayer.Model` struct.
+
+  ## Examples
+
+      iex> Soothsayer.new()
+      %Soothsayer.Model{...}
+
+      iex> Soothsayer.new(%{epochs: 200, learning_rate: 0.005})
+      %Soothsayer.Model{...}
+
+  """
   def new(config \\ %{}) do
     default_config = %{
       trend: %{enabled: true},
@@ -19,6 +43,26 @@ defmodule Soothsayer do
     Model.new(merged_config)
   end
 
+  @doc """
+  Fits the Soothsayer model to the provided data.
+
+  ## Parameters
+
+    * `model` - A `Soothsayer.Model` struct.
+    * `data` - An `Explorer.DataFrame` containing the training data.
+
+  ## Returns
+
+    An updated `Soothsayer.Model` struct with fitted parameters.
+
+  ## Examples
+
+      iex> model = Soothsayer.new()
+      iex> data = Explorer.DataFrame.new(%{"ds" => [...], "y" => [...]})
+      iex> fitted_model = Soothsayer.fit(model, data)
+      %Soothsayer.Model{...}
+
+  """
   def fit(%Model{} = model, %DataFrame{} = data) do
     processed_data = Preprocessor.prepare_data(data, "y", "ds", model.config.seasonality)
 
@@ -43,11 +87,59 @@ defmodule Soothsayer do
     }
   end
 
+  @doc """
+  Makes predictions using a fitted Soothsayer model.
+
+  ## Parameters
+
+    * `model` - A fitted `Soothsayer.Model` struct.
+    * `x` - An `Explorer.Series` containing the dates for which to make predictions.
+
+  ## Returns
+
+    An `Explorer.Series` containing the predicted values.
+
+  ## Examples
+
+      iex> fitted_model = Soothsayer.fit(model, training_data)
+      iex> future_dates = Explorer.Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
+      iex> predictions = Soothsayer.predict(fitted_model, future_dates)
+      #Explorer.Series<
+        [1.5, 2.3, 3.1]
+        dtype: float
+      >
+
+  """
   def predict(%Model{} = model, %Series{} = x) do
     %{combined: combined} = predict_components(model, x)
     combined
   end
 
+  @doc """
+  Makes predictions and returns the individual components (trend, seasonality) using a fitted Soothsayer model.
+
+  ## Parameters
+
+    * `model` - A fitted `Soothsayer.Model` struct.
+    * `x` - An `Explorer.Series` containing the dates for which to make predictions.
+
+  ## Returns
+
+    A map containing the predicted values for each component (trend, yearly seasonality, weekly seasonality) and the combined prediction.
+
+  ## Examples
+
+      iex> fitted_model = Soothsayer.fit(model, training_data)
+      iex> future_dates = Explorer.Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
+      iex> predictions = Soothsayer.predict_components(fitted_model, future_dates)
+      %{
+        combined: #Nx.Tensor<...>,
+        trend: #Nx.Tensor<...>,
+        yearly_seasonality: #Nx.Tensor<...>,
+        weekly_seasonality: #Nx.Tensor<...>
+      }
+
+  """
   def predict_components(%Model{} = model, %Series{} = x) do
     processed_x =
       Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", model.config.seasonality)
