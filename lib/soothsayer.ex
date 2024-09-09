@@ -99,20 +99,24 @@ defmodule Soothsayer do
 
   ## Returns
 
-    An `Explorer.Series` containing the predicted values.
+    An `Nx.Tensor` containing the predicted values.
 
   ## Examples
 
       iex> fitted_model = Soothsayer.fit(model, training_data)
       iex> future_dates = Explorer.Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
       iex> predictions = Soothsayer.predict(fitted_model, future_dates)
-      #Explorer.Series<
-        [1.5, 2.3, 3.1]
-        dtype: float
+      #Nx.Tensor<
+        f32[3][1]
+        [
+          [1.5],
+          [2.3],
+          [3.1]
+        ]
       >
 
   """
-  @spec predict(Soothsayer.Model.t(), Explorer.Series.t()) :: Explorer.Series.t()
+  @spec predict(Soothsayer.Model.t(), Explorer.Series.t()) :: Nx.Tensor.t()
   def predict(%Model{} = model, %Series{} = x) do
     %{combined: combined} = predict_components(model, x)
     combined
