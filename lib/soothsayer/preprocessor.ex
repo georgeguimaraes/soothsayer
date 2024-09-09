@@ -66,16 +66,16 @@ defmodule Soothsayer.Preprocessor do
             |> Series.from_list()
 
           Series.day_of_year(date_series)
-          |> Series.cast(:float)
+          |> Series.cast(:float64)
           |> Series.divide(days_in_year)
 
         :weekly ->
           Series.day_of_week(date_series)
-          |> Series.cast(:float)
+          |> Series.cast(:float64)
           |> Series.divide(Series.from_list(List.duplicate(7.0, Series.size(date_series))))
       end
 
-    Enum.reduce(1..fourier_terms, df, fn i, acc_df ->
+    result_df = Enum.reduce(1..fourier_terms, df, fn i, acc_df ->
       acc_df
       |> DataFrame.put(
         "#{period_type}_sin_#{i}",
@@ -86,5 +86,7 @@ defmodule Soothsayer.Preprocessor do
         Series.cos(t |> Series.multiply(2 * :math.pi() * i))
       )
     end)
+
+    result_df
   end
 end
