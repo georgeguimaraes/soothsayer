@@ -3,18 +3,20 @@ defmodule Soothsayer.PreprocessorTest do
   alias Soothsayer.Preprocessor
   alias Explorer.DataFrame
   alias Explorer.Series
+
   describe "prepare_data/4" do
     test "prepares data with yearly and weekly seasonality" do
-      df = DataFrame.new(%{
-        "y" => [1, 2, 3, 4, 5],
-        "ds" => [
-          ~D[2023-01-01],
-          ~D[2023-04-01],
-          ~D[2023-07-01],
-          ~D[2023-10-01],
-          ~D[2024-01-01]
-        ]
-      })
+      df =
+        DataFrame.new(%{
+          "y" => [1, 2, 3, 4, 5],
+          "ds" => [
+            ~D[2023-01-01],
+            ~D[2023-04-01],
+            ~D[2023-07-01],
+            ~D[2023-10-01],
+            ~D[2024-01-01]
+          ]
+        })
 
       seasonality_config = %{
         yearly: %{enabled: true, fourier_terms: 3},
@@ -36,16 +38,17 @@ defmodule Soothsayer.PreprocessorTest do
     end
 
     test "prepares data with only yearly seasonality" do
-      df = DataFrame.new(%{
-        "y" => [1, 2, 3, 4, 5],
-        "ds" => [
-          ~D[2023-01-01],
-          ~D[2023-04-01],
-          ~D[2023-07-01],
-          ~D[2023-10-01],
-          ~D[2024-01-01]
-        ]
-      })
+      df =
+        DataFrame.new(%{
+          "y" => [1, 2, 3, 4, 5],
+          "ds" => [
+            ~D[2023-01-01],
+            ~D[2023-04-01],
+            ~D[2023-07-01],
+            ~D[2023-10-01],
+            ~D[2024-01-01]
+          ]
+        })
 
       seasonality_config = %{
         yearly: %{enabled: true, fourier_terms: 3},
@@ -65,16 +68,17 @@ defmodule Soothsayer.PreprocessorTest do
     end
 
     test "prepares data with no seasonality" do
-      df = DataFrame.new(%{
-        "y" => [1, 2, 3, 4, 5],
-        "ds" => [
-          ~D[2023-01-01],
-          ~D[2023-04-01],
-          ~D[2023-07-01],
-          ~D[2023-10-01],
-          ~D[2024-01-01]
-        ]
-      })
+      df =
+        DataFrame.new(%{
+          "y" => [1, 2, 3, 4, 5],
+          "ds" => [
+            ~D[2023-01-01],
+            ~D[2023-04-01],
+            ~D[2023-07-01],
+            ~D[2023-10-01],
+            ~D[2024-01-01]
+          ]
+        })
 
       seasonality_config = %{
         yearly: %{enabled: false, fourier_terms: 3},
