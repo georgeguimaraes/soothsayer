@@ -66,7 +66,7 @@ defmodule Soothsayer.Preprocessor do
             |> Series.from_list()
 
           Series.day_of_year(date_series)
-          |> Series.cast(:float64)
+          |> Series.cast({:f, 64})
           |> Series.divide(days_in_year)
 
         :weekly ->
