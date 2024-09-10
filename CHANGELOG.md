@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/georgeguimaraes/soothsayer/compare/v0.3.0...v0.3.1) (2024-09-10)
+
+
+### Bug Fixes
+
+* Add docs and typespecs ([#4](https://github.com/georgeguimaraes/soothsayer/issues/4)) ([e88ae7f](https://github.com/georgeguimaraes/soothsayer/commit/e88ae7f235faba3b9470d0889eb1e9e42da24772))
+
 ## [0.3.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.2.0...v0.3.0) (2024-09-08)
 
 
