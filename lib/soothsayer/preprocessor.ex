@@ -71,7 +71,7 @@ defmodule Soothsayer.Preprocessor do
 
         :weekly ->
           Series.day_of_week(date_series)
-          |> Series.cast(:float64)
+          |> Series.cast({:f, 64})
           |> Series.divide(Series.from_list(List.duplicate(7.0, Series.size(date_series))))
       end
 
