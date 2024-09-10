@@ -61,7 +61,7 @@ defmodule Soothsayer do
       iex> model = Soothsayer.new()
       iex> data = Explorer.DataFrame.new(%{"ds" => [...], "y" => [...]})
       iex> fitted_model = Soothsayer.fit(model, data)
-      %Soothsayer.Model{...}
+      %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}}
 
   """
   @spec fit(Soothsayer.Model.t(), Explorer.DataFrame.t()) :: Soothsayer.Model.t()
