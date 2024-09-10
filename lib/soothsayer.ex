@@ -22,10 +22,10 @@ defmodule Soothsayer do
   ## Examples
 
       iex> Soothsayer.new()
-      %Soothsayer.Model{...}
+      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: 100, learning_rate: 0.01}, network: %Axon.Node{}, params: nil}
 
       iex> Soothsayer.new(%{epochs: 200, learning_rate: 0.005})
-      %Soothsayer.Model{...}
+      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: 200, learning_rate: 0.005}, network: %Axon.Node{}, params: nil}
 
   """
   @spec new(map()) :: Soothsayer.Model.t()
