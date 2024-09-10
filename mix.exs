@@ -32,7 +32,8 @@ defmodule Soothsayer.MixProject do
       {:nx, "~> 0.7.3"},
       {:axon, "~> 0.6.1"},
       {:exla, "~> 0.7.3"},
-      {:ex_doc, ">= 0.0.0", only: :docs}
+      {:ex_doc, ">= 0.0.0", only: :docs},
+      {:dialyxir, "~> 1.0", only: [:dev], runtime: false}
     ]
   end
 

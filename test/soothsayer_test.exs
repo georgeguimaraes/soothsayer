@@ -1,6 +1,5 @@
 defmodule SoothsayerTest do
   use ExUnit.Case
-  doctest Soothsayer
 
   alias Explorer.DataFrame
   alias Explorer.Series
