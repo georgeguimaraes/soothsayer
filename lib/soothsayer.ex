@@ -66,6 +66,7 @@ defmodule Soothsayer do
   """
   @spec fit(Soothsayer.Model.t(), Explorer.DataFrame.t()) :: Soothsayer.Model.t()
   def fit(%Model{} = model, %DataFrame{} = data) do
+    validate_training_data!(data)
     processed_data = Preprocessor.prepare_data(data, "y", "ds", model.config.seasonality)
 
     y = processed_data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
@@ -74,8 +75,18 @@ defmodule Soothsayer do
     x = %{
       "trend" =>
         processed_data["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1),
-      "yearly" => get_seasonality_input(processed_data, :yearly),
-      "weekly" => get_seasonality_input(processed_data, :weekly)
+      "yearly" =>
+        get_seasonality_input(
+          processed_data,
+          :yearly,
+          model.config.seasonality.yearly.fourier_terms
+        ),
+      "weekly" =>
+        get_seasonality_input(
+          processed_data,
+          :weekly,
+          model.config.seasonality.weekly.fourier_terms
+        )
     }
 
     {x_normalized, x_norm} = normalize_inputs(x)
@@ -160,8 +171,10 @@ defmodule Soothsayer do
     x_input = %{
       "trend" =>
         processed_x["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1),
-      "yearly" => get_seasonality_input(processed_x, :yearly),
-      "weekly" => get_seasonality_input(processed_x, :weekly)
+      "yearly" =>
+        get_seasonality_input(processed_x, :yearly, model.config.seasonality.yearly.fourier_terms),
+      "weekly" =>
+        get_seasonality_input(processed_x, :weekly, model.config.seasonality.weekly.fourier_terms)
     }
 
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
@@ -173,15 +186,24 @@ defmodule Soothsayer do
     end)
   end
 
-  defp get_seasonality_input(data, seasonality) do
+  defp get_seasonality_input(data, seasonality, fourier_terms) do
     columns = data.names |> Enum.filter(&String.starts_with?(&1, Atom.to_string(seasonality)))
 
-    data[columns]
-    |> DataFrame.to_series()
-    |> Map.values()
-    |> Enum.map(&Series.to_tensor/1)
-    |> Nx.stack(axis: 1)
-    |> Nx.as_type({:f, 32})
+    case columns do
+      [] ->
+        # No seasonality columns found - return zero tensor with expected shape
+        row_count = DataFrame.n_rows(data)
+        col_count = 2 * fourier_terms
+        Nx.broadcast(0.0, {row_count, col_count}) |> Nx.as_type({:f, 32})
+
+      _ ->
+        data[columns]
+        |> DataFrame.to_series()
+        |> Map.values()
+        |> Enum.map(&Series.to_tensor/1)
+        |> Nx.stack(axis: 1)
+        |> Nx.as_type({:f, 32})
+    end
   end
 
   defp normalize(tensor) do
@@ -192,12 +214,16 @@ defmodule Soothsayer do
   end
 
   defp normalize_inputs(x) do
-    Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, {normalized, norm_params} ->
-      {normalized_tensor, mean, std} = normalize(tensor)
-
-      {Map.put(normalized, key, normalized_tensor),
-       Map.put(norm_params, key, %{mean: mean, std: std})}
+    Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->
+      normalize_single_input(key, tensor, acc)
     end)
+  end
+
+  defp normalize_single_input(key, tensor, {normalized, norm_params}) do
+    {normalized_tensor, mean, std} = normalize(tensor)
+    norm_param = %{mean: mean, std: std}
+
+    {Map.put(normalized, key, normalized_tensor), Map.put(norm_params, key, norm_param)}
   end
 
   defp normalize_with_params(x, norm_params) do
@@ -211,6 +237,27 @@ defmodule Soothsayer do
 
   defp denormalize(tensor, %{mean: mean, std: std}) do
     Nx.add(Nx.multiply(tensor, std), mean)
+  end
+
+  defp validate_training_data!(%DataFrame{} = data) do
+    row_count = DataFrame.n_rows(data)
+    columns = DataFrame.names(data)
+
+    cond do
+      row_count < 2 ->
+        raise ArgumentError, "Training data must have at least 2 rows, got #{row_count}"
+
+      "ds" not in columns ->
+        raise ArgumentError,
+              "Training data must contain a 'ds' (date) column. Available columns: #{inspect(columns)}"
+
+      "y" not in columns ->
+        raise ArgumentError,
+              "Training data must contain a 'y' (target values) column. Available columns: #{inspect(columns)}"
+
+      true ->
+        :ok
+    end
   end
 
   defp deep_merge(left, right) do

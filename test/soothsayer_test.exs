@@ -25,8 +25,8 @@ defmodule SoothsayerTest do
       # Create and fit the model with only trend enabled and 10 epochs
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: true},
-          seasonality_config: %{
+          trend: %{enabled: true},
+          seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
           },
@@ -73,8 +73,8 @@ defmodule SoothsayerTest do
       # Create and fit the model with only seasonality enabled and 10 epochs
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: false},
-          seasonality_config: %{
+          trend: %{enabled: false},
+          seasonality: %{
             yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
           },
@@ -124,8 +124,8 @@ defmodule SoothsayerTest do
       # Create and fit the model with both trend and seasonality enabled
       model =
         Soothsayer.new(%{
-          trend_config: %{enabled: true},
-          seasonality_config: %{
+          trend: %{enabled: true},
+          seasonality: %{
             yearly: %{enabled: true, fourier_terms: 3},
             weekly: %{enabled: true, fourier_terms: 3}
           },

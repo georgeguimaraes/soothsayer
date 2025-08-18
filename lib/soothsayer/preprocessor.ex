@@ -6,6 +6,11 @@ defmodule Soothsayer.Preprocessor do
   alias Explorer.DataFrame
   alias Explorer.Series
 
+  # Calendar constants
+  @days_per_regular_year 365.0
+  @days_per_leap_year 366.0
+  @days_per_week 7.0
+
   @doc """
   Prepares the input data by adding Fourier terms for yearly and weekly seasonality based on the provided configuration.
 
@@ -28,7 +33,8 @@ defmodule Soothsayer.Preprocessor do
       #Explorer.DataFrame<...>
 
   """
-  @spec prepare_data(Explorer.DataFrame.t(), String.t() | nil, String.t(), map()) :: Explorer.DataFrame.t()
+  @spec prepare_data(Explorer.DataFrame.t(), String.t() | nil, String.t(), map()) ::
+          Explorer.DataFrame.t()
   def prepare_data(df, y_column, ds_column, seasonality_config) do
     df =
       if seasonality_config.yearly.enabled do
@@ -61,7 +67,7 @@ defmodule Soothsayer.Preprocessor do
             date_series
             |> Series.to_list()
             |> Enum.map(fn date ->
-              if Date.leap_year?(date), do: 366.0, else: 365.0
+              if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
             end)
             |> Series.from_list()
 
@@ -72,20 +78,23 @@ defmodule Soothsayer.Preprocessor do
         :weekly ->
           Series.day_of_week(date_series)
           |> Series.cast({:f, 64})
-          |> Series.divide(Series.from_list(List.duplicate(7.0, Series.size(date_series))))
+          |> Series.divide(
+            Series.from_list(List.duplicate(@days_per_week, Series.size(date_series)))
+          )
       end
 
-    result_df = Enum.reduce(1..fourier_terms, df, fn i, acc_df ->
-      acc_df
-      |> DataFrame.put(
-        "#{period_type}_sin_#{i}",
-        Series.sin(t |> Series.multiply(2 * :math.pi() * i))
-      )
-      |> DataFrame.put(
-        "#{period_type}_cos_#{i}",
-        Series.cos(t |> Series.multiply(2 * :math.pi() * i))
-      )
-    end)
+    result_df =
+      Enum.reduce(1..fourier_terms, df, fn i, acc_df ->
+        acc_df
+        |> DataFrame.put(
+          "#{period_type}_sin_#{i}",
+          Series.sin(t |> Series.multiply(2 * :math.pi() * i))
+        )
+        |> DataFrame.put(
+          "#{period_type}_cos_#{i}",
+          Series.cos(t |> Series.multiply(2 * :math.pi() * i))
+        )
+      end)
 
     result_df
   end
