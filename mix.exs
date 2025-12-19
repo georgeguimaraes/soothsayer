@@ -53,6 +53,11 @@ defmodule Soothsayer.MixProject do
       main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
+      deps: [
+        axon: "https://hexdocs.pm/axon/",
+        nx: "https://hexdocs.pm/nx/",
+        explorer: "https://hexdocs.pm/explorer/"
+      ],
       extras: [
         "README.md",
         "guides/introduction.md",

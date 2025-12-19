@@ -224,7 +224,7 @@ The following NeuralProphet features are on the roadmap:
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated releases. See [.github/RELEASE.md](.github/RELEASE.md) for details.
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated releases. See the [release documentation](https://github.com/georgeguimaraes/soothsayer/blob/main/.github/RELEASE.md) for details.
 
 ## License
 

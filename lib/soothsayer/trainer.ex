@@ -32,7 +32,7 @@ defmodule Soothsayer.Trainer do
 
   """
   @spec fit(Axon.t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer(), map()) ::
-          Axon.ModelState.t()
+          %Axon.ModelState{}
   def fit(network, x, y, epochs, config) do
     {init_fn, _predict_fn} = Axon.build(network)
     initial_params = init_fn.(x, Axon.ModelState.empty())
@@ -66,7 +66,7 @@ defmodule Soothsayer.Trainer do
       #Nx.Tensor<f32 6.0>
 
   """
-  @spec compute_l1_penalty(Axon.ModelState.t(), list(String.t())) :: Nx.Tensor.t()
+  @spec compute_l1_penalty(%Axon.ModelState{}, list(String.t())) :: Nx.Tensor.t()
   def compute_l1_penalty(params, layer_names) do
     if Enum.empty?(layer_names) do
       Nx.tensor(0.0)
