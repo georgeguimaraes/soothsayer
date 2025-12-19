@@ -3,7 +3,7 @@ defmodule Soothsayer.ARTest do
 
   alias Explorer.DataFrame
   alias Explorer.Series
-  alias Soothsayer.Preprocessor
+  alias Soothsayer.AR
 
   describe "auto-regression config" do
     test "new/1 includes AR config with defaults" do
@@ -21,7 +21,7 @@ defmodule Soothsayer.ARTest do
       y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
       n_lags = 3
 
-      {lagged, targets} = Preprocessor.create_lagged_inputs(y, n_lags)
+      {lagged, targets} = AR.create_lagged_inputs(y, n_lags)
 
       # With n_lags=3 and 5 values, we get 2 windows:
       # Window 1: [1, 2, 3] -> target: 4
@@ -147,16 +147,10 @@ defmodule Soothsayer.ARTest do
           compiler: EXLA
         )
 
-      # Train model WITH regularization using same initial params
-      # We use the Model.fit with regularization which uses custom training loop
-      model_with_reg = %Soothsayer.Model{
-        network: network,
-        config: %{learning_rate: 0.1, ar: %{regularization: 1.0}}
-      }
-
-      trained_reg = Soothsayer.Model.train_with_regularization_public(
-        model_with_reg, input, target, 100, initial_params, 1.0
-      )
+      # Train model WITH regularization
+      # We use the Trainer module with regularization which uses custom training loop
+      config_with_reg = %{learning_rate: 0.1, ar: %{regularization: 1.0}}
+      trained_reg = Soothsayer.Trainer.fit(network, input, target, 100, config_with_reg)
 
       # Get the AR dense layer weights
       ar_weights_reg = trained_reg.data["ar_dense_out"]["kernel"]

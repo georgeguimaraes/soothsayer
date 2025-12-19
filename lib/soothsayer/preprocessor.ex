@@ -99,45 +99,4 @@ defmodule Soothsayer.Preprocessor do
     result_df
   end
 
-  @doc """
-  Creates lagged input windows from a time series for auto-regression.
-
-  ## Parameters
-
-    * `y` - An `Nx.Tensor` containing the target values (1D).
-    * `n_lags` - The number of lagged values to include in each window.
-
-  ## Returns
-
-    A tuple `{lagged_inputs, targets}` where:
-    - `lagged_inputs` is a tensor of shape `{n_samples, n_lags}` containing sliding windows
-    - `targets` is a tensor of shape `{n_samples, 1}` containing the target values
-
-  ## Examples
-
-      iex> y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
-      iex> {lagged, targets} = Soothsayer.Preprocessor.create_lagged_inputs(y, 3)
-      iex> Nx.shape(lagged)
-      {2, 3}
-
-  """
-  @spec create_lagged_inputs(Nx.Tensor.t(), non_neg_integer()) ::
-          {Nx.Tensor.t(), Nx.Tensor.t()}
-  def create_lagged_inputs(y, n_lags) do
-    y = Nx.flatten(y)
-    total = Nx.axis_size(y, 0)
-    n_samples = total - n_lags
-
-    lagged =
-      Enum.map(0..(n_samples - 1), fn i ->
-        Nx.slice(y, [i], [n_lags])
-      end)
-      |> Nx.stack()
-
-    targets =
-      Nx.slice(y, [n_lags], [n_samples])
-      |> Nx.reshape({n_samples, 1})
-
-    {lagged, targets}
-  end
 end
