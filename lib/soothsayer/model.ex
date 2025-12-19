@@ -118,7 +118,7 @@ defmodule Soothsayer.Model do
   @spec fit(t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer()) :: t()
   def fit(model, x, y, epochs) do
     {init_fn, _predict_fn} = Axon.build(model.network)
-    initial_params = init_fn.(x, %{})
+    initial_params = init_fn.(x, Axon.ModelState.empty())
 
     trained_params =
       model.network

@@ -47,7 +47,7 @@ defmodule Soothsayer.ModelTest do
       "weekly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0]])
     }
 
-    assert is_map(init_fn.(input, %{}))
+    assert %Axon.ModelState{} = init_fn.(input, Axon.ModelState.empty())
   end
 
   test "fit/4 trains the model" do
