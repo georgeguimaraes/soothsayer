@@ -75,6 +75,12 @@ model = Soothsayer.new(%{
     yearly: %{enabled: true, fourier_terms: 10},
     weekly: %{enabled: false}
   },
+  ar: %{
+    enabled: true,
+    n_lags: 7,
+    layers: [32, 16],       # optional, for deep AR-Net
+    regularization: 0.1     # optional, L1 regularization for sparse weights
+  },
   epochs: 200,
   learning_rate: 0.005
 })
@@ -114,7 +120,6 @@ Soothsayer is inspired by NeuralProphet but implemented in Elixir with some key 
 
 Soothsayer is a work in progress. The following NeuralProphet features are not yet implemented:
 
-- Auto Regression
 - Lagged Regressors
 - Future Regressors
 - Events and Holidays

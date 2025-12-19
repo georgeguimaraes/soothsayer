@@ -36,6 +36,7 @@ defmodule Soothsayer do
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3}
       },
+      ar: %{enabled: false, n_lags: 0, layers: [], regularization: nil},
       epochs: 100,
       learning_rate: 0.01
     }
@@ -69,34 +70,75 @@ defmodule Soothsayer do
     validate_training_data!(data)
     processed_data = Preprocessor.prepare_data(data, "y", "ds", model.config.seasonality)
 
-    y = processed_data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
-    {y_normalized, y_mean, y_std} = normalize(y)
+    y_full = processed_data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32})
+    {y_full_normalized, y_mean, y_std} = normalize(Nx.new_axis(y_full, -1))
+    y_full_normalized = Nx.flatten(y_full_normalized)
+
+    # Handle AR: create lagged inputs and truncate data
+    {y_normalized, ar_input, n_lags} =
+      if model.config.ar.enabled and model.config.ar.n_lags > 0 do
+        n_lags = model.config.ar.n_lags
+        {ar_lagged, ar_targets} = Preprocessor.create_lagged_inputs(y_full_normalized, n_lags)
+        {ar_targets, ar_lagged, n_lags}
+      else
+        {Nx.new_axis(y_full_normalized, -1), nil, 0}
+      end
+
+    # Build base inputs
+    trend_full =
+      processed_data["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
+
+    yearly_full =
+      get_seasonality_input(
+        processed_data,
+        :yearly,
+        model.config.seasonality.yearly.fourier_terms
+      )
+
+    weekly_full =
+      get_seasonality_input(
+        processed_data,
+        :weekly,
+        model.config.seasonality.weekly.fourier_terms
+      )
+
+    # Truncate inputs if AR is enabled (remove first n_lags rows)
+    {trend, yearly, weekly} =
+      if n_lags > 0 do
+        {
+          Nx.slice(trend_full, [n_lags, 0], [Nx.axis_size(trend_full, 0) - n_lags, 1]),
+          Nx.slice(yearly_full, [n_lags, 0], [Nx.axis_size(yearly_full, 0) - n_lags, Nx.axis_size(yearly_full, 1)]),
+          Nx.slice(weekly_full, [n_lags, 0], [Nx.axis_size(weekly_full, 0) - n_lags, Nx.axis_size(weekly_full, 1)])
+        }
+      else
+        {trend_full, yearly_full, weekly_full}
+      end
 
     x = %{
-      "trend" =>
-        processed_data["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1),
-      "yearly" =>
-        get_seasonality_input(
-          processed_data,
-          :yearly,
-          model.config.seasonality.yearly.fourier_terms
-        ),
-      "weekly" =>
-        get_seasonality_input(
-          processed_data,
-          :weekly,
-          model.config.seasonality.weekly.fourier_terms
-        )
+      "trend" => trend,
+      "yearly" => yearly,
+      "weekly" => weekly
     }
+
+    # Add AR input if enabled
+    x = if ar_input != nil, do: Map.put(x, "ar", ar_input), else: x
 
     {x_normalized, x_norm} = normalize_inputs(x)
 
     fitted_model = Model.fit(model, x_normalized, y_normalized, model.config.epochs)
 
+    # Store training data for prediction lookups
+    training_data = %{
+      dates: Series.to_list(processed_data["ds"]),
+      y_normalized: Nx.to_flat_list(y_full_normalized)
+    }
+
     %{
       fitted_model
       | config:
-          Map.put(model.config, :normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
+          model.config
+          |> Map.put(:normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
+          |> Map.put(:training_data, training_data)
     }
   end
 
@@ -176,6 +218,15 @@ defmodule Soothsayer do
       "weekly" =>
         get_seasonality_input(processed_x, :weekly, model.config.seasonality.weekly.fourier_terms)
     }
+
+    # Add AR input if enabled
+    x_input =
+      if model.config.ar.enabled and model.config.ar.n_lags > 0 do
+        ar_input = get_ar_input(model, Series.to_list(x))
+        Map.put(x_input, "ar", ar_input)
+      else
+        x_input
+      end
 
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
 
@@ -265,5 +316,35 @@ defmodule Soothsayer do
       _, %{} = left, %{} = right -> deep_merge(left, right)
       _, _left, right -> right
     end)
+  end
+
+  defp get_ar_input(model, dates) do
+    n_lags = model.config.ar.n_lags
+    training_dates = model.config.training_data.dates
+    training_y = model.config.training_data.y_normalized
+
+    # Create a map from date to index for fast lookup
+    date_to_idx =
+      training_dates
+      |> Enum.with_index()
+      |> Map.new()
+
+    # For each prediction date, get the n_lags previous y values
+    ar_inputs =
+      Enum.map(dates, fn date ->
+        idx = Map.get(date_to_idx, date)
+
+        if idx && idx >= n_lags do
+          # Get y values from idx-n_lags to idx-1
+          Enum.slice(training_y, (idx - n_lags)..(idx - 1))
+        else
+          # For dates at the beginning or not in training, use zeros
+          List.duplicate(0.0, n_lags)
+        end
+      end)
+
+    ar_inputs
+    |> Nx.tensor()
+    |> Nx.as_type({:f, 32})
   end
 end
