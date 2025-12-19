@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/georgeguimaraes/soothsayer/compare/v0.4.0...v0.4.1) (2025-12-19)
+
+
+### Bug Fixes
+
+* enable Hex.pm publishing in release workflow ([#13](https://github.com/georgeguimaraes/soothsayer/issues/13)) ([b7a33ce](https://github.com/georgeguimaraes/soothsayer/commit/b7a33ce5fa8a86c35cc10243eab03034cd585b02))
+
 ## [0.4.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.3.1...v0.4.0) (2025-12-19)
 
 
