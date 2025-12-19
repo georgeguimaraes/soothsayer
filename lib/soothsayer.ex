@@ -5,6 +5,8 @@ defmodule Soothsayer do
 
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.AR
+  alias Soothsayer.Changepoints
   alias Soothsayer.Model
   alias Soothsayer.Preprocessor
 
@@ -31,7 +33,12 @@ defmodule Soothsayer do
   @spec new(map()) :: Soothsayer.Model.t()
   def new(config \\ %{}) do
     default_config = %{
-      trend: %{enabled: true},
+      trend: %{
+        enabled: true,
+        n_changepoints: 10,
+        changepoints_range: 0.8,
+        regularization: nil
+      },
       seasonality: %{
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3}
@@ -78,15 +85,29 @@ defmodule Soothsayer do
     {y_normalized, ar_input, n_lags} =
       if model.config.ar.enabled and model.config.ar.n_lags > 0 do
         n_lags = model.config.ar.n_lags
-        {ar_lagged, ar_targets} = Preprocessor.create_lagged_inputs(y_full_normalized, n_lags)
+        {ar_lagged, ar_targets} = AR.create_lagged_inputs(y_full_normalized, n_lags)
         {ar_targets, ar_lagged, n_lags}
       else
         {Nx.new_axis(y_full_normalized, -1), nil, 0}
       end
 
-    # Build base inputs
-    trend_full =
-      processed_data["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1)
+    # Extract dates and compute changepoint info
+    dates = Series.to_list(processed_data["ds"])
+    first_date = List.first(dates)
+    n_changepoints = model.config.trend.n_changepoints
+    changepoints_range = model.config.trend.changepoints_range
+
+    # Compute changepoint positions as numeric values (days since first date)
+    changepoint_positions = compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range)
+
+    # Build base time values tensor (days since first date)
+    t_full = Changepoints.date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
+
+    # Build changepoint features
+    changepoint_features_full = Changepoints.build_changepoint_features(t_full, changepoint_positions)
+
+    # Build trend input with changepoint features
+    trend_full = Changepoints.build_trend_input(t_full, changepoint_features_full)
 
     yearly_full =
       get_seasonality_input(
@@ -105,8 +126,9 @@ defmodule Soothsayer do
     # Truncate inputs if AR is enabled (remove first n_lags rows)
     {trend, yearly, weekly} =
       if n_lags > 0 do
+        trend_cols = Nx.axis_size(trend_full, 1)
         {
-          Nx.slice(trend_full, [n_lags, 0], [Nx.axis_size(trend_full, 0) - n_lags, 1]),
+          Nx.slice(trend_full, [n_lags, 0], [Nx.axis_size(trend_full, 0) - n_lags, trend_cols]),
           Nx.slice(yearly_full, [n_lags, 0], [Nx.axis_size(yearly_full, 0) - n_lags, Nx.axis_size(yearly_full, 1)]),
           Nx.slice(weekly_full, [n_lags, 0], [Nx.axis_size(weekly_full, 0) - n_lags, Nx.axis_size(weekly_full, 1)])
         }
@@ -129,7 +151,7 @@ defmodule Soothsayer do
 
     # Store training data for prediction lookups
     training_data = %{
-      dates: Series.to_list(processed_data["ds"]),
+      dates: dates,
       y_normalized: Nx.to_flat_list(y_full_normalized)
     }
 
@@ -139,7 +161,14 @@ defmodule Soothsayer do
           model.config
           |> Map.put(:normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
           |> Map.put(:training_data, training_data)
+          |> Map.put(:first_date, first_date)
+          |> Map.put(:changepoint_positions, changepoint_positions)
     }
+  end
+
+  defp compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range) do
+    changepoint_dates = Changepoints.compute_changepoint_positions(dates, n_changepoints, changepoints_range)
+    Enum.map(changepoint_dates, fn date -> Date.diff(date, first_date) * 1.0 end)
   end
 
   @doc """
@@ -210,9 +239,17 @@ defmodule Soothsayer do
     processed_x =
       Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", model.config.seasonality)
 
+    # Build trend input with changepoint features using stored positions
+    prediction_dates = Series.to_list(x)
+    first_date = model.config.first_date
+    changepoint_positions = model.config.changepoint_positions
+
+    t = Changepoints.date_to_numeric(prediction_dates, first_date) |> Nx.new_axis(-1)
+    changepoint_features = Changepoints.build_changepoint_features(t, changepoint_positions)
+    trend_input = Changepoints.build_trend_input(t, changepoint_features)
+
     x_input = %{
-      "trend" =>
-        processed_x["ds"] |> Series.to_tensor() |> Nx.as_type({:f, 32}) |> Nx.new_axis(-1),
+      "trend" => trend_input,
       "yearly" =>
         get_seasonality_input(processed_x, :yearly, model.config.seasonality.yearly.fourier_terms),
       "weekly" =>
@@ -222,7 +259,7 @@ defmodule Soothsayer do
     # Add AR input if enabled
     x_input =
       if model.config.ar.enabled and model.config.ar.n_lags > 0 do
-        ar_input = get_ar_input(model, Series.to_list(x))
+        ar_input = AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.n_lags)
         Map.put(x_input, "ar", ar_input)
       else
         x_input
@@ -318,36 +355,6 @@ defmodule Soothsayer do
     end)
   end
 
-  defp get_ar_input(model, dates) do
-    n_lags = model.config.ar.n_lags
-    training_dates = model.config.training_data.dates
-    training_y = model.config.training_data.y_normalized
-
-    # Create a map from date to index for fast lookup
-    date_to_idx =
-      training_dates
-      |> Enum.with_index()
-      |> Map.new()
-
-    # For each prediction date, get the n_lags previous y values
-    ar_inputs =
-      Enum.map(dates, fn date ->
-        idx = Map.get(date_to_idx, date)
-
-        if idx && idx >= n_lags do
-          # Get y values from idx-n_lags to idx-1
-          Enum.slice(training_y, (idx - n_lags)..(idx - 1))
-        else
-          # For dates at the beginning or not in training, use zeros
-          List.duplicate(0.0, n_lags)
-        end
-      end)
-
-    ar_inputs
-    |> Nx.tensor()
-    |> Nx.as_type({:f, 32})
-  end
-
   @doc """
   Extracts the raw AR layer weights from a fitted model.
 
@@ -374,19 +381,6 @@ defmodule Soothsayer do
   """
   @spec get_ar_weights(Soothsayer.Model.t()) :: %{String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}}
   def get_ar_weights(%Model{} = model) do
-    unless model.config.ar.enabled do
-      raise ArgumentError, "AR is not enabled on this model"
-    end
-
-    unless model.params do
-      raise ArgumentError, "Model has not been fitted yet"
-    end
-
-    model.params.data
-    |> Enum.filter(fn {name, _} -> String.starts_with?(name, "ar_dense") end)
-    |> Enum.map(fn {name, layer} ->
-      {name, %{kernel: layer["kernel"], bias: layer["bias"]}}
-    end)
-    |> Enum.into(%{})
+    AR.get_weights(model)
   end
 end

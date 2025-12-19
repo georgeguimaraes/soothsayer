@@ -70,6 +70,32 @@ Soothsayer.new(%{
 
 Good for: sales growth, user adoption, gradual temperature changes.
 
+#### Changepoints
+
+By default, Soothsayer uses piecewise linear trends with automatic changepoint detection. This allows the trend to change slope at multiple points, capturing shifts in growth rate (e.g., a product launch, market change, or policy update).
+
+```elixir
+Soothsayer.new(%{
+  trend: %{
+    n_changepoints: 10,      # number of potential changepoints (default: 10)
+    changepoints_range: 0.8  # place changepoints in first 80% of data (default: 0.8)
+  }
+})
+```
+
+The model learns which changepoints matter and how much the slope changes at each one. Setting `n_changepoints: 0` disables changepoints and uses a simple linear trend.
+
+**Trend regularization** can prevent overfitting when you have many changepoints:
+
+```elixir
+trend: %{
+  n_changepoints: 25,
+  regularization: 0.1  # L1 penalty pushes small slope changes toward zero
+}
+```
+
+This is useful when you're not sure how many changepoints you need. Set more than you think necessary and let regularization prune the unimportant ones.
+
 ### Seasonality
 
 Captures repeating patterns at fixed intervals. Soothsayer supports yearly and weekly seasonality using Fourier terms.
@@ -193,7 +219,6 @@ The following NeuralProphet features are on the roadmap:
 - Events and Holidays
 - Uncertainty Estimation
 - Multiplicative Seasonality
-- Changepoint Detection
 
 ## Contributing
 
