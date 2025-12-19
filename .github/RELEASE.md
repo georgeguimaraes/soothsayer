@@ -43,7 +43,9 @@ Once the project reaches 1.0.0, standard semantic versioning will apply:
 - **`feat:`** - Minor bump (x.1.0)
 - **`fix:`** - Patch bump (x.0.1)
 - **`perf:`** - Patch bump (x.0.1)
-- **Others** (`chore:`, `docs:`, etc.) - No version bump
+- **Others** (`chore:`, `docs:`, etc.) - **No version bump** (won't trigger a release)
+
+**Note:** This is the standard semantic versioning behavior that will only apply after version 1.0.0 is reached.
 
 ## Commit Message Format
 
@@ -90,13 +92,11 @@ Release-please configuration is stored in two files:
 
 ### Key Configuration Options
 
-```json
-{
-  "bump-minor-pre-major": true,           // feat bumps minor even for 0.x
-  "bump-patch-for-minor-pre-major": true, // All commits bump patch for 0.x
-  "changelog-sections": [...]             // Organize changelog by commit type
-}
-```
+The release-please-config.json contains:
+
+- **`bump-minor-pre-major: true`** - Feature commits bump minor version even for 0.x versions
+- **`bump-patch-for-minor-pre-major: true`** - All conventional commits bump patch for 0.x versions
+- **`changelog-sections: [...]`** - Organizes changelog by commit type
 
 ## Manual Release
 
