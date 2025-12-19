@@ -1,6 +1,6 @@
 # Soothsayer
 
-Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It provides a flexible and easy-to-use interface for creating and training forecasting models.
+Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It decomposes your time series into interpretable components (trend, seasonality, auto-regression) and uses neural networks to learn the patterns.
 
 **Warning:** Soothsayer is currently in alpha stage. The API is unstable and may change at any moment without prior notice. Use with caution in production environments.
 
@@ -18,26 +18,16 @@ end
 
 Then run `mix deps.get` to install the dependencies.
 
-## Usage
-
-Here's a basic example of how to use Soothsayer:
+## Quick Start
 
 ```elixir
 alias Explorer.DataFrame
 alias Explorer.Series
 
-# Create sample data, (or use your own data)
-dates = Date.range(~D[2020-01-01], ~D[2022-12-31])
-y = Enum.map(dates, fn date ->
-  day_of_year = Date.day_of_year(date)
-  trend = 100 + 0.1 * Date.diff(date, ~D[2020-01-01])
-  seasonality = 10 * :math.sin(2 * :math.pi * day_of_year / 365.25)
-  trend + seasonality + :rand.normal(0, 5)
-end)
-
+# Your data needs two columns: "ds" (dates) and "y" (values)
 df = DataFrame.new(%{
-  "ds" => dates,
-  "y" => y
+  "ds" => Date.range(~D[2020-01-01], ~D[2022-12-31]),
+  "y" => your_values
 })
 
 # Create and fit the model
@@ -47,99 +37,169 @@ fitted_model = Soothsayer.fit(model, df)
 # Make predictions
 future_dates = Date.range(~D[2023-01-01], ~D[2023-12-31])
 predictions = Soothsayer.predict(fitted_model, Series.from_list(Enum.to_list(future_dates)))
-
-# Print the predictions
-IO.inspect(predictions)
 ```
 
-You can also get the components of the forecast:
+You can also get individual components to understand what's driving the forecast:
 
 ```elixir
-components = Soothsayer.predict_components(fitted_model, Series.from_list(Enum.to_list(future_dates)))
-
-#> %{comboned: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ...}
+components = Soothsayer.predict_components(fitted_model, future_dates_series)
+# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ...}
 ```
 
-### Livebook Example
+Check the `livebook` directory for interactive examples.
 
-You can check the `livebook` dir with some examples on how to use Soothsayer.
+## Features
 
-### Customizing the Model
+Soothsayer models time series as a sum of components:
 
-You can customize various aspects of the model:
+```
+y(t) = trend(t) + seasonality(t) + ar(t)
+```
+
+Each component can be enabled or disabled depending on your data.
+
+### Trend
+
+Captures long-term growth or decline in your data. Enable this when your data has a general upward or downward direction over time.
+
+```elixir
+Soothsayer.new(%{
+  trend: %{enabled: true}  # this is the default
+})
+```
+
+Good for: sales growth, user adoption, gradual temperature changes.
+
+### Seasonality
+
+Captures repeating patterns at fixed intervals. Soothsayer supports yearly and weekly seasonality using Fourier terms.
+
+```elixir
+Soothsayer.new(%{
+  seasonality: %{
+    yearly: %{enabled: true, fourier_terms: 6},
+    weekly: %{enabled: true, fourier_terms: 3}
+  }
+})
+```
+
+**Yearly seasonality** captures patterns that repeat every year (holiday shopping, summer peaks, etc). More `fourier_terms` means more flexibility to fit complex seasonal shapes, but also more risk of overfitting.
+
+**Weekly seasonality** captures patterns that repeat every week (weekend dips, Monday spikes, etc). Usually needs fewer fourier terms than yearly.
+
+| fourier_terms | Flexibility | Use when |
+|---------------|-------------|----------|
+| 3 | Low | Simple, smooth seasonal patterns |
+| 6 | Medium | Most cases (default for yearly) |
+| 10+ | High | Complex patterns with sharp peaks |
+
+### Auto-Regression (AR)
+
+Captures dependencies on recent values. Enable this when today's value depends on yesterday's (or the last few days). This is common in financial data, sensor readings, and anything with momentum.
+
+```elixir
+Soothsayer.new(%{
+  ar: %{
+    enabled: true,
+    n_lags: 7           # use the last 7 values to predict the next one
+  }
+})
+```
+
+**Choosing `n_lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
+
+#### Deep AR-Net
+
+For non-linear autoregressive patterns, you can add hidden layers:
+
+```elixir
+ar: %{
+  enabled: true,
+  n_lags: 7,
+  layers: [32, 16]  # two hidden layers with ReLU activation
+}
+```
+
+Use this when the relationship between past and future values is complex. For simple linear relationships, leave `layers` empty (the default).
+
+#### Regularization
+
+L1 regularization pushes AR weights toward zero, which prevents overfitting when you have many lags:
+
+```elixir
+ar: %{
+  enabled: true,
+  n_lags: 14,
+  regularization: 0.1  # higher = more sparsity
+}
+```
+
+This is useful when you're not sure how many lags to use. Set a higher `n_lags` than you think you need and let regularization prevent the model from overfitting to noise in distant lags.
+
+### Training Parameters
+
+```elixir
+Soothsayer.new(%{
+  epochs: 100,        # training iterations (default: 100)
+  learning_rate: 0.01 # how fast to learn (default: 0.01)
+})
+```
+
+If your model is underfitting (predictions are too smooth), try more epochs or a higher learning rate. If it's overfitting (fits training data but not new data), try fewer epochs or more regularization.
+
+## Using EXLA for Faster Training
+
+Soothsayer uses EXLA for training by default, which compiles to XLA for faster execution on CPU/GPU.
+
+Make sure EXLA is configured as your Nx backend in `config/config.exs`:
+
+```elixir
+config :nx, default_backend: EXLA.Backend
+```
+
+Or set it at runtime:
+
+```elixir
+Nx.global_default_backend(EXLA.Backend)
+```
+
+## Full Configuration Example
+
+Here's a model configured for daily sales data with yearly seasonality and short-term momentum:
 
 ```elixir
 model = Soothsayer.new(%{
   trend: %{enabled: true},
   seasonality: %{
-    yearly: %{enabled: true, fourier_terms: 10},
-    weekly: %{enabled: false}
+    yearly: %{enabled: true, fourier_terms: 8},
+    weekly: %{enabled: true, fourier_terms: 3}
   },
   ar: %{
     enabled: true,
     n_lags: 7,
-    layers: [32, 16],       # optional, for deep AR-Net
-    regularization: 0.1     # optional, L1 regularization for sparse weights
+    regularization: 0.05
   },
-  epochs: 200,
-  learning_rate: 0.005
+  epochs: 150,
+  learning_rate: 0.01
 })
 ```
 
-### Using EXLA for Faster Training
-
-Soothsayer can use EXLA (Elixir XLA) for faster training, but it's not the default backend. To use EXLA:
-
-1. Make sure you've added EXLA to your dependencies as shown in the Installation section.
-
-2. Set EXLA as the default backend for Nx. Add the following to your `config/config.exs` file:
-
-   ```elixir
-   config :nx, default_backend: EXLA.Backend
-   ```
-
-   Alternatively, you can set it at runtime before using Soothsayer:
-
-   ```elixir
-   Nx.global_default_backend(EXLA.Backend)
-   ```
-
-## Differences from NeuralProphet
-
-Soothsayer is inspired by NeuralProphet but implemented in Elixir with some key differences:
-
-1. **Elixir Ecosystem**: Soothsayer is built using Elixir and leverages libraries like Explorer for data manipulation and Axon for neural networks.
-
-2. **Simplified Model**: Soothsayer currently offers a more streamlined model with fewer components, focusing on trend and seasonality.
-
-3. **Data Handling**: Soothsayer uses Explorer's DataFrame for data manipulation, which may have different performance characteristics compared to pandas.
-
-4. **Training Process**: The training process in Soothsayer is implemented using Axon and may differ in some aspects from NeuralProphet's PyTorch implementation.
-
 ## Features Not Yet Implemented
 
-Soothsayer is a work in progress. The following NeuralProphet features are not yet implemented:
+The following NeuralProphet features are on the roadmap:
 
-- Lagged Regressors
-- Future Regressors
+- Lagged Regressors (external variables that affect the forecast)
+- Future Regressors (known future values like holidays)
 - Events and Holidays
 - Uncertainty Estimation
-- Global and Local Models (models based on geography)
-- Multiplicative Seasonality (currently only additive is supported)
-- Piecewise Linear Trends (currently only simple linear trend is supported)
-- Advanced Regularization Options
-- Automatic Changepoint Detection
-- Cross-Validation and Hyperparameter Tuning
-
-We plan to implement some of these features in future versions of Soothsayer.
+- Multiplicative Seasonality
+- Changepoint Detection
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-### Release Process
-
-This project uses automated releases based on [Conventional Commits](https://www.conventionalcommits.org/). When contributing, please follow the commit message format described in [.github/RELEASE.md](.github/RELEASE.md).
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated releases. See [.github/RELEASE.md](.github/RELEASE.md) for details.
 
 ## License
 
