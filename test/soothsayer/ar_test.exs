@@ -265,4 +265,84 @@ defmodule Soothsayer.ARTest do
       assert Enum.any?(pred_values, fn v -> abs(v) > 1.0 end)
     end
   end
+
+  describe "get_ar_weights/1" do
+    test "returns weights for linear AR model" do
+      :rand.seed(:exsss, {42, 42, 42})
+
+      n_points = 50
+      start_date = ~D[2023-01-01]
+      dates = Enum.map(0..(n_points - 1), fn i -> Date.add(start_date, i) end)
+      y_values = Enum.map(1..n_points, fn i -> i * 1.0 + :rand.normal(0, 1) end)
+
+      df = DataFrame.new(%{"ds" => dates, "y" => y_values})
+
+      model =
+        Soothsayer.new(%{
+          trend: %{enabled: false},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          ar: %{enabled: true, n_lags: 3},
+          epochs: 2
+        })
+
+      fitted_model = Soothsayer.fit(model, df)
+      weights = Soothsayer.get_ar_weights(fitted_model)
+
+      # Should have only the output layer for linear AR
+      assert Map.has_key?(weights, "ar_dense_out")
+      assert map_size(weights) == 1
+
+      # Kernel should be {n_lags, 1}
+      assert Nx.shape(weights["ar_dense_out"].kernel) == {3, 1}
+      assert Nx.shape(weights["ar_dense_out"].bias) == {1}
+    end
+
+    test "returns all layer weights for deep AR-Net" do
+      :rand.seed(:exsss, {42, 42, 42})
+
+      n_points = 50
+      start_date = ~D[2023-01-01]
+      dates = Enum.map(0..(n_points - 1), fn i -> Date.add(start_date, i) end)
+      y_values = Enum.map(1..n_points, fn i -> i * 1.0 + :rand.normal(0, 1) end)
+
+      df = DataFrame.new(%{"ds" => dates, "y" => y_values})
+
+      model =
+        Soothsayer.new(%{
+          trend: %{enabled: false},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          ar: %{enabled: true, n_lags: 5, layers: [16, 8]},
+          epochs: 2
+        })
+
+      fitted_model = Soothsayer.fit(model, df)
+      weights = Soothsayer.get_ar_weights(fitted_model)
+
+      # Should have hidden layers + output layer
+      assert Map.has_key?(weights, "ar_dense_0")
+      assert Map.has_key?(weights, "ar_dense_1")
+      assert Map.has_key?(weights, "ar_dense_out")
+
+      # Verify shapes
+      assert Nx.shape(weights["ar_dense_0"].kernel) == {5, 16}
+      assert Nx.shape(weights["ar_dense_1"].kernel) == {16, 8}
+      assert Nx.shape(weights["ar_dense_out"].kernel) == {8, 1}
+    end
+
+    test "raises error when AR is disabled" do
+      model = Soothsayer.new(%{ar: %{enabled: false}})
+
+      assert_raise ArgumentError, ~r/AR is not enabled/, fn ->
+        Soothsayer.get_ar_weights(model)
+      end
+    end
+
+    test "raises error when model is not fitted" do
+      model = Soothsayer.new(%{ar: %{enabled: true, n_lags: 3}})
+
+      assert_raise ArgumentError, ~r/not been fitted/, fn ->
+        Soothsayer.get_ar_weights(model)
+      end
+    end
+  end
 end
