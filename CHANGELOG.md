@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.3.1...v0.4.0) (2025-12-19)
+
+
+### Features
+
+* Add auto-regression (AR) support ([#9](https://github.com/georgeguimaraes/soothsayer/issues/9)) ([4a58d36](https://github.com/georgeguimaraes/soothsayer/commit/4a58d36230d87fc35b7c844ad386e5f0deeed202))
+* Add get_ar_weights/1 for AR layer weight inspection ([#11](https://github.com/georgeguimaraes/soothsayer/issues/11)) ([4ad2db6](https://github.com/georgeguimaraes/soothsayer/commit/4ad2db65ae2c8e7976c7d9022e910505a2366876))
+* Add piecewise linear trend with changepoint detection ([#12](https://github.com/georgeguimaraes/soothsayer/issues/12)) ([d39d3a6](https://github.com/georgeguimaraes/soothsayer/commit/d39d3a6642c442503cb8e9e003721f97d33a778a))
+
+
+### Bug Fixes
+
+* Resolve ExDoc warnings for type refs and file links ([303a8a0](https://github.com/georgeguimaraes/soothsayer/commit/303a8a09814b8f89cf0a2df9b1434391cd792056))
+
 ## [0.3.1](https://github.com/georgeguimaraes/soothsayer/compare/v0.3.0...v0.3.1) (2024-09-10)
 
 
