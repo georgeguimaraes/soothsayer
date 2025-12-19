@@ -347,4 +347,46 @@ defmodule Soothsayer do
     |> Nx.tensor()
     |> Nx.as_type({:f, 32})
   end
+
+  @doc """
+  Extracts the raw AR layer weights from a fitted model.
+
+  For linear AR models, returns the output layer weights.
+  For deep AR-Net models, returns all layer weights including hidden layers.
+
+  ## Parameters
+
+    * `model` - A fitted `Soothsayer.Model` struct with AR enabled.
+
+  ## Returns
+
+    A map of layer names to weight structs containing `:kernel` and `:bias` tensors.
+
+  ## Examples
+
+      iex> model = Soothsayer.new(%{ar: %{enabled: true, n_lags: 3}})
+      iex> fitted_model = Soothsayer.fit(model, data)
+      iex> weights = Soothsayer.get_ar_weights(fitted_model)
+      %{
+        "ar_dense_out" => %{kernel: #Nx.Tensor<f32[3][1]>, bias: #Nx.Tensor<f32[1]>}
+      }
+
+  """
+  @spec get_ar_weights(Soothsayer.Model.t()) :: %{String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}}
+  def get_ar_weights(%Model{} = model) do
+    unless model.config.ar.enabled do
+      raise ArgumentError, "AR is not enabled on this model"
+    end
+
+    unless model.params do
+      raise ArgumentError, "Model has not been fitted yet"
+    end
+
+    model.params.data
+    |> Enum.filter(fn {name, _} -> String.starts_with?(name, "ar_dense") end)
+    |> Enum.map(fn {name, layer} ->
+      {name, %{kernel: layer["kernel"], bias: layer["bias"]}}
+    end)
+    |> Enum.into(%{})
+  end
 end
