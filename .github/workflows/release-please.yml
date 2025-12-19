@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           release-type: elixir
 
@@ -40,4 +41,4 @@ jobs:
         run: mix test
       - name: Publish to Hex.pm
         if: ${{ steps.release.outputs.release_created }}
-        run: HEX_API_KEY={{secrets.HEX_API_KEY}} mix hex.publish --yes
+        run: HEX_API_KEY=${{secrets.HEX_API_KEY}} mix hex.publish --yes
