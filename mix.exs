@@ -54,7 +54,21 @@ defmodule Soothsayer.MixProject do
       source_url: @source_url,
       source_ref: "v#{@version}",
       extras: [
-        "README.md"
+        "README.md",
+        "guides/introduction.md",
+        "guides/basics.md",
+        "guides/trends.md",
+        "guides/seasonality.md",
+        "guides/autoregression.md"
+      ],
+      groups_for_extras: [
+        Tutorials: [
+          "guides/introduction.md",
+          "guides/basics.md",
+          "guides/trends.md",
+          "guides/seasonality.md",
+          "guides/autoregression.md"
+        ]
       ]
     ]
   end

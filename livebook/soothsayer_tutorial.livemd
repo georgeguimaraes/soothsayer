@@ -1,0 +1,530 @@
+# Soothsayer Tutorial
+
+A progressive guide to time series forecasting with Soothsayer. We'll start with the basics and incrementally add more powerful features.
+
+```elixir
+Mix.install([
+  {:soothsayer, path: "~/code/soothsayer"},
+  {:explorer, ">= 0.0.0"},
+  {:vega_lite, ">= 0.0.0"},
+  {:kino_vega_lite, ">= 0.0.0"},
+  {:kino_explorer, ">= 0.0.0"},
+  {:req, ">= 0.0.0"}
+])
+
+alias Explorer.DataFrame
+alias Explorer.Series
+alias VegaLite, as: Vl
+
+Nx.global_default_backend(EXLA.Backend)
+```
+
+## 1. Basic Model: Trend + Seasonality
+
+Soothsayer decomposes time series into interpretable components:
+
+```
+y(t) = trend(t) + seasonality(t) + ar(t)
+```
+
+Let's start with synthetic data that has trend, yearly seasonality, and weekly seasonality.
+
+### Generate synthetic data
+
+```elixir
+:rand.seed(:exsss, {42, 42, 42})
+
+start_date = ~D[2020-01-01]
+end_date = ~D[2023-12-31]
+dates = Date.range(start_date, end_date)
+
+y =
+  Enum.map(dates, fn date ->
+    days_since_start = Date.diff(date, start_date)
+    trend = 1000 + 0.5 * days_since_start
+    yearly = 50 * :math.sin(2 * :math.pi() * days_since_start / 365.25)
+    weekly = 20 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
+    noise = :rand.normal(0, 30)
+    trend + yearly + weekly + noise
+  end)
+
+df = DataFrame.new(%{"ds" => dates, "y" => y})
+```
+
+```elixir
+Vl.new(width: 800, height: 400, title: "Synthetic Time Series Data")
+|> Vl.data_from_values(df, only: ["ds", "y"])
+|> Vl.mark(:point, opacity: 0.5)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "y", type: :quantitative)
+```
+
+### Create and fit a basic model
+
+```elixir
+model = Soothsayer.new(%{
+  trend: %{enabled: true},
+  seasonality: %{
+    yearly: %{enabled: true, fourier_terms: 6},
+    weekly: %{enabled: true, fourier_terms: 3}
+  },
+  epochs: 50
+})
+
+fitted_model = Soothsayer.fit(model, df)
+```
+
+### Visualize the neural network
+
+Soothsayer uses a neural network under the hood. Each component (trend, seasonality) is a separate input that gets combined:
+
+```elixir
+# Build input templates matching the network's expected shapes
+n_changepoints = model.config.trend[:n_changepoints] || 0
+yearly_terms = model.config.seasonality.yearly.fourier_terms
+weekly_terms = model.config.seasonality.weekly.fourier_terms
+
+input = %{
+  "trend" => Nx.template({1, 1 + n_changepoints}, :f32),
+  "yearly" => Nx.template({1, 2 * yearly_terms}, :f32),
+  "weekly" => Nx.template({1, 2 * weekly_terms}, :f32)
+}
+
+Axon.Display.as_graph(model.network, input)
+```
+
+### Make predictions
+
+```elixir
+predictions = Soothsayer.predict(fitted_model, df["ds"])
+
+df_with_predictions =
+  df
+  |> DataFrame.put("yhat", predictions)
+```
+
+```elixir
+Vl.new(width: 800, height: 400, title: "Actual vs Predicted")
+|> Vl.data_from_values(df_with_predictions, only: ["ds", "y", "yhat"])
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:point, opacity: 0.3)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "y", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "tomato", stroke_width: 2)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "yhat", type: :quantitative)
+])
+```
+
+### Extract components
+
+One of Soothsayer's strengths is interpretability. We can see what each component contributes:
+
+```elixir
+components = Soothsayer.predict_components(fitted_model, df["ds"])
+
+df_components =
+  df
+  |> DataFrame.put("trend", components.trend)
+  |> DataFrame.put("yearly", components.yearly_seasonality)
+  |> DataFrame.put("weekly", components.weekly_seasonality)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Trend Component")
+|> Vl.data_from_values(df_components)
+|> Vl.mark(:line, color: "steelblue", stroke_width: 2)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "trend", type: :quantitative)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Yearly Seasonality")
+|> Vl.data_from_values(df_components)
+|> Vl.mark(:line, color: "green", stroke_width: 2)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "yearly", type: :quantitative)
+```
+
+```elixir
+# Zoom to see weekly pattern
+Vl.new(width: 800, height: 250, title: "Weekly Seasonality (3 months)")
+|> Vl.data_from_values(df_components)
+|> Vl.mark(:line, color: "purple", stroke_width: 2)
+|> Vl.encode_field(:x, "ds",
+  type: :temporal,
+  scale: [domain: ["2023-01-01", "2023-03-31"]]
+)
+|> Vl.encode_field(:y, "weekly", type: :quantitative)
+```
+
+## 2. Changepoint Detection
+
+Real-world trends often change slope over time. Changepoints allow the trend to have different slopes at different periods - useful for capturing product launches, market shifts, or policy changes.
+
+### Data with a slope change
+
+```elixir
+:rand.seed(:exsss, {42, 42, 42})
+
+n_days = 730  # 2 years
+cp_dates = Enum.map(0..(n_days - 1), fn i -> Date.add(~D[2020-01-01], i) end)
+
+# Dramatic slope change: flat first year, steep second year
+y_cp =
+  Enum.map(0..(n_days - 1), fn i ->
+    trend = if i < 365, do: 100 + 0.1 * i, else: 100 + 0.1 * 365 + 3.0 * (i - 365)
+    yearly = 20 * :math.sin(2 * :math.pi() * i / 365.25)
+    noise = :rand.normal(0, 10)
+    trend + yearly + noise
+  end)
+
+df_cp = DataFrame.new(%{"ds" => cp_dates, "y" => y_cp})
+```
+
+```elixir
+Vl.new(width: 800, height: 400, title: "Data with Slope Change at Day 365")
+|> Vl.data_from_values(df_cp, only: ["ds", "y"])
+|> Vl.mark(:point, opacity: 0.5)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "y", type: :quantitative)
+```
+
+### Compare: Simple Linear vs Piecewise Linear
+
+```elixir
+# WITHOUT changepoints
+model_linear = Soothsayer.new(%{
+  trend: %{n_changepoints: 0},
+  seasonality: %{yearly: %{enabled: true}, weekly: %{enabled: false}},
+  epochs: 100
+})
+
+fitted_linear = Soothsayer.fit(model_linear, df_cp)
+pred_linear = Soothsayer.predict(fitted_linear, df_cp["ds"])
+```
+
+```elixir
+# WITH changepoints
+model_piecewise = Soothsayer.new(%{
+  trend: %{n_changepoints: 10, changepoints_range: 0.8},
+  seasonality: %{yearly: %{enabled: true}, weekly: %{enabled: false}},
+  epochs: 100
+})
+
+fitted_piecewise = Soothsayer.fit(model_piecewise, df_cp)
+pred_piecewise = Soothsayer.predict(fitted_piecewise, df_cp["ds"])
+```
+
+```elixir
+df_cp_compare =
+  df_cp
+  |> DataFrame.put("linear", pred_linear)
+  |> DataFrame.put("piecewise", pred_piecewise)
+
+Vl.new(width: 800, height: 400, title: "Simple Linear (orange) vs Piecewise Linear (green)")
+|> Vl.data_from_values(df_cp_compare)
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:point, opacity: 0.3)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "y", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "orange", stroke_width: 3)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "linear", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "green", stroke_width: 2)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "piecewise", type: :quantitative)
+])
+```
+
+The **green line** (piecewise) captures the slope change, while the **orange line** (simple linear) averages through it.
+
+### Network with changepoints
+
+With changepoints enabled, the trend input includes additional features:
+
+```elixir
+input_with_cp = %{
+  "trend" => Nx.template({1, 11}, :f32),  # 1 + 10 changepoints
+  "yearly" => Nx.template({1, 12}, :f32),
+  "weekly" => Nx.template({1, 6}, :f32)
+}
+
+Axon.Display.as_graph(model_piecewise.network, input_with_cp)
+```
+
+## 3. Auto-Regression (AR)
+
+AR captures dependencies on recent values. Enable this when today's value depends on yesterday's - common in financial data, sensor readings, and anything with momentum.
+
+### Data with momentum
+
+```elixir
+:rand.seed(:exsss, {123, 456, 789})
+
+n_days_ar = 500
+ar_dates = Enum.map(0..(n_days_ar - 1), fn i -> Date.add(~D[2022-01-01], i) end)
+
+# AR(1) process: each value depends on the previous
+y_ar =
+  Enum.reduce(1..(n_days_ar - 1), [100.0], fn _i, [prev | _] = acc ->
+    trend = 0.1
+    ar = 0.7 * (prev - 100)  # mean-reverting
+    noise = :rand.normal(0, 5)
+    [100 + trend * length(acc) + ar + noise | acc]
+  end)
+  |> Enum.reverse()
+
+df_ar = DataFrame.new(%{"ds" => ar_dates, "y" => y_ar})
+```
+
+```elixir
+Vl.new(width: 800, height: 400, title: "Data with Auto-Regressive Pattern")
+|> Vl.data_from_values(df_ar, only: ["ds", "y"])
+|> Vl.mark(:line)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "y", type: :quantitative)
+```
+
+### Compare: Without AR vs With AR
+
+```elixir
+# WITHOUT AR
+model_no_ar = Soothsayer.new(%{
+  trend: %{n_changepoints: 5},
+  seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+  ar: %{enabled: false},
+  epochs: 30
+})
+
+fitted_no_ar = Soothsayer.fit(model_no_ar, df_ar)
+pred_no_ar = Soothsayer.predict(fitted_no_ar, df_ar["ds"])
+```
+
+```elixir
+# WITH AR
+model_with_ar = Soothsayer.new(%{
+  trend: %{n_changepoints: 5},
+  seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+  ar: %{enabled: true, n_lags: 7},
+  epochs: 30
+})
+
+fitted_with_ar = Soothsayer.fit(model_with_ar, df_ar)
+pred_with_ar = Soothsayer.predict(fitted_with_ar, df_ar["ds"])
+```
+
+```elixir
+df_ar_compare =
+  df_ar
+  |> DataFrame.put("no_ar", pred_no_ar)
+  |> DataFrame.put("with_ar", pred_with_ar)
+
+Vl.new(width: 800, height: 400, title: "Trend Only (orange) vs Trend + AR (purple)")
+|> Vl.data_from_values(df_ar_compare)
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:line, opacity: 0.5)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "y", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "orange", stroke_width: 2)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "no_ar", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "purple", stroke_width: 2)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "with_ar", type: :quantitative)
+])
+```
+
+The **purple line** (with AR) tracks short-term fluctuations much better.
+
+### Inspect AR weights
+
+```elixir
+ar_weights = Soothsayer.get_ar_weights(fitted_with_ar)
+kernel = ar_weights["ar_dense_out"].kernel |> Nx.to_flat_list()
+
+lag_weights =
+  kernel
+  |> Enum.with_index(1)
+  |> Enum.map(fn {weight, lag} -> %{lag: lag, weight: weight} end)
+
+Vl.new(width: 400, height: 300, title: "AR Lag Weights")
+|> Vl.data_from_values(lag_weights)
+|> Vl.mark(:bar)
+|> Vl.encode_field(:x, "lag", type: :ordinal, title: "Lag")
+|> Vl.encode_field(:y, "weight", type: :quantitative, title: "Weight")
+```
+
+Lag 1 has the highest weight, matching our AR(1) data generation.
+
+### Network with AR
+
+```elixir
+input_with_ar = %{
+  "trend" => Nx.template({1, 6}, :f32),
+  "yearly" => Nx.template({1, 12}, :f32),
+  "weekly" => Nx.template({1, 6}, :f32),
+  "ar" => Nx.template({1, 7}, :f32)  # 7 lags
+}
+
+Axon.Display.as_graph(model_with_ar.network, input_with_ar)
+```
+
+## 4. Real World Example: Spanish Energy Prices
+
+Let's apply everything to real data: daily energy prices from Spain (2015-2018).
+
+```elixir
+real_df =
+  DataFrame.from_csv!(
+    "https://raw.githubusercontent.com/ourownstory/neuralprophet-data/main/kaggle-energy/datasets/tutorial01.csv"
+  )
+
+real_df =
+  real_df
+  |> DataFrame.put("ds", real_df["ds"] |> Series.cast(:date))
+```
+
+```elixir
+Vl.new(width: 800, height: 400, title: "Spanish Energy Prices (2015-2018)")
+|> Vl.data_from_values(real_df, only: ["ds", "y"])
+|> Vl.mark(:point, opacity: 0.5)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "y", type: :quantitative)
+```
+
+### Full model with all features
+
+```elixir
+energy_model = Soothsayer.new(%{
+  trend: %{n_changepoints: 15, changepoints_range: 0.8},
+  seasonality: %{
+    yearly: %{enabled: true, fourier_terms: 8},
+    weekly: %{enabled: true, fourier_terms: 3}
+  },
+  ar: %{enabled: true, n_lags: 7},
+  epochs: 100
+})
+
+fitted_energy = Soothsayer.fit(energy_model, real_df)
+```
+
+### Full network architecture
+
+With all features enabled, the network combines trend (with changepoints), yearly seasonality, weekly seasonality, and AR:
+
+```elixir
+full_input = %{
+  "trend" => Nx.template({1, 16}, :f32),   # 1 + 15 changepoints
+  "yearly" => Nx.template({1, 16}, :f32),  # 2 * 8 fourier terms
+  "weekly" => Nx.template({1, 6}, :f32),   # 2 * 3 fourier terms
+  "ar" => Nx.template({1, 7}, :f32)        # 7 lags
+}
+
+Axon.Display.as_graph(energy_model.network, full_input)
+```
+
+```elixir
+energy_pred = Soothsayer.predict(fitted_energy, real_df["ds"])
+
+real_df_pred =
+  real_df
+  |> DataFrame.put("yhat", energy_pred)
+
+Vl.new(width: 800, height: 400, title: "Energy Prices: Actual vs Predicted")
+|> Vl.data_from_values(real_df_pred, only: ["ds", "y", "yhat"])
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:point, opacity: 0.3)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "y", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "tomato", stroke_width: 1)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "yhat", type: :quantitative)
+])
+```
+
+### Decomposed components
+
+```elixir
+energy_components = Soothsayer.predict_components(fitted_energy, real_df["ds"])
+
+real_df_comp =
+  real_df
+  |> DataFrame.put("trend", energy_components.trend)
+  |> DataFrame.put("yearly", energy_components.yearly_seasonality)
+  |> DataFrame.put("weekly", energy_components.weekly_seasonality)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Trend (with changepoints)")
+|> Vl.data_from_values(real_df_comp)
+|> Vl.mark(:line, color: "steelblue", stroke_width: 2)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "trend", type: :quantitative)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Yearly Seasonality")
+|> Vl.data_from_values(real_df_comp)
+|> Vl.mark(:line, color: "green", stroke_width: 2)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "yearly", type: :quantitative)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Weekly Seasonality (Q1 2017)")
+|> Vl.data_from_values(real_df_comp)
+|> Vl.mark(:line, color: "purple", stroke_width: 2)
+|> Vl.encode_field(:x, "ds",
+  type: :temporal,
+  scale: [domain: ["2017-01-01", "2017-03-31"]]
+)
+|> Vl.encode_field(:y, "weekly", type: :quantitative)
+```
+
+### AR weights for energy data
+
+```elixir
+energy_ar = Soothsayer.get_ar_weights(fitted_energy)
+energy_kernel = energy_ar["ar_dense_out"].kernel |> Nx.to_flat_list()
+
+energy_lags =
+  energy_kernel
+  |> Enum.with_index(1)
+  |> Enum.map(fn {w, lag} -> %{lag: lag, weight: w} end)
+
+Vl.new(width: 400, height: 300, title: "AR Lag Weights (Energy)")
+|> Vl.data_from_values(energy_lags)
+|> Vl.mark(:bar)
+|> Vl.encode_field(:x, "lag", type: :ordinal, title: "Lag (days)")
+|> Vl.encode_field(:y, "weight", type: :quantitative, title: "Weight")
+```
+
+## Summary
+
+| Feature | Use When | Configuration |
+|---------|----------|---------------|
+| **Trend** | Data has upward/downward direction | `trend: %{enabled: true}` |
+| **Changepoints** | Trend slope changes over time | `trend: %{n_changepoints: 10}` |
+| **Yearly seasonality** | Annual patterns | `seasonality: %{yearly: %{enabled: true}}` |
+| **Weekly seasonality** | Weekly patterns | `seasonality: %{weekly: %{enabled: true}}` |
+| **AR** | Values depend on recent history | `ar: %{enabled: true, n_lags: 7}` |
+| **Regularization** | Prevent overfitting | `regularization: 0.1` |
+
+**Tips:**
+
+* Start simple (trend + seasonality) and add features as needed
+* Use `n_changepoints: 0` for simple linear trends
+* Use `get_ar_weights/1` to understand what lags matter
+* More `fourier_terms` = more flexible seasonality (but risk overfitting)
+* Regularization helps when you have many changepoints or lags
