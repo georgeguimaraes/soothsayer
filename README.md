@@ -132,6 +132,10 @@ We plan to implement some of these features in future versions of Soothsayer.
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+### Release Process
+
+This project uses automated releases based on [Conventional Commits](https://www.conventionalcommits.org/). When contributing, please follow the commit message format described in [.github/RELEASE.md](.github/RELEASE.md).
+
 ## License
 
 Soothsayer is released under the Apache License 2.0. See the LICENSE file for details.
