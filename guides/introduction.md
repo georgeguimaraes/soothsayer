@@ -1,4 +1,4 @@
-# Introduction to Soothsayer
+# Introduction to Soothsayer 🧙🔮
 
 Soothsayer is an Elixir library for time series forecasting, inspired by [Facebook's Prophet](https://facebook.github.io/prophet/) and [NeuralProphet](https://neuralprophet.com/).
 

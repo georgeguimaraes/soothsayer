@@ -7,6 +7,7 @@ defmodule Soothsayer.MixProject do
   def project do
     [
       app: :soothsayer,
+      name: "Soothsayer",
       version: @version,
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
@@ -40,6 +41,7 @@ defmodule Soothsayer.MixProject do
 
   defp package do
     [
+      maintainers: ["George Guimarães"],
       description:
         "Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet.",
       licenses: ["Apache-2.0"],
@@ -52,6 +54,7 @@ defmodule Soothsayer.MixProject do
   defp docs do
     [
       main: "readme",
+      authors: ["George Guimarães"],
       source_url: @source_url,
       source_ref: "v#{@version}",
       deps: [

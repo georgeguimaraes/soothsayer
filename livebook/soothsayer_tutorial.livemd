@@ -1,4 +1,4 @@
-# Soothsayer Tutorial
+# Soothsayer Tutorial 🧙🔮
 
 A progressive guide to time series forecasting with Soothsayer. We'll start with the basics and incrementally add more powerful features.
 
