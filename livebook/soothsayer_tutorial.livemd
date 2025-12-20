@@ -663,6 +663,102 @@ Vl.new(width: 400, height: 300, title: "AR Lag Weights (Energy)")
 |> Vl.encode_field(:y, "weight", type: :quantitative, title: "Weight")
 ```
 
+### Forecasting future energy prices
+
+Now let's predict energy prices for the next 90 days beyond our training data:
+
+```elixir
+# Get the last date from training data
+last_date = real_df["ds"] |> Series.to_list() |> List.last()
+
+# Generate 90 future dates
+future_dates = Enum.map(1..90, fn i -> Date.add(last_date, i) end)
+future_series = Series.from_list(future_dates)
+
+# Make predictions
+future_predictions = Soothsayer.predict(fitted_energy, future_series)
+
+future_df = DataFrame.new(%{
+  "ds" => future_dates,
+  "yhat" => Nx.to_flat_list(future_predictions)
+})
+```
+
+```elixir
+# Combine historical and forecast data for visualization
+historical_subset =
+  real_df
+  |> DataFrame.tail(180)
+  |> DataFrame.put("yhat", Soothsayer.predict(fitted_energy, DataFrame.tail(real_df, 180)["ds"]))
+  |> DataFrame.put("type", List.duplicate("historical", 180))
+
+forecast_with_type =
+  future_df
+  |> DataFrame.put("type", List.duplicate("forecast", 90))
+
+combined_df = DataFrame.concat_rows([historical_subset, forecast_with_type])
+
+Vl.new(width: 800, height: 400, title: "Energy Price Forecast (90 days)")
+|> Vl.data_from_values(combined_df)
+|> Vl.layers([
+  # Historical actual values
+  Vl.new()
+  |> Vl.mark(:point, opacity: 0.3)
+  |> Vl.transform(filter: "datum.type == 'historical'")
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "y", type: :quantitative),
+  # Historical fitted line
+  Vl.new()
+  |> Vl.mark(:line, color: "steelblue", stroke_width: 1)
+  |> Vl.transform(filter: "datum.type == 'historical'")
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "yhat", type: :quantitative),
+  # Forecast line
+  Vl.new()
+  |> Vl.mark(:line, color: "tomato", stroke_width: 2)
+  |> Vl.transform(filter: "datum.type == 'forecast'")
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "yhat", type: :quantitative)
+])
+```
+
+### Forecast components
+
+We can also decompose the forecast to understand what's driving future predictions:
+
+```elixir
+future_components = Soothsayer.predict_components(fitted_energy, future_series)
+
+future_comp_df =
+  future_df
+  |> DataFrame.put("trend", future_components.trend)
+  |> DataFrame.put("yearly", future_components.yearly_seasonality)
+  |> DataFrame.put("weekly", future_components.weekly_seasonality)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Forecast Trend")
+|> Vl.data_from_values(future_comp_df)
+|> Vl.mark(:line, color: "steelblue", stroke_width: 2)
+|> Vl.encode_field(:x, "ds", type: :temporal)
+|> Vl.encode_field(:y, "trend", type: :quantitative)
+```
+
+```elixir
+Vl.new(width: 800, height: 250, title: "Forecast Seasonality (Yearly + Weekly)")
+|> Vl.data_from_values(future_comp_df)
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:line, color: "green", stroke_width: 2)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "yearly", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, color: "purple", stroke_width: 1, opacity: 0.7)
+  |> Vl.encode_field(:x, "ds", type: :temporal)
+  |> Vl.encode_field(:y, "weekly", type: :quantitative)
+])
+```
+
 ## Summary
 
 | Feature                | Use When                            | Configuration                                              |
