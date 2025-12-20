@@ -1,5 +1,7 @@
 # Soothsayer
 
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fgeorgeguimaraes%2Fsoothsayer%2Fblob%2Fmain%2Flivebook%2Fsoothsayer_tutorial.livemd)
+
 Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It decomposes your time series into interpretable components (trend, seasonality, auto-regression) and uses neural networks to learn the patterns.
 
 **Warning:** Soothsayer is currently in alpha stage. The API is unstable and may change at any moment without prior notice. Use with caution in production environments.
@@ -46,7 +48,7 @@ components = Soothsayer.predict_components(fitted_model, future_dates_series)
 # => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ..., events: ...}
 ```
 
-Check the `livebook` directory for interactive examples.
+Click the "Run in Livebook" badge above to try the interactive tutorial, or check the `livebook` directory for examples.
 
 ## Features
 
