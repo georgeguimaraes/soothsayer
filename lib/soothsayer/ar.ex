@@ -33,18 +33,23 @@ defmodule Soothsayer.AR do
   @spec create_lagged_inputs(Nx.Tensor.t(), non_neg_integer()) ::
           {Nx.Tensor.t(), Nx.Tensor.t()}
   def create_lagged_inputs(y, n_lags) do
-    y_list = Nx.to_flat_list(y)
-    n = length(y_list)
+    n = Nx.size(y)
+    n_samples = n - n_lags
 
-    {lagged_list, target_list} =
-      Enum.reduce((n_lags)..(n - 1), {[], []}, fn i, {lagged_acc, target_acc} ->
-        window = Enum.slice(y_list, (i - n_lags)..(i - 1))
-        target = Enum.at(y_list, i)
-        {[window | lagged_acc], [target | target_acc]}
-      end)
+    # Build lagged features using Nx.slice for each lag position
+    # lag 0: y[0:n_samples], lag 1: y[1:n_samples+1], etc.
+    lagged =
+      0..(n_lags - 1)
+      |> Enum.map(fn lag -> Nx.slice(y, [lag], [n_samples]) end)
+      |> Nx.stack(axis: 1)
+      |> Nx.as_type({:f, 32})
 
-    lagged = lagged_list |> Enum.reverse() |> Nx.tensor() |> Nx.as_type({:f, 32})
-    targets = target_list |> Enum.reverse() |> Nx.tensor() |> Nx.reshape({:auto, 1}) |> Nx.as_type({:f, 32})
+    # Targets are the values after each window: y[n_lags:n]
+    targets =
+      y
+      |> Nx.slice([n_lags], [n_samples])
+      |> Nx.reshape({:auto, 1})
+      |> Nx.as_type({:f, 32})
 
     {lagged, targets}
   end
