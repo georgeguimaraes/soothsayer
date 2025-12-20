@@ -106,13 +106,15 @@ defmodule Soothsayer do
     changepoints_range = model.config.trend.changepoints_range
 
     # Compute changepoint positions as numeric values (days since first date)
-    changepoint_positions = compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range)
+    changepoint_positions =
+      compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range)
 
     # Build base time values tensor (days since first date)
     t_full = Changepoints.date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
 
     # Build changepoint features
-    changepoint_features_full = Changepoints.build_changepoint_features(t_full, changepoint_positions)
+    changepoint_features_full =
+      Changepoints.build_changepoint_features(t_full, changepoint_positions)
 
     # Build trend input with changepoint features
     trend_full = Changepoints.build_trend_input(t_full, changepoint_features_full)
@@ -135,10 +137,17 @@ defmodule Soothsayer do
     {trend, yearly, weekly} =
       if n_lags > 0 do
         trend_cols = Nx.axis_size(trend_full, 1)
+
         {
           Nx.slice(trend_full, [n_lags, 0], [Nx.axis_size(trend_full, 0) - n_lags, trend_cols]),
-          Nx.slice(yearly_full, [n_lags, 0], [Nx.axis_size(yearly_full, 0) - n_lags, Nx.axis_size(yearly_full, 1)]),
-          Nx.slice(weekly_full, [n_lags, 0], [Nx.axis_size(weekly_full, 0) - n_lags, Nx.axis_size(weekly_full, 1)])
+          Nx.slice(yearly_full, [n_lags, 0], [
+            Nx.axis_size(yearly_full, 0) - n_lags,
+            Nx.axis_size(yearly_full, 1)
+          ]),
+          Nx.slice(weekly_full, [n_lags, 0], [
+            Nx.axis_size(weekly_full, 0) - n_lags,
+            Nx.axis_size(weekly_full, 1)
+          ])
         }
       else
         {trend_full, yearly_full, weekly_full}
@@ -167,7 +176,9 @@ defmodule Soothsayer do
 
     x =
       if map_size(events_config) > 0 and events_df != nil do
-        events_input = Events.build_features(Series.from_list(event_dates), events_df, events_config)
+        events_input =
+          Events.build_features(Series.from_list(event_dates), events_df, events_config)
+
         Map.put(x, "events", events_input)
       else
         x
@@ -194,8 +205,15 @@ defmodule Soothsayer do
     }
   end
 
-  defp compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range) do
-    changepoint_dates = Changepoints.compute_changepoint_positions(dates, n_changepoints, changepoints_range)
+  defp compute_numeric_changepoint_positions(
+         dates,
+         first_date,
+         n_changepoints,
+         changepoints_range
+       ) do
+    changepoint_dates =
+      Changepoints.compute_changepoint_positions(dates, n_changepoints, changepoints_range)
+
     Enum.map(changepoint_dates, fn date -> Date.diff(date, first_date) * 1.0 end)
   end
 
@@ -293,7 +311,9 @@ defmodule Soothsayer do
     # Add AR input if enabled
     x_input =
       if model.config.ar.enabled and model.config.ar.n_lags > 0 do
-        ar_input = AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.n_lags)
+        ar_input =
+          AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.n_lags)
+
         Map.put(x_input, "ar", ar_input)
       else
         x_input
@@ -424,7 +444,9 @@ defmodule Soothsayer do
       }
 
   """
-  @spec get_ar_weights(Soothsayer.Model.t()) :: %{String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}}
+  @spec get_ar_weights(Soothsayer.Model.t()) :: %{
+          String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}
+        }
   def get_ar_weights(%Model{} = model) do
     AR.get_weights(model)
   end

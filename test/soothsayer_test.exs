@@ -178,10 +178,11 @@ defmodule SoothsayerTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale", "sale"],
-        "ds" => sale_dates
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale", "sale"],
+          "ds" => sale_dates
+        })
 
       # Create model with events
       model =
@@ -206,10 +207,11 @@ defmodule SoothsayerTest do
       future_dates = Date.range(future_start, future_end)
       future_sale_date = ~D[2024-01-15]
 
-      future_events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [future_sale_date]
-      })
+      future_events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [future_sale_date]
+        })
 
       x_test = Series.from_list(Enum.to_list(future_dates))
       predictions = Soothsayer.predict(fitted_model, x_test, events: future_events_df)
@@ -234,10 +236,11 @@ defmodule SoothsayerTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => sale_dates
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => sale_dates
+        })
 
       model =
         Soothsayer.new(%{
@@ -256,10 +259,12 @@ defmodule SoothsayerTest do
 
       # Predict on dates that include an event
       test_dates = Series.from_list([~D[2023-07-01], ~D[2023-07-15]])
-      test_events = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [~D[2023-07-15]]
-      })
+
+      test_events =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [~D[2023-07-15]]
+        })
 
       components = Soothsayer.predict_components(fitted_model, test_dates, events: test_events)
 
@@ -287,15 +292,17 @@ defmodule SoothsayerTest do
               date == Date.add(event_date, 1) -> 20
               true -> 0
             end
+
           trend + spike + :rand.normal(0, 2)
         end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      events_df = DataFrame.new(%{
-        "event" => ["promo"],
-        "ds" => [event_date]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["promo"],
+          "ds" => [event_date]
+        })
 
       model =
         Soothsayer.new(%{
@@ -340,10 +347,11 @@ defmodule SoothsayerTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale", "sale"],
-        "ds" => sale_dates
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale", "sale"],
+          "ds" => sale_dates
+        })
 
       model =
         Soothsayer.new(%{
@@ -377,6 +385,7 @@ defmodule SoothsayerTest do
       y =
         Enum.map(dates, fn date ->
           trend = 100
+
           spike =
             cond do
               date == Date.add(event_date, -1) -> 20
@@ -384,15 +393,17 @@ defmodule SoothsayerTest do
               date == Date.add(event_date, 1) -> 20
               true -> 0
             end
+
           trend + spike + :rand.normal(0, 2)
         end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-      events_df = DataFrame.new(%{
-        "event" => ["promo"],
-        "ds" => [event_date]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["promo"],
+          "ds" => [event_date]
+        })
 
       model =
         Soothsayer.new(%{

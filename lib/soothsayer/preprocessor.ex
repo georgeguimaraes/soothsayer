@@ -63,13 +63,7 @@ defmodule Soothsayer.Preprocessor do
     t =
       case period_type do
         :yearly ->
-          days_in_year =
-            date_series
-            |> Series.to_list()
-            |> Enum.map(fn date ->
-              if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
-            end)
-            |> Series.from_list()
+          days_in_year = compute_days_in_year(date_series)
 
           Series.day_of_year(date_series)
           |> Series.cast({:f, 64})
@@ -99,4 +93,14 @@ defmodule Soothsayer.Preprocessor do
     result_df
   end
 
+  defp compute_days_in_year(date_series) do
+    date_series
+    |> Series.to_list()
+    |> Enum.map(&days_for_date/1)
+    |> Series.from_list()
+  end
+
+  defp days_for_date(date) do
+    if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
+  end
 end

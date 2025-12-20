@@ -1,9 +1,9 @@
 defmodule Soothsayer.EventsTest do
   use ExUnit.Case, async: true
 
-  alias Soothsayer.Events
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.Events
 
   describe "n_features/1" do
     test "returns 0 for empty events config" do
@@ -23,9 +23,12 @@ defmodule Soothsayer.EventsTest do
 
     test "sums features across multiple events" do
       config = %{
-        "black_friday" => %{lower_window: -2, upper_window: 1},  # 4 features
-        "christmas" => %{lower_window: -1, upper_window: 0}       # 2 features
+        # 4 features
+        "black_friday" => %{lower_window: -2, upper_window: 1},
+        # 2 features
+        "christmas" => %{lower_window: -1, upper_window: 0}
       }
+
       assert Events.n_features(config) == 6
     end
   end
@@ -56,6 +59,7 @@ defmodule Soothsayer.EventsTest do
         "christmas" => %{lower_window: 0, upper_window: 0},
         "black_friday" => %{lower_window: -1, upper_window: 0}
       }
+
       names = Events.feature_names(config)
 
       # Should be sorted by event name, then by window position
@@ -67,10 +71,11 @@ defmodule Soothsayer.EventsTest do
     test "returns tensor with correct shape" do
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [~D[2023-01-02]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [~D[2023-01-02]]
+        })
 
       config = %{"sale" => %{lower_window: 0, upper_window: 0}}
 
@@ -91,10 +96,11 @@ defmodule Soothsayer.EventsTest do
     test "sets 1.0 for exact event date with window 0" do
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [~D[2023-01-02]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [~D[2023-01-02]]
+        })
 
       config = %{"sale" => %{lower_window: 0, upper_window: 0}}
 
@@ -110,10 +116,11 @@ defmodule Soothsayer.EventsTest do
     test "handles multiple events" do
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["event_a", "event_b"],
-        "ds" => [~D[2023-01-01], ~D[2023-01-03]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["event_a", "event_b"],
+          "ds" => [~D[2023-01-01], ~D[2023-01-03]]
+        })
 
       config = %{
         "event_a" => %{lower_window: 0, upper_window: 0},
@@ -128,21 +135,24 @@ defmodule Soothsayer.EventsTest do
       # Row 0 (Jan 1): event_a=1, event_b=0
       # Row 1 (Jan 2): event_a=0, event_b=0
       # Row 2 (Jan 3): event_a=0, event_b=1
-      expected = Nx.tensor([
-        [1.0, 0.0],
-        [0.0, 0.0],
-        [0.0, 1.0]
-      ])
+      expected =
+        Nx.tensor([
+          [1.0, 0.0],
+          [0.0, 0.0],
+          [0.0, 1.0]
+        ])
+
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
 
     test "handles recurring events (same event on multiple dates)" do
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale", "sale"],
-        "ds" => [~D[2023-01-01], ~D[2023-01-03]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale", "sale"],
+          "ds" => [~D[2023-01-01], ~D[2023-01-03]]
+        })
 
       config = %{"sale" => %{lower_window: 0, upper_window: 0}}
 
@@ -157,10 +167,11 @@ defmodule Soothsayer.EventsTest do
       # Should create feature columns for: -2 (Jan 1), -1 (Jan 2), 0 (Jan 3)
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [~D[2023-01-03]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [~D[2023-01-03]]
+        })
 
       config = %{"sale" => %{lower_window: -2, upper_window: 0}}
 
@@ -172,12 +183,18 @@ defmodule Soothsayer.EventsTest do
       # Column 0 (sale_-2): 1.0 on Jan 1 (2 days before Jan 3)
       # Column 1 (sale_-1): 1.0 on Jan 2 (1 day before Jan 3)
       # Column 2 (sale_0):  1.0 on Jan 3 (event day)
-      expected = Nx.tensor([
-        [1.0, 0.0, 0.0],  # Jan 1: sale_-2
-        [0.0, 1.0, 0.0],  # Jan 2: sale_-1
-        [0.0, 0.0, 1.0],  # Jan 3: sale_0
-        [0.0, 0.0, 0.0]   # Jan 4: nothing
-      ])
+      expected =
+        Nx.tensor([
+          # Jan 1: sale_-2
+          [1.0, 0.0, 0.0],
+          # Jan 2: sale_-1
+          [0.0, 1.0, 0.0],
+          # Jan 3: sale_0
+          [0.0, 0.0, 1.0],
+          # Jan 4: nothing
+          [0.0, 0.0, 0.0]
+        ])
+
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
 
@@ -186,10 +203,11 @@ defmodule Soothsayer.EventsTest do
       # Should create feature columns for: 0 (Jan 1), +1 (Jan 2), +2 (Jan 3)
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [~D[2023-01-01]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [~D[2023-01-01]]
+        })
 
       config = %{"sale" => %{lower_window: 0, upper_window: 2}}
 
@@ -201,24 +219,38 @@ defmodule Soothsayer.EventsTest do
       # Column 0 (sale_0):  1.0 on Jan 1 (event day)
       # Column 1 (sale_+1): 1.0 on Jan 2 (1 day after Jan 1)
       # Column 2 (sale_+2): 1.0 on Jan 3 (2 days after Jan 1)
-      expected = Nx.tensor([
-        [1.0, 0.0, 0.0],  # Jan 1: sale_0
-        [0.0, 1.0, 0.0],  # Jan 2: sale_+1
-        [0.0, 0.0, 1.0],  # Jan 3: sale_+2
-        [0.0, 0.0, 0.0]   # Jan 4: nothing
-      ])
+      expected =
+        Nx.tensor([
+          # Jan 1: sale_0
+          [1.0, 0.0, 0.0],
+          # Jan 2: sale_+1
+          [0.0, 1.0, 0.0],
+          # Jan 3: sale_+2
+          [0.0, 0.0, 1.0],
+          # Jan 4: nothing
+          [0.0, 0.0, 0.0]
+        ])
+
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
 
     test "handles both lower and upper windows" do
       # Event on Jan 3, with lower_window: -1, upper_window: 1
       # Should create features for: -1 (Jan 2), 0 (Jan 3), +1 (Jan 4)
-      dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]])
+      dates =
+        Series.from_list([
+          ~D[2023-01-01],
+          ~D[2023-01-02],
+          ~D[2023-01-03],
+          ~D[2023-01-04],
+          ~D[2023-01-05]
+        ])
 
-      events_df = DataFrame.new(%{
-        "event" => ["sale"],
-        "ds" => [~D[2023-01-03]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["sale"],
+          "ds" => [~D[2023-01-03]]
+        })
 
       config = %{"sale" => %{lower_window: -1, upper_window: 1}}
 
@@ -227,13 +259,20 @@ defmodule Soothsayer.EventsTest do
       # Shape: {5 dates, 3 features: sale_-1, sale_0, sale_+1}
       assert Nx.shape(tensor) == {5, 3}
 
-      expected = Nx.tensor([
-        [0.0, 0.0, 0.0],  # Jan 1: nothing
-        [1.0, 0.0, 0.0],  # Jan 2: sale_-1 (1 day before event)
-        [0.0, 1.0, 0.0],  # Jan 3: sale_0 (event day)
-        [0.0, 0.0, 1.0],  # Jan 4: sale_+1 (1 day after event)
-        [0.0, 0.0, 0.0]   # Jan 5: nothing
-      ])
+      expected =
+        Nx.tensor([
+          # Jan 1: nothing
+          [0.0, 0.0, 0.0],
+          # Jan 2: sale_-1 (1 day before event)
+          [1.0, 0.0, 0.0],
+          # Jan 3: sale_0 (event day)
+          [0.0, 1.0, 0.0],
+          # Jan 4: sale_+1 (1 day after event)
+          [0.0, 0.0, 1.0],
+          # Jan 5: nothing
+          [0.0, 0.0, 0.0]
+        ])
+
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
 
@@ -241,10 +280,11 @@ defmodule Soothsayer.EventsTest do
       # event_a on Jan 2, event_b on Jan 3, both with window -1 to 0
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]])
 
-      events_df = DataFrame.new(%{
-        "event" => ["event_a", "event_b"],
-        "ds" => [~D[2023-01-02], ~D[2023-01-03]]
-      })
+      events_df =
+        DataFrame.new(%{
+          "event" => ["event_a", "event_b"],
+          "ds" => [~D[2023-01-02], ~D[2023-01-03]]
+        })
 
       config = %{
         "event_a" => %{lower_window: -1, upper_window: 0},
@@ -257,12 +297,18 @@ defmodule Soothsayer.EventsTest do
       assert Nx.shape(tensor) == {4, 4}
 
       # Columns sorted by event name, then window position
-      expected = Nx.tensor([
-        [1.0, 0.0, 0.0, 0.0],  # Jan 1: event_a_-1
-        [0.0, 1.0, 1.0, 0.0],  # Jan 2: event_a_0, event_b_-1
-        [0.0, 0.0, 0.0, 1.0],  # Jan 3: event_b_0
-        [0.0, 0.0, 0.0, 0.0]   # Jan 4: nothing
-      ])
+      expected =
+        Nx.tensor([
+          # Jan 1: event_a_-1
+          [1.0, 0.0, 0.0, 0.0],
+          # Jan 2: event_a_0, event_b_-1
+          [0.0, 1.0, 1.0, 0.0],
+          # Jan 3: event_b_0
+          [0.0, 0.0, 0.0, 1.0],
+          # Jan 4: nothing
+          [0.0, 0.0, 0.0, 0.0]
+        ])
+
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
   end

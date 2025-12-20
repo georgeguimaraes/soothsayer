@@ -121,7 +121,9 @@ defmodule Soothsayer.AR do
       %{"ar_dense_out" => %{kernel: #Nx.Tensor<...>, bias: #Nx.Tensor<...>}}
 
   """
-  @spec get_weights(Soothsayer.Model.t()) :: %{String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}}
+  @spec get_weights(Soothsayer.Model.t()) :: %{
+          String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}
+        }
   def get_weights(%Soothsayer.Model{} = model) do
     unless model.config.ar.enabled do
       raise ArgumentError, "AR is not enabled on this model"

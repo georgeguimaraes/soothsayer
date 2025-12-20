@@ -70,6 +70,7 @@ defmodule Soothsayer.ChangepointsTest do
         "yearly" => Nx.broadcast(0.0, {1, 8}),
         "weekly" => Nx.broadcast(0.0, {1, 4})
       }
+
       params = init_fn.(input, Axon.ModelState.empty())
 
       assert Map.has_key?(params.data, "trend_dense")
@@ -92,9 +93,10 @@ defmodule Soothsayer.ChangepointsTest do
       # Check that indices are evenly spaced
       [first | _rest] = result
       spacing = Enum.at(result, 1) - first
+
       assert Enum.all?(Enum.chunk_every(result, 2, 1, :discard), fn [a, b] ->
-        b - a == spacing
-      end)
+               b - a == spacing
+             end)
     end
 
     test "respects changepoints_range parameter" do
@@ -168,13 +170,15 @@ defmodule Soothsayer.ChangepointsTest do
       assert Nx.shape(result) == {5, 2}
       # Column 0: max(0, t-1.5) = [0, 0.5, 1.5, 2.5, 3.5]
       # Column 1: max(0, t-3.5) = [0, 0, 0, 0.5, 1.5]
-      expected = Nx.tensor([
-        [0.0, 0.0],
-        [0.5, 0.0],
-        [1.5, 0.0],
-        [2.5, 0.5],
-        [3.5, 1.5]
-      ])
+      expected =
+        Nx.tensor([
+          [0.0, 0.0],
+          [0.5, 0.0],
+          [1.5, 0.0],
+          [2.5, 0.5],
+          [3.5, 1.5]
+        ])
+
       assert Nx.to_flat_list(result) == Nx.to_flat_list(expected)
     end
   end
@@ -196,11 +200,14 @@ defmodule Soothsayer.ChangepointsTest do
       result = Changepoints.build_trend_input(t, changepoint_features)
 
       assert Nx.shape(result) == {3, 3}
-      expected = Nx.tensor([
-        [1.0, 0.0, 0.0],
-        [2.0, 0.5, 0.0],
-        [3.0, 1.5, 0.5]
-      ])
+
+      expected =
+        Nx.tensor([
+          [1.0, 0.0, 0.0],
+          [2.0, 0.5, 0.0],
+          [3.0, 1.5, 0.5]
+        ])
+
       assert Nx.to_flat_list(result) == Nx.to_flat_list(expected)
     end
   end
@@ -250,11 +257,12 @@ defmodule Soothsayer.ChangepointsTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y_values})
 
-      model = Soothsayer.new(%{
-        trend: %{n_changepoints: 5, changepoints_range: 0.8},
-        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-        epochs: 2
-      })
+      model =
+        Soothsayer.new(%{
+          trend: %{n_changepoints: 5, changepoints_range: 0.8},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 2
+        })
 
       fitted_model = Soothsayer.fit(model, df)
 
@@ -272,18 +280,20 @@ defmodule Soothsayer.ChangepointsTest do
       start_date = ~D[2023-01-01]
       dates = Enum.map(0..(n_points - 1), fn i -> Date.add(start_date, i) end)
       # Generate data with a trend that changes slope
-      y_values = Enum.map(0..(n_points - 1), fn i ->
-        base = if i < 50, do: i * 1.0, else: 50.0 + (i - 50) * 2.0
-        base + :rand.normal(0, 2)
-      end)
+      y_values =
+        Enum.map(0..(n_points - 1), fn i ->
+          base = if i < 50, do: i * 1.0, else: 50.0 + (i - 50) * 2.0
+          base + :rand.normal(0, 2)
+        end)
 
       df = DataFrame.new(%{"ds" => dates, "y" => y_values})
 
-      model = Soothsayer.new(%{
-        trend: %{n_changepoints: 5, changepoints_range: 0.8},
-        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-        epochs: 5
-      })
+      model =
+        Soothsayer.new(%{
+          trend: %{n_changepoints: 5, changepoints_range: 0.8},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 5
+        })
 
       fitted_model = Soothsayer.fit(model, df)
 
@@ -307,11 +317,12 @@ defmodule Soothsayer.ChangepointsTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y_values})
 
-      model = Soothsayer.new(%{
-        trend: %{n_changepoints: 0},
-        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-        epochs: 2
-      })
+      model =
+        Soothsayer.new(%{
+          trend: %{n_changepoints: 0},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 2
+        })
 
       fitted_model = Soothsayer.fit(model, df)
 
@@ -335,11 +346,12 @@ defmodule Soothsayer.ChangepointsTest do
 
       df = DataFrame.new(%{"ds" => dates, "y" => y_values})
 
-      model = Soothsayer.new(%{
-        trend: %{n_changepoints: 3},
-        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-        epochs: 2
-      })
+      model =
+        Soothsayer.new(%{
+          trend: %{n_changepoints: 3},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 2
+        })
 
       fitted_model = Soothsayer.fit(model, df)
 

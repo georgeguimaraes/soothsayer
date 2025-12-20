@@ -26,6 +26,7 @@ defmodule Soothsayer.ARModuleTest do
         dates: [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]],
         y_normalized: [1.0, 2.0, 3.0, 4.0, 5.0]
       }
+
       n_lags = 2
       prediction_dates = [~D[2023-01-04], ~D[2023-01-05]]
 
@@ -42,6 +43,7 @@ defmodule Soothsayer.ARModuleTest do
         dates: [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]],
         y_normalized: [1.0, 2.0, 3.0]
       }
+
       n_lags = 2
       prediction_dates = [~D[2023-01-01], ~D[2023-01-02]]
 

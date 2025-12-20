@@ -62,13 +62,16 @@ defmodule Soothsayer.Events do
   def feature_names(events_config) do
     events_config
     |> Enum.sort_by(fn {name, _} -> name end)
-    |> Enum.flat_map(fn {name, %{lower_window: lower, upper_window: upper}} ->
-      lower..upper
-      |> Enum.map(fn offset ->
-        offset_str = if offset > 0, do: "+#{offset}", else: "#{offset}"
-        "#{name}_#{offset_str}"
-      end)
-    end)
+    |> Enum.flat_map(&feature_names_for_event/1)
+  end
+
+  defp feature_names_for_event({name, %{lower_window: lower, upper_window: upper}}) do
+    Enum.map(lower..upper, fn offset -> format_feature_name(name, offset) end)
+  end
+
+  defp format_feature_name(name, offset) do
+    offset_str = if offset > 0, do: "+#{offset}", else: "#{offset}"
+    "#{name}_#{offset_str}"
   end
 
   @doc """

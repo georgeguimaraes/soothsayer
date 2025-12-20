@@ -33,7 +33,8 @@ defmodule Soothsayer.MixProject do
       {:axon, "~> 0.8.0"},
       {:exla, "~> 0.10.0"},
       {:ex_doc, ">= 0.0.0", only: :docs},
-      {:dialyxir, "~> 1.0", only: [:dev], runtime: false}
+      {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 

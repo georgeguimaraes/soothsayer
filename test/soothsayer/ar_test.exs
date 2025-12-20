@@ -125,8 +125,16 @@ defmodule Soothsayer.ARTest do
         "trend" => Nx.tensor([[1.0], [2.0], [3.0], [4.0], [5.0]]),
         "yearly" => Nx.broadcast(0.0, {5, 8}),
         "weekly" => Nx.broadcast(0.0, {5, 4}),
-        "ar" => Nx.tensor([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0], [3.0, 4.0, 5.0], [4.0, 5.0, 6.0], [5.0, 6.0, 7.0]])
+        "ar" =>
+          Nx.tensor([
+            [1.0, 2.0, 3.0],
+            [2.0, 3.0, 4.0],
+            [3.0, 4.0, 5.0],
+            [4.0, 5.0, 6.0],
+            [5.0, 6.0, 7.0]
+          ])
       }
+
       target = Nx.tensor([[4.0], [5.0], [6.0], [7.0], [8.0]])
 
       # Build network and get initial params
@@ -162,7 +170,7 @@ defmodule Soothsayer.ARTest do
 
       # With L1 regularization, weights should be pushed toward zero
       assert l1_norm_reg < l1_norm_no_reg,
-        "L1 regularization should reduce weight magnitudes. Got reg: #{l1_norm_reg}, no_reg: #{l1_norm_no_reg}"
+             "L1 regularization should reduce weight magnitudes. Got reg: #{l1_norm_reg}, no_reg: #{l1_norm_no_reg}"
     end
   end
 

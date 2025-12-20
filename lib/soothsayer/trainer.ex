@@ -32,7 +32,7 @@ defmodule Soothsayer.Trainer do
 
   """
   @spec fit(Axon.t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer(), map()) ::
-          %Axon.ModelState{}
+          Axon.ModelState.t(any(), any())
   def fit(network, x, y, epochs, config) do
     {init_fn, _predict_fn} = Axon.build(network)
     initial_params = init_fn.(x, Axon.ModelState.empty())
@@ -66,7 +66,7 @@ defmodule Soothsayer.Trainer do
       #Nx.Tensor<f32 6.0>
 
   """
-  @spec compute_l1_penalty(%Axon.ModelState{}, list(String.t())) :: Nx.Tensor.t()
+  @spec compute_l1_penalty(Axon.ModelState.t(any(), any()), list(String.t())) :: Nx.Tensor.t()
   def compute_l1_penalty(params, layer_names) do
     if Enum.empty?(layer_names) do
       Nx.tensor(0.0)
@@ -160,14 +160,24 @@ defmodule Soothsayer.Trainer do
 
   defp build_train_step_fn(objective_fn, update_fn) do
     fn params, opt_state, x_input, y_target ->
-      {loss, grads} = Nx.Defn.value_and_grad(params, fn p -> objective_fn.(p, x_input, y_target) end)
+      {loss, grads} =
+        Nx.Defn.value_and_grad(params, fn p -> objective_fn.(p, x_input, y_target) end)
+
       {updates, new_opt_state} = update_fn.(grads, opt_state, params)
       new_params = Polaris.Updates.apply_updates(params, updates)
       {loss, new_params, new_opt_state}
     end
   end
 
-  defp run_training_loop(epochs, iterations, initial_params, initial_opt_state, x, y, jit_train_step) do
+  defp run_training_loop(
+         epochs,
+         iterations,
+         initial_params,
+         initial_opt_state,
+         x,
+         y,
+         jit_train_step
+       ) do
     log_interval = max(div(epochs, 10), 1)
 
     {final_params, _final_opt_state} =

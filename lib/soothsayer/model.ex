@@ -65,76 +65,71 @@ defmodule Soothsayer.Model do
     yearly_input = Axon.input("yearly", shape: {nil, 2 * config.seasonality.yearly.fourier_terms})
     weekly_input = Axon.input("weekly", shape: {nil, 2 * config.seasonality.weekly.fourier_terms})
 
-    trend =
-      if config.trend.enabled do
-        Axon.dense(trend_input, 1, activation: :linear, name: "trend_dense")
-      else
-        Axon.constant(0)
-      end
+    trend = build_trend_component(trend_input, config.trend.enabled)
 
     yearly_seasonality =
-      if config.seasonality.yearly.enabled do
-        Axon.dense(yearly_input, 1, activation: :linear)
-      else
-        Axon.constant(0)
-      end
+      build_seasonality_component(yearly_input, config.seasonality.yearly.enabled)
 
     weekly_seasonality =
-      if config.seasonality.weekly.enabled do
-        Axon.dense(weekly_input, 1, activation: :linear)
-      else
-        Axon.constant(0)
-      end
+      build_seasonality_component(weekly_input, config.seasonality.weekly.enabled)
 
-    {ar_component, _ar_input} =
-      if config[:ar][:enabled] do
-        ar_input = Axon.input("ar", shape: {nil, config.ar.n_lags})
-        ar_layers = Map.get(config.ar, :layers, [])
+    ar_component = build_ar_component(config)
+    events_component = build_events_component(config[:events] || %{})
 
-        ar =
-          case ar_layers do
-            [] ->
-              # Linear AR (current behavior)
-              Axon.dense(ar_input, 1, activation: :linear, name: "ar_dense_out")
+    combined =
+      Axon.add([trend, yearly_seasonality, weekly_seasonality, ar_component, events_component])
 
-            layers ->
-              # Deep AR-Net with hidden layers
-              {hidden, _idx} =
-                Enum.reduce(layers, {ar_input, 0}, fn units, {acc, idx} ->
-                  {Axon.dense(acc, units, activation: :relu, name: "ar_dense_#{idx}"), idx + 1}
-                end)
-
-              Axon.dense(hidden, 1, activation: :linear, name: "ar_dense_out")
-          end
-
-        {ar, ar_input}
-      else
-        {Axon.constant(0), nil}
-      end
-
-    events_config = config[:events] || %{}
-
-    events_component =
-      if map_size(events_config) > 0 do
-        n_event_features = Events.n_features(events_config)
-        events_input = Axon.input("events", shape: {nil, n_event_features})
-        Axon.dense(events_input, 1, activation: :linear, name: "events_dense")
-      else
-        Axon.constant(0)
-      end
-
-    combined = Axon.add([trend, yearly_seasonality, weekly_seasonality, ar_component, events_component])
-
-    container = %{
+    Axon.container(%{
       combined: combined,
       trend: trend,
       yearly_seasonality: yearly_seasonality,
       weekly_seasonality: weekly_seasonality,
       ar: ar_component,
       events: events_component
-    }
+    })
+  end
 
-    Axon.container(container)
+  defp build_trend_component(input, true),
+    do: Axon.dense(input, 1, activation: :linear, name: "trend_dense")
+
+  defp build_trend_component(_input, false), do: Axon.constant(0)
+
+  defp build_seasonality_component(input, true), do: Axon.dense(input, 1, activation: :linear)
+  defp build_seasonality_component(_input, false), do: Axon.constant(0)
+
+  defp build_ar_component(%{ar: %{enabled: true, n_lags: n_lags} = ar_config}) do
+    ar_input = Axon.input("ar", shape: {nil, n_lags})
+    ar_layers = Map.get(ar_config, :layers, [])
+    build_ar_network(ar_input, ar_layers)
+  end
+
+  defp build_ar_component(_config), do: Axon.constant(0)
+
+  defp build_ar_network(input, []) do
+    Axon.dense(input, 1, activation: :linear, name: "ar_dense_out")
+  end
+
+  defp build_ar_network(input, layers) do
+    hidden = build_ar_hidden_layers(input, layers)
+    Axon.dense(hidden, 1, activation: :linear, name: "ar_dense_out")
+  end
+
+  defp build_ar_hidden_layers(input, layers) do
+    {hidden, _idx} =
+      Enum.reduce(layers, {input, 0}, fn units, {acc, idx} ->
+        {Axon.dense(acc, units, activation: :relu, name: "ar_dense_#{idx}"), idx + 1}
+      end)
+
+    hidden
+  end
+
+  defp build_events_component(events_config) when map_size(events_config) == 0,
+    do: Axon.constant(0)
+
+  defp build_events_component(events_config) do
+    n_event_features = Events.n_features(events_config)
+    events_input = Axon.input("events", shape: {nil, n_event_features})
+    Axon.dense(events_input, 1, activation: :linear, name: "events_dense")
   end
 
   @doc """
