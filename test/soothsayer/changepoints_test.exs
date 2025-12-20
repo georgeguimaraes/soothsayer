@@ -1,7 +1,7 @@
 defmodule Soothsayer.ChangepointsTest do
   use ExUnit.Case, async: true
 
-  alias Soothsayer.Changepoints
+  alias Soothsayer.Trend
 
   describe "config defaults" do
     test "new/1 includes trend changepoint config with defaults" do
@@ -79,14 +79,14 @@ defmodule Soothsayer.ChangepointsTest do
 
   describe "compute_changepoint_indices/3" do
     test "returns empty list when n_changepoints is 0" do
-      result = Changepoints.compute_changepoint_indices(100, 0, 0.8)
+      result = Trend.compute_changepoint_indices(100, 0, 0.8)
       assert result == []
     end
 
     test "returns evenly spaced indices in the first portion of data" do
       # 100 samples, 5 changepoints, 80% range = first 80 samples
       # Changepoints at: 16, 32, 48, 64, 80 (evenly spaced)
-      result = Changepoints.compute_changepoint_indices(100, 5, 0.8)
+      result = Trend.compute_changepoint_indices(100, 5, 0.8)
 
       assert length(result) == 5
       assert Enum.all?(result, fn idx -> idx >= 0 and idx <= 80 end)
@@ -101,14 +101,14 @@ defmodule Soothsayer.ChangepointsTest do
 
     test "respects changepoints_range parameter" do
       # 100 samples, 5 changepoints, 50% range = first 50 samples
-      result = Changepoints.compute_changepoint_indices(100, 5, 0.5)
+      result = Trend.compute_changepoint_indices(100, 5, 0.5)
 
       assert length(result) == 5
       assert Enum.all?(result, fn idx -> idx >= 0 and idx <= 50 end)
     end
 
     test "handles edge case with few samples" do
-      result = Changepoints.compute_changepoint_indices(10, 3, 0.8)
+      result = Trend.compute_changepoint_indices(10, 3, 0.8)
 
       assert length(result) == 3
       assert Enum.all?(result, fn idx -> idx >= 0 and idx <= 8 end)
@@ -119,7 +119,7 @@ defmodule Soothsayer.ChangepointsTest do
     test "returns dates at computed indices" do
       dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)
 
-      result = Changepoints.compute_changepoint_positions(dates, 5, 0.8)
+      result = Trend.compute_changepoint_positions(dates, 5, 0.8)
 
       assert length(result) == 5
       assert Enum.all?(result, fn date -> date in dates end)
@@ -130,7 +130,7 @@ defmodule Soothsayer.ChangepointsTest do
     test "returns empty list when n_changepoints is 0" do
       dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)
 
-      result = Changepoints.compute_changepoint_positions(dates, 0, 0.8)
+      result = Trend.compute_changepoint_positions(dates, 0, 0.8)
 
       assert result == []
     end
@@ -140,7 +140,7 @@ defmodule Soothsayer.ChangepointsTest do
     test "returns nil when no changepoint positions" do
       t = Nx.tensor([[1.0], [2.0], [3.0]])
 
-      result = Changepoints.build_changepoint_features(t, [])
+      result = Trend.build_changepoint_features(t, [])
 
       assert result == nil
     end
@@ -152,7 +152,7 @@ defmodule Soothsayer.ChangepointsTest do
       t = Nx.tensor([[1.0], [2.0], [3.0], [4.0], [5.0]])
       changepoint_positions = [2.5]
 
-      result = Changepoints.build_changepoint_features(t, changepoint_positions)
+      result = Trend.build_changepoint_features(t, changepoint_positions)
 
       assert Nx.shape(result) == {5, 1}
       expected = Nx.tensor([[0.0], [0.0], [0.5], [1.5], [2.5]])
@@ -165,7 +165,7 @@ defmodule Soothsayer.ChangepointsTest do
       t = Nx.tensor([[1.0], [2.0], [3.0], [4.0], [5.0]])
       changepoint_positions = [1.5, 3.5]
 
-      result = Changepoints.build_changepoint_features(t, changepoint_positions)
+      result = Trend.build_changepoint_features(t, changepoint_positions)
 
       assert Nx.shape(result) == {5, 2}
       # Column 0: max(0, t-1.5) = [0, 0.5, 1.5, 2.5, 3.5]
@@ -187,7 +187,7 @@ defmodule Soothsayer.ChangepointsTest do
     test "returns t when no changepoints" do
       t = Nx.tensor([[1.0], [2.0], [3.0]])
 
-      result = Changepoints.build_trend_input(t, nil)
+      result = Trend.build_trend_input(t, nil)
 
       assert Nx.shape(result) == {3, 1}
       assert Nx.to_flat_list(result) == Nx.to_flat_list(t)
@@ -197,7 +197,7 @@ defmodule Soothsayer.ChangepointsTest do
       t = Nx.tensor([[1.0], [2.0], [3.0]])
       changepoint_features = Nx.tensor([[0.0, 0.0], [0.5, 0.0], [1.5, 0.5]])
 
-      result = Changepoints.build_trend_input(t, changepoint_features)
+      result = Trend.build_trend_input(t, changepoint_features)
 
       assert Nx.shape(result) == {3, 3}
 
@@ -217,7 +217,7 @@ defmodule Soothsayer.ChangepointsTest do
       dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
       first_date = ~D[2023-01-01]
 
-      result = Changepoints.date_to_numeric(dates, first_date)
+      result = Trend.date_to_numeric(dates, first_date)
 
       assert Nx.to_flat_list(result) == [0.0, 1.0, 2.0]
     end
@@ -226,7 +226,7 @@ defmodule Soothsayer.ChangepointsTest do
       dates = [~D[2023-01-01]]
       first_date = ~D[2023-01-01]
 
-      result = Changepoints.date_to_numeric(dates, first_date)
+      result = Trend.date_to_numeric(dates, first_date)
 
       assert Nx.to_flat_list(result) == [0.0]
     end
@@ -237,7 +237,7 @@ defmodule Soothsayer.ChangepointsTest do
       numeric = [0.0, 1.0, 2.0]
       first_date = ~D[2023-01-01]
 
-      result = Changepoints.numeric_to_date(numeric, first_date)
+      result = Trend.numeric_to_date(numeric, first_date)
 
       assert result == [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
     end

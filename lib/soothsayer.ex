@@ -6,10 +6,10 @@ defmodule Soothsayer do
   alias Explorer.DataFrame
   alias Explorer.Series
   alias Soothsayer.AR
-  alias Soothsayer.Changepoints
   alias Soothsayer.Events
   alias Soothsayer.Model
-  alias Soothsayer.Preprocessor
+  alias Soothsayer.Seasonality
+  alias Soothsayer.Trend
 
   @doc """
   Creates a new Soothsayer model with the given configuration.
@@ -83,7 +83,9 @@ defmodule Soothsayer do
   def fit(%Model{} = model, %DataFrame{} = data, opts \\ []) do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
-    processed_data = Preprocessor.prepare_data(data, "y", "ds", model.config.seasonality)
+    processed_data = Seasonality.add_fourier_features(data, "ds", model.config.seasonality)
+    # Reorder columns to put y first
+    processed_data = DataFrame.select(processed_data, ["y" | processed_data.names -- ["y"]])
 
     y_full = processed_data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32})
     {y_full_normalized, y_mean, y_std} = normalize(Nx.new_axis(y_full, -1))
@@ -110,14 +112,14 @@ defmodule Soothsayer do
       compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range)
 
     # Build base time values tensor (days since first date)
-    t_full = Changepoints.date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
+    t_full = Trend.date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
 
     # Build changepoint features
     changepoint_features_full =
-      Changepoints.build_changepoint_features(t_full, changepoint_positions)
+      Trend.build_changepoint_features(t_full, changepoint_positions)
 
     # Build trend input with changepoint features
-    trend_full = Changepoints.build_trend_input(t_full, changepoint_features_full)
+    trend_full = Trend.build_trend_input(t_full, changepoint_features_full)
 
     yearly_full =
       get_seasonality_input(
@@ -212,7 +214,7 @@ defmodule Soothsayer do
          changepoints_range
        ) do
     changepoint_dates =
-      Changepoints.compute_changepoint_positions(dates, n_changepoints, changepoints_range)
+      Trend.compute_changepoint_positions(dates, n_changepoints, changepoints_range)
 
     Enum.map(changepoint_dates, fn date -> Date.diff(date, first_date) * 1.0 end)
   end
@@ -289,16 +291,16 @@ defmodule Soothsayer do
     events_df = Keyword.get(opts, :events)
 
     processed_x =
-      Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", model.config.seasonality)
+      Seasonality.add_fourier_features(DataFrame.new(%{"ds" => x}), "ds", model.config.seasonality)
 
     # Build trend input with changepoint features using stored positions
     prediction_dates = Series.to_list(x)
     first_date = model.config.first_date
     changepoint_positions = model.config.changepoint_positions
 
-    t = Changepoints.date_to_numeric(prediction_dates, first_date) |> Nx.new_axis(-1)
-    changepoint_features = Changepoints.build_changepoint_features(t, changepoint_positions)
-    trend_input = Changepoints.build_trend_input(t, changepoint_features)
+    t = Trend.date_to_numeric(prediction_dates, first_date) |> Nx.new_axis(-1)
+    changepoint_features = Trend.build_changepoint_features(t, changepoint_positions)
+    trend_input = Trend.build_trend_input(t, changepoint_features)
 
     x_input = %{
       "trend" => trend_input,
