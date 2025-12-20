@@ -4,7 +4,7 @@ A progressive guide to time series forecasting with Soothsayer. We'll start with
 
 ```elixir
 Mix.install([
-  {:soothsayer, path: "~/code/soothsayer"},
+  {:soothsayer, ">= 0.0.0"},
   {:explorer, ">= 0.0.0"},
   {:vega_lite, ">= 0.0.0"},
   {:kino_vega_lite, ">= 0.0.0"},
