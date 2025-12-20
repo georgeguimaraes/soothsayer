@@ -7,7 +7,7 @@ defmodule Soothsayer.ARTest do
 
   describe "build_network_input/1" do
     test "returns nil when AR is disabled" do
-      config = %{ar: %{enabled: false, n_lags: 0}}
+      config = %{ar: %{enabled: false, lags: 0}}
       assert AR.build_network_input(config) == nil
     end
 
@@ -17,7 +17,7 @@ defmodule Soothsayer.ARTest do
     end
 
     test "returns Axon input with correct shape when enabled" do
-      config = %{ar: %{enabled: true, n_lags: 5}}
+      config = %{ar: %{enabled: true, lags: 5}}
       input = AR.build_network_input(config)
 
       assert Axon.get_inputs(input)["ar"] == {nil, 5}
@@ -26,7 +26,7 @@ defmodule Soothsayer.ARTest do
 
   describe "build_component/2" do
     test "returns constant 0 when AR is disabled" do
-      config = %{ar: %{enabled: false, n_lags: 0}}
+      config = %{ar: %{enabled: false, lags: 0}}
       input = Axon.input("ar", shape: {nil, 3})
 
       component = AR.build_component(input, config)
@@ -39,7 +39,7 @@ defmodule Soothsayer.ARTest do
     end
 
     test "returns linear AR when enabled with no hidden layers" do
-      config = %{ar: %{enabled: true, n_lags: 3, layers: []}}
+      config = %{ar: %{enabled: true, lags: 3, layers: []}}
       input = Axon.input("ar", shape: {nil, 3})
 
       component = AR.build_component(input, config)
@@ -53,7 +53,7 @@ defmodule Soothsayer.ARTest do
     end
 
     test "returns deep AR-Net when enabled with hidden layers" do
-      config = %{ar: %{enabled: true, n_lags: 5, layers: [32, 16]}}
+      config = %{ar: %{enabled: true, lags: 5, layers: [32, 16]}}
       input = Axon.input("ar", shape: {nil, 5})
 
       component = AR.build_component(input, config)
@@ -78,7 +78,7 @@ defmodule Soothsayer.ARTest do
       model = Soothsayer.new()
 
       assert model.config.ar.enabled == false
-      assert model.config.ar.n_lags == 0
+      assert model.config.ar.lags == 0
       assert model.config.ar.layers == []
       assert model.config.ar.regularization == nil
     end
@@ -87,11 +87,11 @@ defmodule Soothsayer.ARTest do
   describe "lagged input preparation" do
     test "create_lagged_inputs/2 creates sliding windows from y values" do
       y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
-      n_lags = 3
+      lags = 3
 
-      {lagged, targets} = AR.create_lagged_inputs(y, n_lags)
+      {lagged, targets} = AR.create_lagged_inputs(y, lags)
 
-      # With n_lags=3 and 5 values, we get 2 windows:
+      # With lags=3 and 5 values, we get 2 windows:
       # Window 1: [1, 2, 3] -> target: 4
       # Window 2: [2, 3, 4] -> target: 5
       expected_lagged = Nx.tensor([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]])
@@ -112,7 +112,7 @@ defmodule Soothsayer.ARTest do
           yearly: %{enabled: true, fourier_terms: 4},
           weekly: %{enabled: true, fourier_terms: 2}
         },
-        ar: %{enabled: true, n_lags: 5}
+        ar: %{enabled: true, lags: 5}
       }
 
       network = Soothsayer.Model.build_network(config)
@@ -128,7 +128,7 @@ defmodule Soothsayer.ARTest do
           yearly: %{enabled: true, fourier_terms: 4},
           weekly: %{enabled: true, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       network = Soothsayer.Model.build_network(config)
@@ -144,7 +144,7 @@ defmodule Soothsayer.ARTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: true, n_lags: 5, layers: [32, 16]}
+        ar: %{enabled: true, lags: 5, layers: [32, 16]}
       }
 
       network = Soothsayer.Model.build_network(config)
@@ -185,7 +185,7 @@ defmodule Soothsayer.ARTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: true, n_lags: 3, layers: [], regularization: nil}
+        ar: %{enabled: true, lags: 3, layers: [], regularization: nil}
       }
 
       # Create training data
@@ -270,7 +270,7 @@ defmodule Soothsayer.ARTest do
             yearly: %{enabled: false},
             weekly: %{enabled: false}
           },
-          ar: %{enabled: true, n_lags: 5, layers: [16, 8]},
+          ar: %{enabled: true, lags: 5, layers: [16, 8]},
           epochs: 5
         })
 
@@ -316,7 +316,7 @@ defmodule Soothsayer.ARTest do
             yearly: %{enabled: false},
             weekly: %{enabled: false}
           },
-          ar: %{enabled: true, n_lags: 3},
+          ar: %{enabled: true, lags: 3},
           epochs: 5
         })
 
@@ -351,7 +351,7 @@ defmodule Soothsayer.ARTest do
         Soothsayer.new(%{
           trend: %{enabled: false},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-          ar: %{enabled: true, n_lags: 3},
+          ar: %{enabled: true, lags: 3},
           epochs: 2
         })
 
@@ -362,7 +362,7 @@ defmodule Soothsayer.ARTest do
       assert Map.has_key?(weights, "ar_dense_out")
       assert map_size(weights) == 1
 
-      # Kernel should be {n_lags, 1}
+      # Kernel should be {lags, 1}
       assert Nx.shape(weights["ar_dense_out"].kernel) == {3, 1}
       assert Nx.shape(weights["ar_dense_out"].bias) == {1}
     end
@@ -381,7 +381,7 @@ defmodule Soothsayer.ARTest do
         Soothsayer.new(%{
           trend: %{enabled: false},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-          ar: %{enabled: true, n_lags: 5, layers: [16, 8]},
+          ar: %{enabled: true, lags: 5, layers: [16, 8]},
           epochs: 2
         })
 
@@ -408,7 +408,7 @@ defmodule Soothsayer.ARTest do
     end
 
     test "raises error when model is not fitted" do
-      model = Soothsayer.new(%{ar: %{enabled: true, n_lags: 3}})
+      model = Soothsayer.new(%{ar: %{enabled: true, lags: 3}})
 
       assert_raise ArgumentError, ~r/not been fitted/, fn ->
         Soothsayer.get_ar_weights(model)

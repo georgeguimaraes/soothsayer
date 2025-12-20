@@ -6,11 +6,11 @@ defmodule Soothsayer.ARModuleTest do
   describe "create_lagged_inputs/2" do
     test "creates sliding windows from y values" do
       y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
-      n_lags = 3
+      lags = 3
 
-      {lagged, targets} = AR.create_lagged_inputs(y, n_lags)
+      {lagged, targets} = AR.create_lagged_inputs(y, lags)
 
-      # With n_lags=3 and 5 values, we get 2 windows:
+      # With lags=3 and 5 values, we get 2 windows:
       # Window 1: [1, 2, 3] -> target: 4
       # Window 2: [2, 3, 4] -> target: 5
       assert Nx.shape(lagged) == {2, 3}
@@ -27,10 +27,10 @@ defmodule Soothsayer.ARModuleTest do
         y_normalized: [1.0, 2.0, 3.0, 4.0, 5.0]
       }
 
-      n_lags = 2
+      lags = 2
       prediction_dates = [~D[2023-01-04], ~D[2023-01-05]]
 
-      result = AR.build_input(training_data, prediction_dates, n_lags)
+      result = AR.build_input(training_data, prediction_dates, lags)
 
       # For date 2023-01-04 (idx 3), lags are [2.0, 3.0]
       # For date 2023-01-05 (idx 4), lags are [3.0, 4.0]
@@ -44,10 +44,10 @@ defmodule Soothsayer.ARModuleTest do
         y_normalized: [1.0, 2.0, 3.0]
       }
 
-      n_lags = 2
+      lags = 2
       prediction_dates = [~D[2023-01-01], ~D[2023-01-02]]
 
-      result = AR.build_input(training_data, prediction_dates, n_lags)
+      result = AR.build_input(training_data, prediction_dates, lags)
 
       # Both dates don't have enough history, should return zeros
       assert Nx.to_flat_list(result) == [0.0, 0.0, 0.0, 0.0]
@@ -69,7 +69,7 @@ defmodule Soothsayer.ARModuleTest do
         Soothsayer.new(%{
           trend: %{enabled: false, changepoints: 0},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-          ar: %{enabled: true, n_lags: 3},
+          ar: %{enabled: true, lags: 3},
           epochs: 2
         })
 
@@ -96,7 +96,7 @@ defmodule Soothsayer.ARModuleTest do
         Soothsayer.new(%{
           trend: %{enabled: false, changepoints: 0},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-          ar: %{enabled: true, n_lags: 5, layers: [16, 8]},
+          ar: %{enabled: true, lags: 5, layers: [16, 8]},
           epochs: 2
         })
 
@@ -120,7 +120,7 @@ defmodule Soothsayer.ARModuleTest do
     end
 
     test "raises error when model is not fitted" do
-      model = Soothsayer.new(%{ar: %{enabled: true, n_lags: 3}})
+      model = Soothsayer.new(%{ar: %{enabled: true, lags: 3}})
 
       assert_raise ArgumentError, ~r/not been fitted/, fn ->
         AR.get_weights(model)

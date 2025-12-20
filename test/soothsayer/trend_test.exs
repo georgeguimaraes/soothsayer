@@ -79,7 +79,7 @@ defmodule Soothsayer.TrendTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       model = Soothsayer.Model.new(config)
@@ -110,7 +110,7 @@ defmodule Soothsayer.TrendTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       model = Soothsayer.Model.new(config)
@@ -127,7 +127,7 @@ defmodule Soothsayer.TrendTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       model = Soothsayer.Model.new(config)

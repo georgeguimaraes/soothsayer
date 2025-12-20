@@ -27,7 +27,7 @@ defmodule Soothsayer.ChangepointsTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       network = Soothsayer.Model.build_network(config)
@@ -43,7 +43,7 @@ defmodule Soothsayer.ChangepointsTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       network = Soothsayer.Model.build_network(config)
@@ -59,7 +59,7 @@ defmodule Soothsayer.ChangepointsTest do
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
         },
-        ar: %{enabled: false, n_lags: 0}
+        ar: %{enabled: false, lags: 0}
       }
 
       network = Soothsayer.Model.build_network(config)

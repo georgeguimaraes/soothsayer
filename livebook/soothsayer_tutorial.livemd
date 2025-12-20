@@ -311,7 +311,7 @@ pred_no_ar = Soothsayer.predict(fitted_no_ar, df_ar["ds"])
 model_with_ar = Soothsayer.new(%{
   trend: %{changepoints: 5},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-  ar: %{enabled: true, n_lags: 7},
+  ar: %{enabled: true, lags: 7},
   epochs: 30
 })
 
@@ -561,7 +561,7 @@ energy_model = Soothsayer.new(%{
     yearly: %{enabled: true, fourier_terms: 8},
     weekly: %{enabled: true, fourier_terms: 3}
   },
-  ar: %{enabled: true, n_lags: 7},
+  ar: %{enabled: true, lags: 7},
   epochs: 100
 })
 
@@ -669,7 +669,7 @@ Vl.new(width: 400, height: 300, title: "AR Lag Weights (Energy)")
 | **Changepoints** | Trend slope changes over time | `trend: %{changepoints: 10}` |
 | **Yearly seasonality** | Annual patterns | `seasonality: %{yearly: %{enabled: true}}` |
 | **Weekly seasonality** | Weekly patterns | `seasonality: %{weekly: %{enabled: true}}` |
-| **AR** | Values depend on recent history | `ar: %{enabled: true, n_lags: 7}` |
+| **AR** | Values depend on recent history | `ar: %{enabled: true, lags: 7}` |
 | **Events** | Holidays, promotions, special dates | `events: %{"sale" => %{lower_window: 0, upper_window: 0}}` |
 | **Regularization** | Prevent overfitting | `regularization: 0.1` |
 

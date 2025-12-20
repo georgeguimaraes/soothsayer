@@ -127,12 +127,12 @@ Captures dependencies on recent values. Enable this when today's value depends o
 Soothsayer.new(%{
   ar: %{
     enabled: true,
-    n_lags: 7           # use the last 7 values to predict the next one
+    lags: 7           # use the last 7 values to predict the next one
   }
 })
 ```
 
-**Choosing `n_lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
+**Choosing `lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
 
 #### Deep AR-Net
 
@@ -141,7 +141,7 @@ For non-linear autoregressive patterns, you can add hidden layers:
 ```elixir
 ar: %{
   enabled: true,
-  n_lags: 7,
+  lags: 7,
   layers: [32, 16]  # two hidden layers with ReLU activation
 }
 ```
@@ -155,12 +155,12 @@ L1 regularization pushes AR weights toward zero, which prevents overfitting when
 ```elixir
 ar: %{
   enabled: true,
-  n_lags: 14,
+  lags: 14,
   regularization: 0.1  # higher = more sparsity
 }
 ```
 
-This is useful when you're not sure how many lags to use. Set a higher `n_lags` than you think you need and let regularization prevent the model from overfitting to noise in distant lags.
+This is useful when you're not sure how many lags to use. Set a higher `lags` than you think you need and let regularization prevent the model from overfitting to noise in distant lags.
 
 ### Events
 
@@ -254,7 +254,7 @@ model = Soothsayer.new(%{
   },
   ar: %{
     enabled: true,
-    n_lags: 7,
+    lags: 7,
     regularization: 0.05
   },
   epochs: 150,

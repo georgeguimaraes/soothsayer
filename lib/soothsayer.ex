@@ -44,7 +44,7 @@ defmodule Soothsayer do
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3}
       },
-      ar: %{enabled: false, n_lags: 0, layers: [], regularization: nil},
+      ar: %{enabled: false, lags: 0, layers: [], regularization: nil},
       epochs: 100,
       learning_rate: 0.01
     }
@@ -92,11 +92,11 @@ defmodule Soothsayer do
     y_full_normalized = Nx.flatten(y_full_normalized)
 
     # Handle AR: create lagged inputs and truncate data
-    {y_normalized, ar_input, n_lags} =
-      if model.config.ar.enabled and model.config.ar.n_lags > 0 do
-        n_lags = model.config.ar.n_lags
-        {ar_lagged, ar_targets} = AR.create_lagged_inputs(y_full_normalized, n_lags)
-        {ar_targets, ar_lagged, n_lags}
+    {y_normalized, ar_input, lags} =
+      if model.config.ar.enabled and model.config.ar.lags > 0 do
+        lags = model.config.ar.lags
+        {ar_lagged, ar_targets} = AR.create_lagged_inputs(y_full_normalized, lags)
+        {ar_targets, ar_lagged, lags}
       else
         {Nx.new_axis(y_full_normalized, -1), nil, 0}
       end
@@ -106,19 +106,19 @@ defmodule Soothsayer do
     {trend_full, trend_metadata} = Trend.build_features(dates, model.config)
     seasonality = Seasonality.build_features(dates, model.config)
 
-    # Truncate inputs if AR is enabled (remove first n_lags rows)
+    # Truncate inputs if AR is enabled (remove first lags rows)
     {trend, yearly, weekly} =
-      if n_lags > 0 do
+      if lags > 0 do
         trend_cols = Nx.axis_size(trend_full, 1)
 
         {
-          Nx.slice(trend_full, [n_lags, 0], [Nx.axis_size(trend_full, 0) - n_lags, trend_cols]),
-          Nx.slice(seasonality.yearly, [n_lags, 0], [
-            Nx.axis_size(seasonality.yearly, 0) - n_lags,
+          Nx.slice(trend_full, [lags, 0], [Nx.axis_size(trend_full, 0) - lags, trend_cols]),
+          Nx.slice(seasonality.yearly, [lags, 0], [
+            Nx.axis_size(seasonality.yearly, 0) - lags,
             Nx.axis_size(seasonality.yearly, 1)
           ]),
-          Nx.slice(seasonality.weekly, [n_lags, 0], [
-            Nx.axis_size(seasonality.weekly, 0) - n_lags,
+          Nx.slice(seasonality.weekly, [lags, 0], [
+            Nx.axis_size(seasonality.weekly, 0) - lags,
             Nx.axis_size(seasonality.weekly, 1)
           ])
         }
@@ -141,8 +141,8 @@ defmodule Soothsayer do
 
     # Truncate dates for events if AR is enabled
     event_dates =
-      if n_lags > 0 do
-        Enum.drop(dates, n_lags)
+      if lags > 0 do
+        Enum.drop(dates, lags)
       else
         dates
       end
@@ -269,9 +269,9 @@ defmodule Soothsayer do
 
     # Add AR input if enabled
     x_input =
-      if model.config.ar.enabled and model.config.ar.n_lags > 0 do
+      if model.config.ar.enabled and model.config.ar.lags > 0 do
         ar_input =
-          AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.n_lags)
+          AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.lags)
 
         Map.put(x_input, "ar", ar_input)
       else
@@ -375,7 +375,7 @@ defmodule Soothsayer do
 
   ## Examples
 
-      iex> model = Soothsayer.new(%{ar: %{enabled: true, n_lags: 3}})
+      iex> model = Soothsayer.new(%{ar: %{enabled: true, lags: 3}})
       iex> fitted_model = Soothsayer.fit(model, data)
       iex> weights = Soothsayer.get_ar_weights(fitted_model)
       %{

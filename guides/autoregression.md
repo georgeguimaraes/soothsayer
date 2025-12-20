@@ -17,7 +17,7 @@ ar(t) = sum(w_i * y(t-i))
 ```
 
 Where:
-- `y(t-i)` = value at lag i (1 to n_lags)
+- `y(t-i)` = value at lag i (1 to lags)
 - `w_i` = learned weight for each lag
 
 For more details, see [NeuralProphet's Auto-Regression documentation](https://neuralprophet.com/html/autoregression.html).
@@ -28,7 +28,7 @@ For more details, see [NeuralProphet's Auto-Regression documentation](https://ne
 model = Soothsayer.new(%{
   ar: %{
     enabled: true,       # Enable AR component (default: false)
-    n_lags: 7,           # Number of lagged values to use
+    lags: 7,           # Number of lagged values to use
     layers: [],          # Hidden layers for deep AR-Net (default: [])
     regularization: nil  # L1 penalty on weights (default: nil)
   }
@@ -40,7 +40,7 @@ model = Soothsayer.new(%{
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enabled` | `false` | Enable/disable AR component |
-| `n_lags` | `0` | Number of lagged values to use |
+| `lags` | `0` | Number of lagged values to use |
 | `layers` | `[]` | Hidden layer sizes for deep AR-Net |
 | `regularization` | `nil` | L1 penalty to encourage sparsity |
 
@@ -50,7 +50,7 @@ For simple linear dependencies:
 
 ```elixir
 model = Soothsayer.new(%{
-  ar: %{enabled: true, n_lags: 7}
+  ar: %{enabled: true, lags: 7}
 })
 ```
 
@@ -64,7 +64,7 @@ For non-linear relationships, add hidden layers:
 model = Soothsayer.new(%{
   ar: %{
     enabled: true,
-    n_lags: 7,
+    lags: 7,
     layers: [32, 16]  # Two hidden layers with ReLU activation
   }
 })
@@ -75,11 +75,11 @@ Use deep AR-Net when:
 - You have enough data to train a deeper model
 - The relationship between past and future is complex
 
-## Choosing n_lags
+## Choosing lags
 
 Start with the natural cycle of your data:
 
-| Data Frequency | Suggested n_lags | Reason |
+| Data Frequency | Suggested lags | Reason |
 |----------------|------------------|--------|
 | Daily with weekly pattern | 7 | Captures full week |
 | Daily with monthly pattern | 30 | Captures full month |
@@ -121,7 +121,7 @@ model_no_ar = Soothsayer.new(%{
 model_with_ar = Soothsayer.new(%{
   trend: %{changepoints: 5},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-  ar: %{enabled: true, n_lags: 7},
+  ar: %{enabled: true, lags: 7},
   epochs: 30
 })
 
@@ -155,7 +155,7 @@ For models with hidden layers:
 
 ```elixir
 model = Soothsayer.new(%{
-  ar: %{enabled: true, n_lags: 7, layers: [32, 16]}
+  ar: %{enabled: true, lags: 7, layers: [32, 16]}
 })
 fitted = Soothsayer.fit(model, df)
 
@@ -175,7 +175,7 @@ When you're unsure how many lags matter, use regularization:
 model = Soothsayer.new(%{
   ar: %{
     enabled: true,
-    n_lags: 14,          # More lags than we likely need
+    lags: 14,          # More lags than we likely need
     regularization: 0.1  # L1 penalty
   }
 })
@@ -192,8 +192,8 @@ Regularization pushes unimportant lag weights toward zero, effectively selecting
 ## Data Considerations
 
 **Training Data:**
-- First `n_lags` observations are used to seed the AR model
-- Training targets start at observation `n_lags + 1`
+- First `lags` observations are used to seed the AR model
+- Training targets start at observation `lags + 1`
 - More lags = less effective training data
 
 **Prediction:**
@@ -206,7 +206,7 @@ The AR component adds an input branch to the network:
 
 ```elixir
 # Input shape
-ar_input_shape = {nil, n_lags}
+ar_input_shape = {nil, lags}
 
 # For linear AR: direct dense layer to output
 # For deep AR-Net: hidden layers -> dense output
