@@ -261,11 +261,11 @@ Nx.global_default_backend(EXLA.Backend)
 
 ## Full Configuration Example
 
-Here's a model configured for daily sales data with yearly seasonality and short-term momentum:
+Here's a model configured for daily sales data with yearly seasonality, short-term momentum, and holiday effects:
 
 ```elixir
 model = Soothsayer.new(%{
-  trend: %{enabled: true},
+  trend: %{enabled: true, changepoints: 10},
   seasonality: %{
     yearly: %{enabled: true, fourier_terms: 8},
     weekly: %{enabled: true, fourier_terms: 3}
@@ -274,6 +274,10 @@ model = Soothsayer.new(%{
     enabled: true,
     lags: 7,
     regularization: 0.05
+  },
+  events: %{
+    "black_friday" => %{lower_window: -1, upper_window: 1},
+    "christmas" => %{lower_window: -3, upper_window: 0}
   },
   epochs: 150,
   learning_rate: 0.01
