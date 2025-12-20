@@ -7,7 +7,7 @@ Soothsayer is an Elixir library for time series forecasting, inspired by [Facebo
 Soothsayer decomposes your time series into interpretable components and uses neural networks to learn the patterns. The model equation is:
 
 ```
-y(t) = trend(t) + seasonality(t) + ar(t)
+y(t) = trend(t) + seasonality(t) + ar(t) + events(t)
 ```
 
 Where:
