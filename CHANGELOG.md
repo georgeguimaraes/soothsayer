@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.4.1...v0.5.0) (2025-12-20)
+
+
+### Features
+
+* Add events and holidays support ([c4cecba](https://github.com/georgeguimaraes/soothsayer/commit/c4cecbafd0ab784d89a30c406dd2240d0f7fb1d7))
+
 ## [0.4.1](https://github.com/georgeguimaraes/soothsayer/compare/v0.4.0...v0.4.1) (2025-12-19)
 
 
