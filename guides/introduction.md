@@ -37,10 +37,15 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Weekly seasonality | Yes | Yes |
 | Auto-regression (AR) | Yes | Yes |
 | Deep AR-Net | Yes | Yes |
+| Events | Yes | Yes |
 | Lagged regressors | Planned | Yes |
 | Future regressors | Planned | Yes |
-| Events/Holidays | Yes | Yes |
-| Uncertainty quantification | Planned | Yes |
+| Country holidays | Planned | Yes |
+| Multiplicative events | Planned | Yes |
+| Event regularization | Planned | Yes |
+| Recurring events | Planned | Yes |
+| Uncertainty estimation | Planned | Yes |
+| Multiplicative seasonality | Planned | Yes |
 
 ## Quick Example
 
