@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.4.1...v0.5.0) (2025-12-20)
+
+
+### Features
+
+* Add display_network/1 for Axon.Display.as_graph compatibility ([1f9ead7](https://github.com/georgeguimaraes/soothsayer/commit/1f9ead7e6e4061b41dff639a3684fc03f111e34e))
+* Add events and holidays support ([c4cecba](https://github.com/georgeguimaraes/soothsayer/commit/c4cecbafd0ab784d89a30c406dd2240d0f7fb1d7))
+
 ## [0.4.1](https://github.com/georgeguimaraes/soothsayer/compare/v0.4.0...v0.4.1) (2025-12-19)
 
 
