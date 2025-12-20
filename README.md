@@ -2,7 +2,7 @@
 
 [![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fgeorgeguimaraes%2Fsoothsayer%2Fblob%2Fmain%2Flivebook%2Fsoothsayer_tutorial.livemd)
 
-Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It decomposes your time series into interpretable components (trend, seasonality, auto-regression) and uses neural networks to learn the patterns.
+Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It decomposes your time series into interpretable components (trend, seasonality, auto-regression, events) and uses neural networks to learn the patterns.
 
 **Warning:** Soothsayer is currently in alpha stage. The API is unstable and may change at any moment without prior notice. Use with caution in production environments.
 
@@ -46,6 +46,22 @@ You can also get individual components to understand what's driving the forecast
 ```elixir
 components = Soothsayer.predict_components(fitted_model, future_dates_series)
 # => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ..., events: ...}
+```
+
+To model special events like holidays or promotions:
+
+```elixir
+# Define events with optional windows (days before/after)
+model = Soothsayer.new(%{
+  events: %{"black_friday" => %{lower_window: -1, upper_window: 1}}
+})
+
+events_df = DataFrame.new(%{
+  "event" => ["black_friday", "black_friday"],
+  "ds" => [~D[2021-11-26], ~D[2022-11-25]]
+})
+
+fitted_model = Soothsayer.fit(model, df, events: events_df)
 ```
 
 Click the "Run in Livebook" badge above to try the interactive tutorial, or check the `livebook` directory for examples.

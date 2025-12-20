@@ -14,6 +14,7 @@ Where:
 - **trend(t)** captures long-term growth or decline
 - **seasonality(t)** captures repeating patterns (yearly, weekly)
 - **ar(t)** captures dependencies on recent values (auto-regression)
+- **events(t)** captures the impact of special occasions (holidays, promotions)
 
 Each component can be enabled or disabled depending on your data.
 
@@ -38,7 +39,7 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Deep AR-Net | Yes | Yes |
 | Lagged regressors | Planned | Yes |
 | Future regressors | Planned | Yes |
-| Events/Holidays | Planned | Yes |
+| Events/Holidays | Yes | Yes |
 | Uncertainty quantification | Planned | Yes |
 
 ## Quick Example
@@ -63,7 +64,7 @@ predictions = Soothsayer.predict(fitted_model, future_dates)
 
 # Get individual components
 components = Soothsayer.predict_components(fitted_model, future_dates)
-# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ...}
+# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ..., events: ...}
 ```
 
 ## Next Steps
@@ -72,6 +73,7 @@ components = Soothsayer.predict_components(fitted_model, future_dates)
 - [Trends](trends.md) - Piecewise linear trends with changepoint detection
 - [Seasonality](seasonality.md) - Yearly and weekly patterns with Fourier terms
 - [Auto-Regression](autoregression.md) - Capture dependencies on recent values
+- [Events](events.md) - Model holidays, promotions, and special occasions
 
 ## Resources
 
