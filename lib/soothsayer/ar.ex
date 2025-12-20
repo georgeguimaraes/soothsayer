@@ -2,8 +2,75 @@ defmodule Soothsayer.AR do
   @moduledoc """
   Auto-regression (AR) component functionality.
 
-  Handles creation of lagged inputs and extraction of AR weights from fitted models.
+  Handles network building, feature engineering, and weight extraction for AR models.
+  Supports both linear AR and deep AR-Net architectures with configurable hidden layers.
   """
+
+  # Network Building
+
+  @doc """
+  Creates the Axon input node for the AR component.
+
+  ## Parameters
+
+    * `config` - Model configuration map with `:ar` key.
+
+  ## Returns
+
+    An Axon input node when AR is enabled, `nil` otherwise.
+
+  """
+  @spec build_network_input(map()) :: Axon.t() | nil
+  def build_network_input(%{ar: %{enabled: true, n_lags: n_lags}}) do
+    Axon.input("ar", shape: {nil, n_lags})
+  end
+  def build_network_input(_config), do: nil
+
+  @doc """
+  Builds the AR component layer(s).
+
+  Supports both linear AR (single dense layer) and deep AR-Net (multiple hidden layers
+  with ReLU activation followed by linear output).
+
+  ## Parameters
+
+    * `input` - Axon input node from `build_network_input/1`.
+    * `config` - Model configuration map.
+
+  ## Returns
+
+    An Axon layer when AR is enabled, `Axon.constant(0)` otherwise.
+
+  """
+  @spec build_component(Axon.t() | nil, map()) :: Axon.t()
+  def build_component(nil, _config), do: Axon.constant(0)
+
+  def build_component(input, %{ar: %{enabled: true} = ar_config}) do
+    layers = Map.get(ar_config, :layers, [])
+    build_ar_network(input, layers)
+  end
+
+  def build_component(_input, _config), do: Axon.constant(0)
+
+  defp build_ar_network(input, []) do
+    Axon.dense(input, 1, activation: :linear, name: "ar_dense_out")
+  end
+
+  defp build_ar_network(input, layers) do
+    hidden = build_hidden_layers(input, layers)
+    Axon.dense(hidden, 1, activation: :linear, name: "ar_dense_out")
+  end
+
+  defp build_hidden_layers(input, layers) do
+    {hidden, _idx} =
+      Enum.reduce(layers, {input, 0}, fn units, {acc, idx} ->
+        {Axon.dense(acc, units, activation: :relu, name: "ar_dense_#{idx}"), idx + 1}
+      end)
+
+    hidden
+  end
+
+  # Feature Engineering
 
   @doc """
   Creates lagged input features and corresponding targets for AR training.

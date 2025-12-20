@@ -3,8 +3,11 @@ defmodule Soothsayer.Model do
   Defines the structure and operations for the Soothsayer forecasting model.
   """
 
+  alias Soothsayer.AR
   alias Soothsayer.Events
+  alias Soothsayer.Seasonality
   alias Soothsayer.Trainer
+  alias Soothsayer.Trend
 
   defstruct [:network, :params, :config]
 
@@ -60,76 +63,33 @@ defmodule Soothsayer.Model do
   """
   @spec build_network(map()) :: Axon.t()
   def build_network(config) do
-    n_changepoints = get_in(config, [:trend, :n_changepoints]) || 0
-    trend_input = Axon.input("trend", shape: {nil, 1 + n_changepoints})
-    yearly_input = Axon.input("yearly", shape: {nil, 2 * config.seasonality.yearly.fourier_terms})
-    weekly_input = Axon.input("weekly", shape: {nil, 2 * config.seasonality.weekly.fourier_terms})
+    # Trend
+    trend_input = Trend.build_input(config)
+    trend = Trend.build_component(trend_input, config)
 
-    trend = build_trend_component(trend_input, config.trend.enabled)
+    # Seasonality
+    seasonality_inputs = Seasonality.build_inputs(config)
+    seasonality = Seasonality.build_components(seasonality_inputs, config)
 
-    yearly_seasonality =
-      build_seasonality_component(yearly_input, config.seasonality.yearly.enabled)
+    # AR
+    ar_input = AR.build_network_input(config)
+    ar_component = AR.build_component(ar_input, config)
 
-    weekly_seasonality =
-      build_seasonality_component(weekly_input, config.seasonality.weekly.enabled)
-
-    ar_component = build_ar_component(config)
-    events_component = build_events_component(config[:events] || %{})
+    # Events
+    events_input = Events.build_network_input(%{events: config[:events] || %{}})
+    events_component = Events.build_component(events_input, %{events: config[:events] || %{}})
 
     combined =
-      Axon.add([trend, yearly_seasonality, weekly_seasonality, ar_component, events_component])
+      Axon.add([trend, seasonality.yearly, seasonality.weekly, ar_component, events_component])
 
     Axon.container(%{
       combined: combined,
       trend: trend,
-      yearly_seasonality: yearly_seasonality,
-      weekly_seasonality: weekly_seasonality,
+      yearly_seasonality: seasonality.yearly,
+      weekly_seasonality: seasonality.weekly,
       ar: ar_component,
       events: events_component
     })
-  end
-
-  defp build_trend_component(input, true),
-    do: Axon.dense(input, 1, activation: :linear, name: "trend_dense")
-
-  defp build_trend_component(_input, false), do: Axon.constant(0)
-
-  defp build_seasonality_component(input, true), do: Axon.dense(input, 1, activation: :linear)
-  defp build_seasonality_component(_input, false), do: Axon.constant(0)
-
-  defp build_ar_component(%{ar: %{enabled: true, n_lags: n_lags} = ar_config}) do
-    ar_input = Axon.input("ar", shape: {nil, n_lags})
-    ar_layers = Map.get(ar_config, :layers, [])
-    build_ar_network(ar_input, ar_layers)
-  end
-
-  defp build_ar_component(_config), do: Axon.constant(0)
-
-  defp build_ar_network(input, []) do
-    Axon.dense(input, 1, activation: :linear, name: "ar_dense_out")
-  end
-
-  defp build_ar_network(input, layers) do
-    hidden = build_ar_hidden_layers(input, layers)
-    Axon.dense(hidden, 1, activation: :linear, name: "ar_dense_out")
-  end
-
-  defp build_ar_hidden_layers(input, layers) do
-    {hidden, _idx} =
-      Enum.reduce(layers, {input, 0}, fn units, {acc, idx} ->
-        {Axon.dense(acc, units, activation: :relu, name: "ar_dense_#{idx}"), idx + 1}
-      end)
-
-    hidden
-  end
-
-  defp build_events_component(events_config) when map_size(events_config) == 0,
-    do: Axon.constant(0)
-
-  defp build_events_component(events_config) do
-    n_event_features = Events.n_features(events_config)
-    events_input = Axon.input("events", shape: {nil, n_event_features})
-    Axon.dense(events_input, 1, activation: :linear, name: "events_dense")
   end
 
   @doc """

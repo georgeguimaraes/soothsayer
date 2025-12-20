@@ -5,6 +5,59 @@ defmodule Soothsayer.EventsTest do
   alias Explorer.Series
   alias Soothsayer.Events
 
+  describe "build_network_input/1" do
+    test "returns nil when no events configured" do
+      config = %{}
+      assert Events.build_network_input(config) == nil
+    end
+
+    test "returns nil when events key is empty map" do
+      config = %{events: %{}}
+      assert Events.build_network_input(config) == nil
+    end
+
+    test "returns Axon input with correct shape when events configured" do
+      config = %{
+        events: %{
+          "sale" => %{lower_window: 0, upper_window: 0},
+          "holiday" => %{lower_window: -1, upper_window: 1}
+        }
+      }
+
+      input = Events.build_network_input(config)
+
+      # sale: 1 feature, holiday: 3 features = 4 total
+      assert Axon.get_inputs(input)["events"] == {nil, 4}
+    end
+  end
+
+  describe "build_component/2" do
+    test "returns constant 0 when no events configured" do
+      config = %{}
+      input = Axon.input("events", shape: {nil, 1})
+
+      component = Events.build_component(input, config)
+
+      {init_fn, predict_fn} = Axon.build(component)
+      params = init_fn.(%{"events" => Nx.tensor([[1.0]])}, Axon.ModelState.empty())
+      output = predict_fn.(params, %{"events" => Nx.tensor([[1.0]])})
+
+      assert Nx.to_number(output) == 0.0
+    end
+
+    test "returns dense layer when events configured" do
+      config = %{events: %{"sale" => %{lower_window: 0, upper_window: 0}}}
+      input = Axon.input("events", shape: {nil, 1})
+
+      component = Events.build_component(input, config)
+
+      {init_fn, _predict_fn} = Axon.build(component)
+      params = init_fn.(%{"events" => Nx.tensor([[1.0]])}, Axon.ModelState.empty())
+
+      assert Map.has_key?(params.data, "events_dense")
+    end
+  end
+
   describe "n_features/1" do
     test "returns 0 for empty events config" do
       assert Events.n_features(%{}) == 0

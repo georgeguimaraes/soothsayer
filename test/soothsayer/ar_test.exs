@@ -5,6 +5,74 @@ defmodule Soothsayer.ARTest do
   alias Explorer.Series
   alias Soothsayer.AR
 
+  describe "build_network_input/1" do
+    test "returns nil when AR is disabled" do
+      config = %{ar: %{enabled: false, n_lags: 0}}
+      assert AR.build_network_input(config) == nil
+    end
+
+    test "returns nil when AR config is missing" do
+      config = %{trend: %{enabled: true}}
+      assert AR.build_network_input(config) == nil
+    end
+
+    test "returns Axon input with correct shape when enabled" do
+      config = %{ar: %{enabled: true, n_lags: 5}}
+      input = AR.build_network_input(config)
+
+      assert Axon.get_inputs(input)["ar"] == {nil, 5}
+    end
+  end
+
+  describe "build_component/2" do
+    test "returns constant 0 when AR is disabled" do
+      config = %{ar: %{enabled: false, n_lags: 0}}
+      input = Axon.input("ar", shape: {nil, 3})
+
+      component = AR.build_component(input, config)
+
+      {init_fn, predict_fn} = Axon.build(component)
+      params = init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0]])}, Axon.ModelState.empty())
+      output = predict_fn.(params, %{"ar" => Nx.tensor([[1.0, 2.0, 3.0]])})
+
+      assert Nx.to_number(output) == 0.0
+    end
+
+    test "returns linear AR when enabled with no hidden layers" do
+      config = %{ar: %{enabled: true, n_lags: 3, layers: []}}
+      input = Axon.input("ar", shape: {nil, 3})
+
+      component = AR.build_component(input, config)
+
+      {init_fn, _predict_fn} = Axon.build(component)
+      params = init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0]])}, Axon.ModelState.empty())
+
+      # Linear AR only has output layer
+      assert Map.has_key?(params.data, "ar_dense_out")
+      refute Map.has_key?(params.data, "ar_dense_0")
+    end
+
+    test "returns deep AR-Net when enabled with hidden layers" do
+      config = %{ar: %{enabled: true, n_lags: 5, layers: [32, 16]}}
+      input = Axon.input("ar", shape: {nil, 5})
+
+      component = AR.build_component(input, config)
+
+      {init_fn, _predict_fn} = Axon.build(component)
+      params = init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0]])}, Axon.ModelState.empty())
+
+      # Deep AR-Net has hidden layers + output
+      assert Map.has_key?(params.data, "ar_dense_0")
+      assert Map.has_key?(params.data, "ar_dense_1")
+      assert Map.has_key?(params.data, "ar_dense_out")
+
+      # Verify shapes
+      assert Nx.shape(params.data["ar_dense_0"]["kernel"]) == {5, 32}
+      assert Nx.shape(params.data["ar_dense_1"]["kernel"]) == {32, 16}
+      assert Nx.shape(params.data["ar_dense_out"]["kernel"]) == {16, 1}
+    end
+  end
+
   describe "auto-regression config" do
     test "new/1 includes AR config with defaults" do
       model = Soothsayer.new()

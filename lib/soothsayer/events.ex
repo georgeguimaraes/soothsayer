@@ -1,13 +1,58 @@
 defmodule Soothsayer.Events do
   @moduledoc """
-  Event feature engineering for Soothsayer models.
+  Event component for Soothsayer models.
 
-  Events model special occasions (holidays, promotions, etc.) that affect the time series.
+  Handles network building and feature engineering for events (holidays, promotions, etc.).
   Each event becomes binary features indicating whether the event occurs on a given date.
   """
 
   alias Explorer.DataFrame
   alias Explorer.Series
+
+  # Network Building
+
+  @doc """
+  Creates the Axon input node for the events component.
+
+  ## Parameters
+
+    * `config` - Model configuration map with optional `:events` key.
+
+  ## Returns
+
+    An Axon input node when events are configured, `nil` otherwise.
+
+  """
+  @spec build_network_input(map()) :: Axon.t() | nil
+  def build_network_input(%{events: events_config}) when map_size(events_config) > 0 do
+    n = n_features(events_config)
+    Axon.input("events", shape: {nil, n})
+  end
+  def build_network_input(_config), do: nil
+
+  @doc """
+  Builds the events component layer.
+
+  ## Parameters
+
+    * `input` - Axon input node from `build_network_input/1`.
+    * `config` - Model configuration map.
+
+  ## Returns
+
+    An Axon dense layer when events are configured, `Axon.constant(0)` otherwise.
+
+  """
+  @spec build_component(Axon.t() | nil, map()) :: Axon.t()
+  def build_component(nil, _config), do: Axon.constant(0)
+
+  def build_component(input, %{events: events_config}) when map_size(events_config) > 0 do
+    Axon.dense(input, 1, activation: :linear, name: "events_dense")
+  end
+
+  def build_component(_input, _config), do: Axon.constant(0)
+
+  # Feature Engineering
 
   @doc """
   Computes total number of event features based on config.
