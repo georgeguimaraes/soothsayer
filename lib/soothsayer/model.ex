@@ -3,6 +3,7 @@ defmodule Soothsayer.Model do
   Defines the structure and operations for the Soothsayer forecasting model.
   """
 
+  alias Soothsayer.Events
   alias Soothsayer.Trainer
 
   defstruct [:network, :params, :config]
@@ -111,14 +112,26 @@ defmodule Soothsayer.Model do
         {Axon.constant(0), nil}
       end
 
-    combined = Axon.add([trend, yearly_seasonality, weekly_seasonality, ar_component])
+    events_config = config[:events] || %{}
+
+    events_component =
+      if map_size(events_config) > 0 do
+        n_event_features = Events.n_features(events_config)
+        events_input = Axon.input("events", shape: {nil, n_event_features})
+        Axon.dense(events_input, 1, activation: :linear, name: "events_dense")
+      else
+        Axon.constant(0)
+      end
+
+    combined = Axon.add([trend, yearly_seasonality, weekly_seasonality, ar_component, events_component])
 
     container = %{
       combined: combined,
       trend: trend,
       yearly_seasonality: yearly_seasonality,
       weekly_seasonality: weekly_seasonality,
-      ar: ar_component
+      ar: ar_component,
+      events: events_component
     }
 
     Axon.container(container)

@@ -43,7 +43,7 @@ You can also get individual components to understand what's driving the forecast
 
 ```elixir
 components = Soothsayer.predict_components(fitted_model, future_dates_series)
-# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ...}
+# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ..., events: ...}
 ```
 
 Check the `livebook` directory for interactive examples.
@@ -53,7 +53,7 @@ Check the `livebook` directory for interactive examples.
 Soothsayer models time series as a sum of components:
 
 ```
-y(t) = trend(t) + seasonality(t) + ar(t)
+y(t) = trend(t) + seasonality(t) + ar(t) + events(t)
 ```
 
 Each component can be enabled or disabled depending on your data.
@@ -162,6 +162,58 @@ ar: %{
 
 This is useful when you're not sure how many lags to use. Set a higher `n_lags` than you think you need and let regularization prevent the model from overfitting to noise in distant lags.
 
+### Events
+
+Captures the impact of special occasions (holidays, promotions, etc.) that affect your time series. Events are modeled as additive effects that spike on specific dates.
+
+```elixir
+alias Explorer.DataFrame
+
+# Define which events to model and their windows
+model = Soothsayer.new(%{
+  events: %{
+    "black_friday" => %{lower_window: -1, upper_window: 1},
+    "christmas" => %{lower_window: -3, upper_window: 0}
+  }
+})
+
+# Create a DataFrame with event dates
+events_df = DataFrame.new(%{
+  "event" => ["black_friday", "black_friday", "christmas", "christmas"],
+  "ds" => [~D[2022-11-25], ~D[2023-11-24], ~D[2022-12-25], ~D[2023-12-25]]
+})
+
+# Fit with events
+fitted_model = Soothsayer.fit(model, df, events: events_df)
+
+# Predict (include future events)
+future_events = DataFrame.new(%{
+  "event" => ["black_friday", "christmas"],
+  "ds" => [~D[2024-11-29], ~D[2024-12-25]]
+})
+predictions = Soothsayer.predict(fitted_model, future_dates, events: future_events)
+```
+
+#### Event Windows
+
+Windows allow events to affect surrounding days, not just the event date itself:
+
+- **`lower_window`**: Days before the event (use negative numbers). `-2` means the effect starts 2 days before.
+- **`upper_window`**: Days after the event. `1` means the effect extends 1 day after.
+
+Example: `%{lower_window: -1, upper_window: 1}` creates effects for the day before, the event day, and the day after (3 separate learned coefficients).
+
+#### Getting Event Effects
+
+After training, you can extract the learned impact of each event:
+
+```elixir
+effects = Soothsayer.get_event_effects(fitted_model)
+# => %{"black_friday_-1" => 12.5, "black_friday_0" => 45.2, "black_friday_+1" => 8.3, ...}
+```
+
+This shows how much each event (at each window position) adds to the forecast.
+
 ### Training Parameters
 
 ```elixir
@@ -216,7 +268,10 @@ The following NeuralProphet features are on the roadmap:
 
 - Lagged Regressors (external variables that affect the forecast)
 - Future Regressors (known future values like holidays)
-- Events and Holidays
+- Country Holidays (automatic holiday detection via `:holidefs` library)
+- Multiplicative Events (events that scale with trend)
+- Event Regularization
+- Recurring Events (auto-expand to all years)
 - Uncertainty Estimation
 - Multiplicative Seasonality
 

@@ -214,6 +214,7 @@ ar_input_shape = {nil, n_lags}
 
 ## Next Steps
 
+- [Events](events.md) - Holidays and special occasions
 - [Trends](trends.md) - Piecewise linear trends with changepoints
 - [Seasonality](seasonality.md) - Yearly and weekly patterns
 - [The Basics](basics.md) - Fundamental concepts

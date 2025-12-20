@@ -7,6 +7,7 @@ defmodule Soothsayer do
   alias Explorer.Series
   alias Soothsayer.AR
   alias Soothsayer.Changepoints
+  alias Soothsayer.Events
   alias Soothsayer.Model
   alias Soothsayer.Preprocessor
 
@@ -59,6 +60,8 @@ defmodule Soothsayer do
 
     * `model` - A `Soothsayer.Model` struct.
     * `data` - An `Explorer.DataFrame` containing the training data.
+    * `opts` - Optional keyword list:
+      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
 
   ## Returns
 
@@ -71,9 +74,14 @@ defmodule Soothsayer do
       iex> fitted_model = Soothsayer.fit(model, data)
       %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}}
 
+      iex> events_df = Explorer.DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-01]]})
+      iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
+      %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}}
+
   """
-  @spec fit(Soothsayer.Model.t(), Explorer.DataFrame.t()) :: Soothsayer.Model.t()
-  def fit(%Model{} = model, %DataFrame{} = data) do
+  @spec fit(Soothsayer.Model.t(), Explorer.DataFrame.t(), keyword()) :: Soothsayer.Model.t()
+  def fit(%Model{} = model, %DataFrame{} = data, opts \\ []) do
+    events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
     processed_data = Preprocessor.prepare_data(data, "y", "ds", model.config.seasonality)
 
@@ -145,6 +153,26 @@ defmodule Soothsayer do
     # Add AR input if enabled
     x = if ar_input != nil, do: Map.put(x, "ar", ar_input), else: x
 
+    # Add events input if configured
+    events_config = model.config[:events] || %{}
+    dates = Series.to_list(processed_data["ds"])
+
+    # Truncate dates for events if AR is enabled
+    event_dates =
+      if n_lags > 0 do
+        Enum.drop(dates, n_lags)
+      else
+        dates
+      end
+
+    x =
+      if map_size(events_config) > 0 and events_df != nil do
+        events_input = Events.build_features(Series.from_list(event_dates), events_df, events_config)
+        Map.put(x, "events", events_input)
+      else
+        x
+      end
+
     {x_normalized, x_norm} = normalize_inputs(x)
 
     fitted_model = Model.fit(model, x_normalized, y_normalized, model.config.epochs)
@@ -178,6 +206,8 @@ defmodule Soothsayer do
 
     * `model` - A fitted `Soothsayer.Model` struct.
     * `x` - An `Explorer.Series` containing the dates for which to make predictions.
+    * `opts` - Optional keyword list:
+      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
 
   ## Returns
 
@@ -198,9 +228,9 @@ defmodule Soothsayer do
       >
 
   """
-  @spec predict(Soothsayer.Model.t(), Explorer.Series.t()) :: Nx.Tensor.t()
-  def predict(%Model{} = model, %Series{} = x) do
-    %{combined: combined} = predict_components(model, x)
+  @spec predict(Soothsayer.Model.t(), Explorer.Series.t(), keyword()) :: Nx.Tensor.t()
+  def predict(%Model{} = model, %Series{} = x, opts \\ []) do
+    %{combined: combined} = predict_components(model, x, opts)
     combined
   end
 
@@ -211,10 +241,12 @@ defmodule Soothsayer do
 
     * `model` - A fitted `Soothsayer.Model` struct.
     * `x` - An `Explorer.Series` containing the dates for which to make predictions.
+    * `opts` - Optional keyword list:
+      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
 
   ## Returns
 
-    A map containing the predicted values for each component (trend, yearly seasonality, weekly seasonality) and the combined prediction.
+    A map containing the predicted values for each component (trend, yearly seasonality, weekly seasonality, events) and the combined prediction.
 
   ## Examples
 
@@ -229,13 +261,15 @@ defmodule Soothsayer do
       }
 
   """
-  @spec predict_components(Soothsayer.Model.t(), Explorer.Series.t()) :: %{
+  @spec predict_components(Soothsayer.Model.t(), Explorer.Series.t(), keyword()) :: %{
           combined: Nx.Tensor.t(),
           trend: Nx.Tensor.t(),
           yearly_seasonality: Nx.Tensor.t(),
           weekly_seasonality: Nx.Tensor.t()
         }
-  def predict_components(%Model{} = model, %Series{} = x) do
+  def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
+    events_df = Keyword.get(opts, :events)
+
     processed_x =
       Preprocessor.prepare_data(DataFrame.new(%{"ds" => x}), nil, "ds", model.config.seasonality)
 
@@ -261,6 +295,17 @@ defmodule Soothsayer do
       if model.config.ar.enabled and model.config.ar.n_lags > 0 do
         ar_input = AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.n_lags)
         Map.put(x_input, "ar", ar_input)
+      else
+        x_input
+      end
+
+    # Add events input if configured
+    events_config = model.config[:events] || %{}
+
+    x_input =
+      if map_size(events_config) > 0 and events_df != nil do
+        events_input = Events.build_features(x, events_df, events_config)
+        Map.put(x_input, "events", events_input)
       else
         x_input
       end
@@ -382,5 +427,63 @@ defmodule Soothsayer do
   @spec get_ar_weights(Soothsayer.Model.t()) :: %{String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}}
   def get_ar_weights(%Model{} = model) do
     AR.get_weights(model)
+  end
+
+  @doc """
+  Extracts the learned event coefficients from a fitted model.
+
+  Returns a map of event feature names to their learned coefficients.
+  Feature names are formatted as "event_name_offset" where offset indicates
+  the window position relative to the event date.
+
+  ## Parameters
+
+    * `model` - A fitted `Soothsayer.Model` struct with events configured.
+
+  ## Returns
+
+    A map of feature names to coefficient values.
+
+  ## Examples
+
+      iex> model = Soothsayer.new(%{events: %{"sale" => %{lower_window: 0, upper_window: 0}}})
+      iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
+      iex> effects = Soothsayer.get_event_effects(fitted_model)
+      %{"sale_0" => 45.2}
+
+      iex> model = Soothsayer.new(%{events: %{"promo" => %{lower_window: -1, upper_window: 1}}})
+      iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
+      iex> effects = Soothsayer.get_event_effects(fitted_model)
+      %{"promo_-1" => 12.5, "promo_0" => 50.0, "promo_+1" => 8.3}
+
+  """
+  @spec get_event_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
+  def get_event_effects(%Model{} = model) do
+    events_config = model.config[:events] || %{}
+
+    if map_size(events_config) == 0 do
+      raise ArgumentError, "No events configured on this model"
+    end
+
+    unless model.params do
+      raise ArgumentError, "Model has not been fitted yet"
+    end
+
+    # Get the events_dense layer weights
+    events_layer = model.params.data["events_dense"]
+
+    unless events_layer do
+      raise ArgumentError, "Events layer not found in model params"
+    end
+
+    # Get kernel weights - shape is {n_features, 1}
+    kernel = events_layer["kernel"]
+    coefficients = kernel |> Nx.flatten() |> Nx.to_flat_list()
+
+    # Get feature names and zip with coefficients
+    feature_names = Events.feature_names(events_config)
+
+    Enum.zip(feature_names, coefficients)
+    |> Enum.into(%{})
   end
 end

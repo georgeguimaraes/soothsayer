@@ -115,4 +115,92 @@ defmodule Soothsayer.ModelTest do
     assert is_tensor(predictions.combined)
     assert Nx.shape(predictions.combined) == {3, 1}
   end
+
+  describe "events support" do
+    test "build_network/1 creates network with events input when events configured" do
+      config = %{
+        trend: %{enabled: true},
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 4},
+          weekly: %{enabled: true, fourier_terms: 2}
+        },
+        events: %{
+          "sale" => %{lower_window: 0, upper_window: 0},
+          "holiday" => %{lower_window: -1, upper_window: 1}
+        }
+      }
+
+      network = Model.build_network(config)
+
+      # Check that events input exists
+      inputs = Axon.get_inputs(network)
+      assert Map.has_key?(inputs, "events")
+
+      # Verify the network can be initialized
+      {init_fn, _predict_fn} = Axon.build(network)
+
+      # sale: 1 feature, holiday: 3 features = 4 total event features
+      input = %{
+        "trend" => Nx.tensor([[1.0]]),
+        "yearly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]),
+        "weekly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0]]),
+        "events" => Nx.tensor([[1.0, 0.0, 0.0, 0.0]])
+      }
+
+      assert %Axon.ModelState{} = init_fn.(input, Axon.ModelState.empty())
+    end
+
+    test "predict/2 returns events component when events configured" do
+      config = %{
+        trend: %{enabled: true},
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 4},
+          weekly: %{enabled: true, fourier_terms: 2}
+        },
+        events: %{
+          "sale" => %{lower_window: 0, upper_window: 0}
+        },
+        learning_rate: 0.01,
+        epochs: 1
+      }
+
+      model = Model.new(config)
+
+      x = %{
+        "trend" => Nx.tensor([[1.0], [2.0], [3.0]]),
+        "yearly" =>
+          Nx.tensor([
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+            [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+          ]),
+        "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]]),
+        "events" => Nx.tensor([[1.0], [0.0], [0.0]])
+      }
+
+      y = Nx.tensor([[5.0], [2.0], [3.0]])
+
+      trained_model = Model.fit(model, x, y, 1)
+      predictions = Model.predict(trained_model, x)
+
+      assert Map.has_key?(predictions, :events)
+      assert is_tensor(predictions.events)
+      assert Nx.shape(predictions.events) == {3, 1}
+    end
+
+    test "build_network/1 does not add events input when no events configured" do
+      config = %{
+        trend: %{enabled: true},
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 4},
+          weekly: %{enabled: true, fourier_terms: 2}
+        }
+      }
+
+      network = Model.build_network(config)
+
+      inputs = Axon.get_inputs(network)
+      refute Map.has_key?(inputs, "events")
+    end
+  end
 end
