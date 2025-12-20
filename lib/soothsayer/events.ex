@@ -28,6 +28,7 @@ defmodule Soothsayer.Events do
     n = n_features(events_config)
     Axon.input("events", shape: {nil, n})
   end
+
   def build_network_input(_config), do: nil
 
   @doc """

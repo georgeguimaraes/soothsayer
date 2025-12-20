@@ -24,6 +24,7 @@ defmodule Soothsayer.AR do
   def build_network_input(%{ar: %{enabled: true, lags: lags}}) do
     Axon.input("ar", shape: {nil, lags})
   end
+
   def build_network_input(_config), do: nil
 
   @doc """

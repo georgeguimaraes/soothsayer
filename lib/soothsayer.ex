@@ -422,4 +422,34 @@ defmodule Soothsayer do
   def get_event_effects(%Model{} = model) do
     Events.get_effects(model)
   end
+
+  @doc """
+  Returns a display-friendly version of the network that outputs a single tensor.
+
+  This can be used with `Axon.Display.as_graph/2` since it doesn't use
+  `Axon.container` with a map output.
+
+  ## Parameters
+
+    * `model` - A `Soothsayer.Model` struct.
+
+  ## Returns
+
+    An Axon network suitable for visualization.
+
+  ## Examples
+
+      iex> model = Soothsayer.new()
+      iex> input = %{
+      ...>   "trend" => Nx.template({1, 11}, :f32),
+      ...>   "yearly" => Nx.template({1, 12}, :f32),
+      ...>   "weekly" => Nx.template({1, 6}, :f32)
+      ...> }
+      iex> Axon.Display.as_graph(Soothsayer.display_network(model), input)
+
+  """
+  @spec display_network(Soothsayer.Model.t()) :: Axon.t()
+  def display_network(%Model{} = model) do
+    Model.display_network(model.config)
+  end
 end

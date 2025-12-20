@@ -63,6 +63,38 @@ defmodule Soothsayer.Model do
   """
   @spec build_network(map()) :: Axon.t()
   def build_network(config) do
+    {combined, components} = build_network_components(config)
+
+    Axon.container(%{
+      combined: combined,
+      trend: components.trend,
+      yearly_seasonality: components.yearly,
+      weekly_seasonality: components.weekly,
+      ar: components.ar,
+      events: components.events
+    })
+  end
+
+  @doc """
+  Returns a display-friendly version of the network that outputs a single tensor.
+
+  This version can be used with `Axon.Display.as_graph/2` since it doesn't use
+  `Axon.container` with a map output.
+
+  ## Examples
+
+      iex> model = Soothsayer.new(config)
+      iex> input = %{"trend" => Nx.template({1, 1}, :f32), ...}
+      iex> Axon.Display.as_graph(Soothsayer.Model.display_network(model.config), input)
+
+  """
+  @spec display_network(map()) :: Axon.t()
+  def display_network(config) do
+    {combined, _components} = build_network_components(config)
+    combined
+  end
+
+  defp build_network_components(config) do
     # Trend
     trend_input = Trend.build_input(config)
     trend = Trend.build_component(trend_input, config)
@@ -82,14 +114,14 @@ defmodule Soothsayer.Model do
     combined =
       Axon.add([trend, seasonality.yearly, seasonality.weekly, ar_component, events_component])
 
-    Axon.container(%{
-      combined: combined,
-      trend: trend,
-      yearly_seasonality: seasonality.yearly,
-      weekly_seasonality: seasonality.weekly,
-      ar: ar_component,
-      events: events_component
-    })
+    {combined,
+     %{
+       trend: trend,
+       yearly: seasonality.yearly,
+       weekly: seasonality.weekly,
+       ar: ar_component,
+       events: events_component
+     }}
   end
 
   @doc """

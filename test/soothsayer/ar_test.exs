@@ -59,7 +59,9 @@ defmodule Soothsayer.ARTest do
       component = AR.build_component(input, config)
 
       {init_fn, _predict_fn} = Axon.build(component)
-      params = init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0]])}, Axon.ModelState.empty())
+
+      params =
+        init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0]])}, Axon.ModelState.empty())
 
       # Deep AR-Net has hidden layers + output
       assert Map.has_key?(params.data, "ar_dense_0")

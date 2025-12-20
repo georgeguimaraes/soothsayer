@@ -218,7 +218,9 @@ defmodule Soothsayer.Seasonality do
 
   defp compute_period_fractions(dates, :yearly) do
     Enum.map(dates, fn date ->
-      days_in_year = if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
+      days_in_year =
+        if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
+
       Date.day_of_year(date) / days_in_year
     end)
   end
