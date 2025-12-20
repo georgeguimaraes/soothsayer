@@ -52,6 +52,53 @@ defmodule Soothsayer.Events do
 
   def build_component(_input, _config), do: Axon.constant(0)
 
+  # Weight Extraction
+
+  @doc """
+  Extracts the learned event coefficients from a fitted model.
+
+  Returns a map of event feature names to their learned coefficients.
+
+  ## Parameters
+
+    * `model` - A fitted `Soothsayer.Model` struct with events configured.
+
+  ## Returns
+
+    A map of feature names to coefficient values.
+
+  ## Examples
+
+      iex> effects = Events.get_effects(fitted_model)
+      %{"sale_0" => 45.2, "promo_-1" => 12.5}
+
+  """
+  @spec get_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
+  def get_effects(%Soothsayer.Model{} = model) do
+    events_config = model.config[:events] || %{}
+
+    if map_size(events_config) == 0 do
+      raise ArgumentError, "No events configured on this model"
+    end
+
+    unless model.params do
+      raise ArgumentError, "Model has not been fitted yet"
+    end
+
+    events_layer = model.params.data["events_dense"]
+
+    unless events_layer do
+      raise ArgumentError, "Events layer not found in model params"
+    end
+
+    kernel = events_layer["kernel"]
+    coefficients = kernel |> Nx.flatten() |> Nx.to_flat_list()
+
+    feature_names(events_config)
+    |> Enum.zip(coefficients)
+    |> Enum.into(%{})
+  end
+
   # Feature Engineering
 
   @doc """

@@ -32,7 +32,7 @@ For more details on the math, see [NeuralProphet's Trend documentation](https://
 model = Soothsayer.new(%{
   trend: %{
     enabled: true,           # Enable trend component (default: true)
-    n_changepoints: 10,      # Number of potential changepoints (default: 10)
+    changepoints: 10,      # Number of potential changepoints (default: 10)
     changepoints_range: 0.8, # Place in first 80% of data (default: 0.8)
     regularization: nil      # L1 penalty on rate changes (default: nil)
   }
@@ -44,7 +44,7 @@ model = Soothsayer.new(%{
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enabled` | `true` | Enable/disable the trend component |
-| `n_changepoints` | `10` | Number of potential slope changes |
+| `changepoints` | `10` | Number of potential slope changes |
 | `changepoints_range` | `0.8` | Fraction of data where changepoints can occur |
 | `regularization` | `nil` | L1 penalty to encourage sparse changepoints |
 
@@ -54,7 +54,7 @@ For data with a consistent growth rate, disable changepoints:
 
 ```elixir
 model = Soothsayer.new(%{
-  trend: %{n_changepoints: 0}
+  trend: %{changepoints: 0}
 })
 ```
 
@@ -66,7 +66,7 @@ For data where the growth rate changes over time:
 
 ```elixir
 model = Soothsayer.new(%{
-  trend: %{n_changepoints: 10, changepoints_range: 0.8}
+  trend: %{changepoints: 10, changepoints_range: 0.8}
 })
 ```
 
@@ -92,14 +92,14 @@ df = DataFrame.new(%{"ds" => dates, "y" => y})
 
 # Model WITHOUT changepoints (misses the slope change)
 model_linear = Soothsayer.new(%{
-  trend: %{n_changepoints: 0},
+  trend: %{changepoints: 0},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   epochs: 100
 })
 
 # Model WITH changepoints (captures the slope change)
 model_piecewise = Soothsayer.new(%{
-  trend: %{n_changepoints: 10, changepoints_range: 0.8},
+  trend: %{changepoints: 10, changepoints_range: 0.8},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   epochs: 100
 })
@@ -117,7 +117,7 @@ When you're unsure how many changepoints you need, set more than necessary and u
 ```elixir
 model = Soothsayer.new(%{
   trend: %{
-    n_changepoints: 25,      # More than we likely need
+    changepoints: 25,      # More than we likely need
     regularization: 0.1      # L1 penalty pushes small changes toward zero
   }
 })
@@ -133,11 +133,11 @@ Higher regularization values encourage sparser changepoints (fewer slope changes
 
 ## Choosing Parameters
 
-**n_changepoints:**
+**changepoints:**
 - Start with the default (10)
 - Increase if you expect many slope changes
 - Decrease if you expect a smooth trend
-- Use `n_changepoints: 0` for simple linear trend
+- Use `changepoints: 0` for simple linear trend
 
 **changepoints_range:**
 - Default (0.8) works well for most cases
@@ -151,14 +151,14 @@ Higher regularization values encourage sparser changepoints (fewer slope changes
 
 ## Network Architecture
 
-With changepoints enabled, the trend input has shape `{batch_size, 1 + n_changepoints}`:
+With changepoints enabled, the trend input has shape `{batch_size, 1 + changepoints}`:
 
 ```elixir
 # The network receives:
 # - Column 0: normalized time t
 # - Columns 1-n: changepoint features max(0, t - s_j)
 
-input_shape = {nil, 1 + n_changepoints}
+input_shape = {nil, 1 + changepoints}
 ```
 
 See the [Interactive Livebook Tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) for network visualization examples.

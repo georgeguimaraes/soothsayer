@@ -77,19 +77,19 @@ By default, Soothsayer uses piecewise linear trends with automatic changepoint d
 ```elixir
 Soothsayer.new(%{
   trend: %{
-    n_changepoints: 10,      # number of potential changepoints (default: 10)
+    changepoints: 10,      # number of potential changepoints (default: 10)
     changepoints_range: 0.8  # place changepoints in first 80% of data (default: 0.8)
   }
 })
 ```
 
-The model learns which changepoints matter and how much the slope changes at each one. Setting `n_changepoints: 0` disables changepoints and uses a simple linear trend.
+The model learns which changepoints matter and how much the slope changes at each one. Setting `changepoints: 0` disables changepoints and uses a simple linear trend.
 
 **Trend regularization** can prevent overfitting when you have many changepoints:
 
 ```elixir
 trend: %{
-  n_changepoints: 25,
+  changepoints: 25,
   regularization: 0.1  # L1 penalty pushes small slope changes toward zero
 }
 ```

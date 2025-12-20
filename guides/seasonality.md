@@ -141,7 +141,7 @@ df = DataFrame.new(%{"ds" => dates, "y" => y})
 
 # Fit model
 model = Soothsayer.new(%{
-  trend: %{n_changepoints: 0},  # Simple linear trend
+  trend: %{changepoints: 0},  # Simple linear trend
   seasonality: %{
     yearly: %{enabled: true, fourier_terms: 6},
     weekly: %{enabled: true, fourier_terms: 3}

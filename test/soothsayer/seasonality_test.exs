@@ -212,4 +212,90 @@ defmodule Soothsayer.SeasonalityTest do
       assert result.names == df.names
     end
   end
+
+  describe "build_features/2" do
+    test "returns map with yearly and weekly tensors" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+
+      config = %{
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 3},
+          weekly: %{enabled: true, fourier_terms: 2}
+        }
+      }
+
+      result = Seasonality.build_features(dates, config)
+
+      assert is_map(result)
+      assert Map.has_key?(result, :yearly)
+      assert Map.has_key?(result, :weekly)
+    end
+
+    test "yearly tensor has shape {n_dates, 2 * fourier_terms}" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]]
+
+      config = %{
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 3},
+          weekly: %{enabled: true, fourier_terms: 2}
+        }
+      }
+
+      result = Seasonality.build_features(dates, config)
+
+      # 3 fourier terms = 6 features (sin + cos for each)
+      assert Nx.shape(result.yearly) == {5, 6}
+    end
+
+    test "weekly tensor has shape {n_dates, 2 * fourier_terms}" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]]
+
+      config = %{
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 3},
+          weekly: %{enabled: true, fourier_terms: 2}
+        }
+      }
+
+      result = Seasonality.build_features(dates, config)
+
+      # 2 fourier terms = 4 features (sin + cos for each)
+      assert Nx.shape(result.weekly) == {5, 4}
+    end
+
+    test "returns zero tensors when seasonality is disabled" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+
+      config = %{
+        seasonality: %{
+          yearly: %{enabled: false, fourier_terms: 3},
+          weekly: %{enabled: false, fourier_terms: 2}
+        }
+      }
+
+      result = Seasonality.build_features(dates, config)
+
+      # Should still have correct shapes, but all zeros
+      assert Nx.shape(result.yearly) == {3, 6}
+      assert Nx.shape(result.weekly) == {3, 4}
+      assert Nx.to_flat_list(result.yearly) |> Enum.all?(&(&1 == 0.0))
+      assert Nx.to_flat_list(result.weekly) |> Enum.all?(&(&1 == 0.0))
+    end
+
+    test "tensors are f32 type" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+
+      config = %{
+        seasonality: %{
+          yearly: %{enabled: true, fourier_terms: 2},
+          weekly: %{enabled: true, fourier_terms: 2}
+        }
+      }
+
+      result = Seasonality.build_features(dates, config)
+
+      assert Nx.type(result.yearly) == {:f, 32}
+      assert Nx.type(result.weekly) == {:f, 32}
+    end
+  end
 end

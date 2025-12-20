@@ -365,4 +365,50 @@ defmodule Soothsayer.EventsTest do
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
   end
+
+  describe "get_effects/1" do
+    test "raises when no events configured" do
+      model = %Soothsayer.Model{
+        config: %{},
+        params: %Axon.ModelState{data: %{}},
+        network: nil
+      }
+
+      assert_raise ArgumentError, "No events configured on this model", fn ->
+        Events.get_effects(model)
+      end
+    end
+
+    test "raises when model not fitted" do
+      model = %Soothsayer.Model{
+        config: %{events: %{"sale" => %{lower_window: 0, upper_window: 0}}},
+        params: nil,
+        network: nil
+      }
+
+      assert_raise ArgumentError, "Model has not been fitted yet", fn ->
+        Events.get_effects(model)
+      end
+    end
+
+    test "returns map of feature names to coefficients" do
+      # Create mock params with events_dense layer
+      kernel = Nx.tensor([[1.5], [2.5]])
+      bias = Nx.tensor([0.0])
+
+      model = %Soothsayer.Model{
+        config: %{events: %{"sale" => %{lower_window: -1, upper_window: 0}}},
+        params: %Axon.ModelState{data: %{"events_dense" => %{"kernel" => kernel, "bias" => bias}}},
+        network: nil
+      }
+
+      effects = Events.get_effects(model)
+
+      assert is_map(effects)
+      assert Map.has_key?(effects, "sale_-1")
+      assert Map.has_key?(effects, "sale_0")
+      assert_in_delta effects["sale_-1"], 1.5, 0.001
+      assert_in_delta effects["sale_0"], 2.5, 0.001
+    end
+  end
 end

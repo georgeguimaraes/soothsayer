@@ -111,7 +111,7 @@ df = DataFrame.new(%{"ds" => dates, "y" => y})
 
 # Model WITHOUT AR (trend only)
 model_no_ar = Soothsayer.new(%{
-  trend: %{n_changepoints: 5},
+  trend: %{changepoints: 5},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   ar: %{enabled: false},
   epochs: 30
@@ -119,7 +119,7 @@ model_no_ar = Soothsayer.new(%{
 
 # Model WITH AR
 model_with_ar = Soothsayer.new(%{
-  trend: %{n_changepoints: 5},
+  trend: %{changepoints: 5},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   ar: %{enabled: true, n_lags: 7},
   epochs: 30

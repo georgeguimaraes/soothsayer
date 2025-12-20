@@ -41,7 +41,7 @@ If you call `Soothsayer.new()` without arguments, you get sensible defaults:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `trend.enabled` | `true` | Enable trend component |
-| `trend.n_changepoints` | `10` | Number of potential changepoints |
+| `trend.changepoints` | `10` | Number of potential changepoints |
 | `trend.changepoints_range` | `0.8` | Place changepoints in first 80% of data |
 | `seasonality.yearly.enabled` | `true` | Enable yearly seasonality |
 | `seasonality.yearly.fourier_terms` | `6` | Flexibility of yearly pattern |

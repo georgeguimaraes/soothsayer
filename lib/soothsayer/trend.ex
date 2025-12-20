@@ -27,13 +27,13 @@ defmodule Soothsayer.Trend do
 
   ## Returns
 
-    An Axon input node with shape `{nil, 1 + n_changepoints}`.
+    An Axon input node with shape `{nil, 1 + changepoints}`.
 
   """
   @spec build_input(map()) :: Axon.t()
   def build_input(config) do
-    n_changepoints = get_in(config, [:trend, :n_changepoints]) || 0
-    Axon.input("trend", shape: {nil, 1 + n_changepoints})
+    changepoints = get_in(config, [:trend, :changepoints]) || 0
+    Axon.input("trend", shape: {nil, 1 + changepoints})
   end
 
   @doc """
@@ -95,7 +95,7 @@ defmodule Soothsayer.Trend do
   ## Parameters
 
     * `n_samples` - Total number of samples in the dataset.
-    * `n_changepoints` - Number of changepoints to create.
+    * `changepoints` - Number of changepoints to create.
     * `changepoints_range` - Fraction of data to place changepoints in (0-1).
 
   ## Returns
@@ -112,11 +112,11 @@ defmodule Soothsayer.Trend do
           list(non_neg_integer())
   def compute_changepoint_indices(_n_samples, 0, _changepoints_range), do: []
 
-  def compute_changepoint_indices(n_samples, n_changepoints, changepoints_range) do
+  def compute_changepoint_indices(n_samples, changepoints, changepoints_range) do
     max_index = trunc(n_samples * changepoints_range)
-    step = max_index / n_changepoints
+    step = max_index / changepoints
 
-    1..n_changepoints
+    1..changepoints
     |> Enum.map(fn i -> trunc(i * step) end)
   end
 
@@ -126,7 +126,7 @@ defmodule Soothsayer.Trend do
   ## Parameters
 
     * `dates` - List of dates in the dataset.
-    * `n_changepoints` - Number of changepoints to create.
+    * `changepoints` - Number of changepoints to create.
     * `changepoints_range` - Fraction of data to place changepoints in (0-1).
 
   ## Returns
@@ -144,9 +144,9 @@ defmodule Soothsayer.Trend do
           list(Date.t())
   def compute_changepoint_positions(_dates, 0, _changepoints_range), do: []
 
-  def compute_changepoint_positions(dates, n_changepoints, changepoints_range) do
+  def compute_changepoint_positions(dates, changepoints, changepoints_range) do
     n_samples = length(dates)
-    indices = compute_changepoint_indices(n_samples, n_changepoints, changepoints_range)
+    indices = compute_changepoint_indices(n_samples, changepoints, changepoints_range)
     Enum.map(indices, fn idx -> Enum.at(dates, idx) end)
   end
 
@@ -160,7 +160,7 @@ defmodule Soothsayer.Trend do
 
   ## Returns
 
-    A tensor of shape `{n_samples, n_changepoints}` with changepoint features.
+    A tensor of shape `{n_samples, changepoints}` with changepoint features.
 
   ## Examples
 
@@ -191,11 +191,11 @@ defmodule Soothsayer.Trend do
   ## Parameters
 
     * `t` - Tensor of time values with shape `{n_samples, 1}`.
-    * `changepoint_features` - Tensor of changepoint features with shape `{n_samples, n_changepoints}`.
+    * `changepoint_features` - Tensor of changepoint features with shape `{n_samples, changepoints}`.
 
   ## Returns
 
-    A tensor of shape `{n_samples, 1 + n_changepoints}`.
+    A tensor of shape `{n_samples, 1 + changepoints}`.
 
   ## Examples
 
@@ -236,6 +236,57 @@ defmodule Soothsayer.Trend do
     |> Enum.map(fn date -> Date.diff(date, first_date) * 1.0 end)
     |> Nx.tensor()
     |> Nx.as_type({:f, 32})
+  end
+
+  @doc """
+  Builds trend features tensor and metadata from dates.
+
+  ## Parameters
+
+    * `dates` - List of dates.
+    * `config` - Model configuration map with `:trend` key.
+
+  ## Returns
+
+    A tuple `{tensor, metadata}` where:
+    - `tensor` has shape `{n_dates, 1 + changepoints}`
+    - `metadata` contains `:first_date` and `:changepoint_positions`
+
+  ## Examples
+
+      iex> dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+      iex> config = %{trend: %{changepoints: 0, changepoints_range: 0.8}}
+      iex> {tensor, metadata} = Soothsayer.Trend.build_features(dates, config)
+      iex> Nx.shape(tensor)
+      {3, 1}
+      iex> metadata.first_date
+      ~D[2023-01-01]
+
+  """
+  @spec build_features(list(Date.t()), map()) :: {Nx.Tensor.t(), map()}
+  def build_features(dates, config) do
+    first_date = List.first(dates)
+    changepoints = get_in(config, [:trend, :changepoints]) || 0
+    changepoints_range = get_in(config, [:trend, :changepoints_range]) || 0.8
+
+    changepoint_positions =
+      compute_numeric_changepoint_positions(dates, first_date, changepoints, changepoints_range)
+
+    t = date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
+    changepoint_features = build_changepoint_features(t, changepoint_positions)
+    tensor = build_trend_input(t, changepoint_features)
+
+    metadata = %{
+      first_date: first_date,
+      changepoint_positions: changepoint_positions
+    }
+
+    {tensor, metadata}
+  end
+
+  defp compute_numeric_changepoint_positions(dates, first_date, changepoints, changepoints_range) do
+    changepoint_dates = compute_changepoint_positions(dates, changepoints, changepoints_range)
+    Enum.map(changepoint_dates, fn date -> Date.diff(date, first_date) * 1.0 end)
   end
 
   @doc """

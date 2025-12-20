@@ -154,4 +154,76 @@ defmodule Soothsayer.Seasonality do
   defp days_for_date(date) do
     if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
   end
+
+  @doc """
+  Builds seasonality feature tensors from dates.
+
+  ## Parameters
+
+    * `dates` - List of dates.
+    * `config` - Model configuration map with `:seasonality` key.
+
+  ## Returns
+
+    A map with `:yearly` and `:weekly` keys containing Nx tensors.
+
+  ## Examples
+
+      iex> dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+      iex> config = %{seasonality: %{yearly: %{enabled: true, fourier_terms: 2}, weekly: %{enabled: true, fourier_terms: 2}}}
+      iex> result = Soothsayer.Seasonality.build_features(dates, config)
+      iex> Nx.shape(result.yearly)
+      {3, 4}
+
+  """
+  @spec build_features(list(Date.t()), map()) :: %{yearly: Nx.Tensor.t(), weekly: Nx.Tensor.t()}
+  def build_features(dates, config) do
+    yearly_config = get_in(config, [:seasonality, :yearly]) || %{enabled: false, fourier_terms: 0}
+    weekly_config = get_in(config, [:seasonality, :weekly]) || %{enabled: false, fourier_terms: 0}
+
+    n_dates = length(dates)
+
+    yearly =
+      if yearly_config.enabled do
+        build_period_features(dates, :yearly, yearly_config.fourier_terms)
+      else
+        Nx.broadcast(0.0, {n_dates, yearly_config.fourier_terms * 2}) |> Nx.as_type({:f, 32})
+      end
+
+    weekly =
+      if weekly_config.enabled do
+        build_period_features(dates, :weekly, weekly_config.fourier_terms)
+      else
+        Nx.broadcast(0.0, {n_dates, weekly_config.fourier_terms * 2}) |> Nx.as_type({:f, 32})
+      end
+
+    %{yearly: yearly, weekly: weekly}
+  end
+
+  defp build_period_features(dates, period, fourier_terms) do
+    t = compute_period_fractions(dates, period)
+
+    features =
+      Enum.flat_map(1..fourier_terms, fn i ->
+        sin_vals = Enum.map(t, fn t_val -> :math.sin(2 * :math.pi() * i * t_val) end)
+        cos_vals = Enum.map(t, fn t_val -> :math.cos(2 * :math.pi() * i * t_val) end)
+        [sin_vals, cos_vals]
+      end)
+
+    features
+    |> Enum.map(&Nx.tensor/1)
+    |> Nx.stack(axis: 1)
+    |> Nx.as_type({:f, 32})
+  end
+
+  defp compute_period_fractions(dates, :yearly) do
+    Enum.map(dates, fn date ->
+      days_in_year = if Date.leap_year?(date), do: @days_per_leap_year, else: @days_per_regular_year
+      Date.day_of_year(date) / days_in_year
+    end)
+  end
+
+  defp compute_period_fractions(dates, :weekly) do
+    Enum.map(dates, fn date -> Date.day_of_week(date) / @days_per_week end)
+  end
 end

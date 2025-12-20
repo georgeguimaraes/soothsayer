@@ -137,7 +137,7 @@ events_df = DataFrame.new(%{
 
 # Fit model
 model = Soothsayer.new(%{
-  trend: %{enabled: true, n_changepoints: 0},
+  trend: %{enabled: true, changepoints: 0},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   events: %{
     "sale" => %{lower_window: 0, upper_window: 0}

@@ -67,7 +67,7 @@ defmodule Soothsayer.ARModuleTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{enabled: false, n_changepoints: 0},
+          trend: %{enabled: false, changepoints: 0},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
           ar: %{enabled: true, n_lags: 3},
           epochs: 2
@@ -94,7 +94,7 @@ defmodule Soothsayer.ARModuleTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{enabled: false, n_changepoints: 0},
+          trend: %{enabled: false, changepoints: 0},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
           ar: %{enabled: true, n_lags: 5, layers: [16, 8]},
           epochs: 2

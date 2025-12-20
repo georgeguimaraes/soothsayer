@@ -7,22 +7,22 @@ defmodule Soothsayer.ChangepointsTest do
     test "new/1 includes trend changepoint config with defaults" do
       model = Soothsayer.new()
 
-      assert model.config.trend.n_changepoints == 10
+      assert model.config.trend.changepoints == 10
       assert model.config.trend.changepoints_range == 0.8
       assert model.config.trend.regularization == nil
     end
 
-    test "n_changepoints: 0 disables changepoints" do
-      model = Soothsayer.new(%{trend: %{n_changepoints: 0}})
+    test "changepoints: 0 disables changepoints" do
+      model = Soothsayer.new(%{trend: %{changepoints: 0}})
 
-      assert model.config.trend.n_changepoints == 0
+      assert model.config.trend.changepoints == 0
     end
   end
 
   describe "network with changepoints" do
-    test "build_network has trend input shape {nil, 1} when n_changepoints is 0" do
+    test "build_network has trend input shape {nil, 1} when changepoints is 0" do
       config = %{
-        trend: %{enabled: true, n_changepoints: 0, changepoints_range: 0.8, regularization: nil},
+        trend: %{enabled: true, changepoints: 0, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
@@ -36,9 +36,9 @@ defmodule Soothsayer.ChangepointsTest do
       assert inputs["trend"] == {nil, 1}
     end
 
-    test "build_network has trend input shape {nil, 1 + n_changepoints} when changepoints enabled" do
+    test "build_network has trend input shape {nil, 1 + changepoints} when changepoints enabled" do
       config = %{
-        trend: %{enabled: true, n_changepoints: 5, changepoints_range: 0.8, regularization: nil},
+        trend: %{enabled: true, changepoints: 5, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
@@ -54,7 +54,7 @@ defmodule Soothsayer.ChangepointsTest do
 
     test "build_network names trend layer 'trend_dense' for regularization" do
       config = %{
-        trend: %{enabled: true, n_changepoints: 5, changepoints_range: 0.8, regularization: nil},
+        trend: %{enabled: true, changepoints: 5, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
@@ -78,7 +78,7 @@ defmodule Soothsayer.ChangepointsTest do
   end
 
   describe "compute_changepoint_indices/3" do
-    test "returns empty list when n_changepoints is 0" do
+    test "returns empty list when changepoints is 0" do
       result = Trend.compute_changepoint_indices(100, 0, 0.8)
       assert result == []
     end
@@ -127,7 +127,7 @@ defmodule Soothsayer.ChangepointsTest do
       assert Enum.all?(result, fn date -> Date.compare(date, ~D[2023-03-23]) != :gt end)
     end
 
-    test "returns empty list when n_changepoints is 0" do
+    test "returns empty list when changepoints is 0" do
       dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)
 
       result = Trend.compute_changepoint_positions(dates, 0, 0.8)
@@ -259,7 +259,7 @@ defmodule Soothsayer.ChangepointsTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{n_changepoints: 5, changepoints_range: 0.8},
+          trend: %{changepoints: 5, changepoints_range: 0.8},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
           epochs: 2
         })
@@ -290,7 +290,7 @@ defmodule Soothsayer.ChangepointsTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{n_changepoints: 5, changepoints_range: 0.8},
+          trend: %{changepoints: 5, changepoints_range: 0.8},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
           epochs: 5
         })
@@ -307,7 +307,7 @@ defmodule Soothsayer.ChangepointsTest do
       assert Enum.any?(pred_values, fn v -> abs(v) > 1.0 end)
     end
 
-    test "n_changepoints: 0 works (backward compatible)" do
+    test "changepoints: 0 works (backward compatible)" do
       :rand.seed(:exsss, {42, 42, 42})
 
       n_points = 50
@@ -319,7 +319,7 @@ defmodule Soothsayer.ChangepointsTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{n_changepoints: 0},
+          trend: %{changepoints: 0},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
           epochs: 2
         })
@@ -348,7 +348,7 @@ defmodule Soothsayer.ChangepointsTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{n_changepoints: 3},
+          trend: %{changepoints: 3},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
           epochs: 2
         })

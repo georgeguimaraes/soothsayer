@@ -36,7 +36,7 @@ defmodule Soothsayer do
     default_config = %{
       trend: %{
         enabled: true,
-        n_changepoints: 10,
+        changepoints: 10,
         changepoints_range: 0.8,
         regularization: nil
       },
@@ -101,39 +101,10 @@ defmodule Soothsayer do
         {Nx.new_axis(y_full_normalized, -1), nil, 0}
       end
 
-    # Extract dates and compute changepoint info
+    # Build features using component modules
     dates = Series.to_list(processed_data["ds"])
-    first_date = List.first(dates)
-    n_changepoints = model.config.trend.n_changepoints
-    changepoints_range = model.config.trend.changepoints_range
-
-    # Compute changepoint positions as numeric values (days since first date)
-    changepoint_positions =
-      compute_numeric_changepoint_positions(dates, first_date, n_changepoints, changepoints_range)
-
-    # Build base time values tensor (days since first date)
-    t_full = Trend.date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
-
-    # Build changepoint features
-    changepoint_features_full =
-      Trend.build_changepoint_features(t_full, changepoint_positions)
-
-    # Build trend input with changepoint features
-    trend_full = Trend.build_trend_input(t_full, changepoint_features_full)
-
-    yearly_full =
-      get_seasonality_input(
-        processed_data,
-        :yearly,
-        model.config.seasonality.yearly.fourier_terms
-      )
-
-    weekly_full =
-      get_seasonality_input(
-        processed_data,
-        :weekly,
-        model.config.seasonality.weekly.fourier_terms
-      )
+    {trend_full, trend_metadata} = Trend.build_features(dates, model.config)
+    seasonality = Seasonality.build_features(dates, model.config)
 
     # Truncate inputs if AR is enabled (remove first n_lags rows)
     {trend, yearly, weekly} =
@@ -142,17 +113,17 @@ defmodule Soothsayer do
 
         {
           Nx.slice(trend_full, [n_lags, 0], [Nx.axis_size(trend_full, 0) - n_lags, trend_cols]),
-          Nx.slice(yearly_full, [n_lags, 0], [
-            Nx.axis_size(yearly_full, 0) - n_lags,
-            Nx.axis_size(yearly_full, 1)
+          Nx.slice(seasonality.yearly, [n_lags, 0], [
+            Nx.axis_size(seasonality.yearly, 0) - n_lags,
+            Nx.axis_size(seasonality.yearly, 1)
           ]),
-          Nx.slice(weekly_full, [n_lags, 0], [
-            Nx.axis_size(weekly_full, 0) - n_lags,
-            Nx.axis_size(weekly_full, 1)
+          Nx.slice(seasonality.weekly, [n_lags, 0], [
+            Nx.axis_size(seasonality.weekly, 0) - n_lags,
+            Nx.axis_size(seasonality.weekly, 1)
           ])
         }
       else
-        {trend_full, yearly_full, weekly_full}
+        {trend_full, seasonality.yearly, seasonality.weekly}
       end
 
     x = %{
@@ -202,21 +173,9 @@ defmodule Soothsayer do
           model.config
           |> Map.put(:normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
           |> Map.put(:training_data, training_data)
-          |> Map.put(:first_date, first_date)
-          |> Map.put(:changepoint_positions, changepoint_positions)
+          |> Map.put(:first_date, trend_metadata.first_date)
+          |> Map.put(:changepoint_positions, trend_metadata.changepoint_positions)
     }
-  end
-
-  defp compute_numeric_changepoint_positions(
-         dates,
-         first_date,
-         n_changepoints,
-         changepoints_range
-       ) do
-    changepoint_dates =
-      Trend.compute_changepoint_positions(dates, n_changepoints, changepoints_range)
-
-    Enum.map(changepoint_dates, fn date -> Date.diff(date, first_date) * 1.0 end)
   end
 
   @doc """
@@ -290,24 +249,22 @@ defmodule Soothsayer do
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
 
-    processed_x =
-      Seasonality.add_fourier_features(DataFrame.new(%{"ds" => x}), "ds", model.config.seasonality)
-
-    # Build trend input with changepoint features using stored positions
     prediction_dates = Series.to_list(x)
+
+    # Build trend input using stored changepoint positions from training
     first_date = model.config.first_date
     changepoint_positions = model.config.changepoint_positions
-
     t = Trend.date_to_numeric(prediction_dates, first_date) |> Nx.new_axis(-1)
     changepoint_features = Trend.build_changepoint_features(t, changepoint_positions)
     trend_input = Trend.build_trend_input(t, changepoint_features)
 
+    # Build seasonality features
+    seasonality = Seasonality.build_features(prediction_dates, model.config)
+
     x_input = %{
       "trend" => trend_input,
-      "yearly" =>
-        get_seasonality_input(processed_x, :yearly, model.config.seasonality.yearly.fourier_terms),
-      "weekly" =>
-        get_seasonality_input(processed_x, :weekly, model.config.seasonality.weekly.fourier_terms)
+      "yearly" => seasonality.yearly,
+      "weekly" => seasonality.weekly
     }
 
     # Add AR input if enabled
@@ -339,26 +296,6 @@ defmodule Soothsayer do
     Map.new(predictions, fn {key, node} ->
       {key, denormalize(node, model.config.normalization.y)}
     end)
-  end
-
-  defp get_seasonality_input(data, seasonality, fourier_terms) do
-    columns = data.names |> Enum.filter(&String.starts_with?(&1, Atom.to_string(seasonality)))
-
-    case columns do
-      [] ->
-        # No seasonality columns found - return zero tensor with expected shape
-        row_count = DataFrame.n_rows(data)
-        col_count = 2 * fourier_terms
-        Nx.broadcast(0.0, {row_count, col_count}) |> Nx.as_type({:f, 32})
-
-      _ ->
-        data[columns]
-        |> DataFrame.to_series()
-        |> Map.values()
-        |> Enum.map(&Series.to_tensor/1)
-        |> Nx.stack(axis: 1)
-        |> Nx.as_type({:f, 32})
-    end
   end
 
   defp normalize(tensor) do
@@ -483,31 +420,6 @@ defmodule Soothsayer do
   """
   @spec get_event_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
   def get_event_effects(%Model{} = model) do
-    events_config = model.config[:events] || %{}
-
-    if map_size(events_config) == 0 do
-      raise ArgumentError, "No events configured on this model"
-    end
-
-    unless model.params do
-      raise ArgumentError, "Model has not been fitted yet"
-    end
-
-    # Get the events_dense layer weights
-    events_layer = model.params.data["events_dense"]
-
-    unless events_layer do
-      raise ArgumentError, "Events layer not found in model params"
-    end
-
-    # Get kernel weights - shape is {n_features, 1}
-    kernel = events_layer["kernel"]
-    coefficients = kernel |> Nx.flatten() |> Nx.to_flat_list()
-
-    # Get feature names and zip with coefficients
-    feature_names = Events.feature_names(events_config)
-
-    Enum.zip(feature_names, coefficients)
-    |> Enum.into(%{})
+    Events.get_effects(model)
   end
 end

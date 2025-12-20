@@ -4,23 +4,23 @@ defmodule Soothsayer.TrendTest do
   alias Soothsayer.Trend
 
   describe "build_input/1" do
-    test "returns input with shape {nil, 1} when n_changepoints is 0" do
-      config = %{trend: %{n_changepoints: 0}}
+    test "returns input with shape {nil, 1} when changepoints is 0" do
+      config = %{trend: %{changepoints: 0}}
 
       input = Trend.build_input(config)
 
       assert Axon.get_inputs(input)["trend"] == {nil, 1}
     end
 
-    test "returns input with shape {nil, 1 + n_changepoints}" do
-      config = %{trend: %{n_changepoints: 5}}
+    test "returns input with shape {nil, 1 + changepoints}" do
+      config = %{trend: %{changepoints: 5}}
 
       input = Trend.build_input(config)
 
       assert Axon.get_inputs(input)["trend"] == {nil, 6}
     end
 
-    test "returns input with shape {nil, 1} when trend config missing n_changepoints" do
+    test "returns input with shape {nil, 1} when trend config missing changepoints" do
       config = %{trend: %{}}
 
       input = Trend.build_input(config)
@@ -31,7 +31,7 @@ defmodule Soothsayer.TrendTest do
 
   describe "build_component/2" do
     test "returns dense layer when enabled" do
-      config = %{trend: %{enabled: true, n_changepoints: 0}}
+      config = %{trend: %{enabled: true, changepoints: 0}}
       input = Axon.input("trend", shape: {nil, 1})
 
       component = Trend.build_component(input, config)
@@ -44,7 +44,7 @@ defmodule Soothsayer.TrendTest do
     end
 
     test "returns constant 0 when disabled" do
-      config = %{trend: %{enabled: false, n_changepoints: 0}}
+      config = %{trend: %{enabled: false, changepoints: 0}}
       input = Axon.input("trend", shape: {nil, 1})
 
       component = Trend.build_component(input, config)
@@ -58,7 +58,7 @@ defmodule Soothsayer.TrendTest do
     end
 
     test "dense layer is named 'trend_dense' for regularization" do
-      config = %{trend: %{enabled: true, n_changepoints: 3}}
+      config = %{trend: %{enabled: true, changepoints: 3}}
       input = Axon.input("trend", shape: {nil, 4})
 
       component = Trend.build_component(input, config)
@@ -74,7 +74,7 @@ defmodule Soothsayer.TrendTest do
     test "extracts trend_dense kernel and bias from fitted model" do
       # Create a minimal model with trend enabled
       config = %{
-        trend: %{enabled: true, n_changepoints: 2, changepoints_range: 0.8, regularization: nil},
+        trend: %{enabled: true, changepoints: 2, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
@@ -105,7 +105,7 @@ defmodule Soothsayer.TrendTest do
 
     test "raises when model not fitted" do
       config = %{
-        trend: %{enabled: true, n_changepoints: 0, changepoints_range: 0.8, regularization: nil},
+        trend: %{enabled: true, changepoints: 0, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
@@ -122,7 +122,7 @@ defmodule Soothsayer.TrendTest do
 
     test "raises when trend not enabled" do
       config = %{
-        trend: %{enabled: false, n_changepoints: 0, changepoints_range: 0.8, regularization: nil},
+        trend: %{enabled: false, changepoints: 0, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
           yearly: %{enabled: false, fourier_terms: 4},
           weekly: %{enabled: false, fourier_terms: 2}
@@ -151,7 +151,7 @@ defmodule Soothsayer.TrendTest do
 
   # Existing changepoint tests - these should still pass after rename
   describe "compute_changepoint_indices/3" do
-    test "returns empty list when n_changepoints is 0" do
+    test "returns empty list when changepoints is 0" do
       result = Trend.compute_changepoint_indices(100, 0, 0.8)
       assert result == []
     end
@@ -182,6 +182,70 @@ defmodule Soothsayer.TrendTest do
       assert Nx.shape(result) == {5, 1}
       expected = Nx.tensor([[0.0], [0.0], [0.5], [1.5], [2.5]])
       assert Nx.to_flat_list(result) == Nx.to_flat_list(expected)
+    end
+  end
+
+  describe "build_features/2" do
+    test "returns tensor and metadata" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]]
+      config = %{trend: %{changepoints: 2, changepoints_range: 0.8}}
+
+      {tensor, metadata} = Trend.build_features(dates, config)
+
+      assert is_struct(tensor, Nx.Tensor)
+      assert Map.has_key?(metadata, :first_date)
+      assert Map.has_key?(metadata, :changepoint_positions)
+    end
+
+    test "tensor has shape {n_dates, 1 + changepoints}" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]]
+      config = %{trend: %{changepoints: 2, changepoints_range: 0.8}}
+
+      {tensor, _metadata} = Trend.build_features(dates, config)
+
+      # 5 dates, 1 + 2 changepoints = 3 columns
+      assert Nx.shape(tensor) == {5, 3}
+    end
+
+    test "first column is days since first date" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+      config = %{trend: %{changepoints: 0, changepoints_range: 0.8}}
+
+      {tensor, _metadata} = Trend.build_features(dates, config)
+
+      # Days: 0, 1, 2
+      first_col = Nx.slice(tensor, [0, 0], [3, 1]) |> Nx.flatten() |> Nx.to_flat_list()
+      assert first_col == [0.0, 1.0, 2.0]
+    end
+
+    test "metadata includes first_date" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+      config = %{trend: %{changepoints: 0, changepoints_range: 0.8}}
+
+      {_tensor, metadata} = Trend.build_features(dates, config)
+
+      assert metadata.first_date == ~D[2023-01-01]
+    end
+
+    test "metadata includes changepoint_positions as numeric values" do
+      dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)
+      config = %{trend: %{changepoints: 5, changepoints_range: 0.8}}
+
+      {_tensor, metadata} = Trend.build_features(dates, config)
+
+      assert is_list(metadata.changepoint_positions)
+      assert length(metadata.changepoint_positions) == 5
+      assert Enum.all?(metadata.changepoint_positions, &is_number/1)
+    end
+
+    test "handles zero changepoints" do
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+      config = %{trend: %{changepoints: 0, changepoints_range: 0.8}}
+
+      {tensor, metadata} = Trend.build_features(dates, config)
+
+      assert Nx.shape(tensor) == {3, 1}
+      assert metadata.changepoint_positions == []
     end
   end
 end

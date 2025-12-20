@@ -187,7 +187,7 @@ defmodule SoothsayerTest do
       # Create model with events
       model =
         Soothsayer.new(%{
-          trend: %{enabled: true, n_changepoints: 0},
+          trend: %{enabled: true, changepoints: 0},
           seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
@@ -244,7 +244,7 @@ defmodule SoothsayerTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{enabled: true, n_changepoints: 0},
+          trend: %{enabled: true, changepoints: 0},
           seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
@@ -306,7 +306,7 @@ defmodule SoothsayerTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{enabled: true, n_changepoints: 0},
+          trend: %{enabled: true, changepoints: 0},
           seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
@@ -355,7 +355,7 @@ defmodule SoothsayerTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{enabled: true, n_changepoints: 0},
+          trend: %{enabled: true, changepoints: 0},
           seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
@@ -407,7 +407,7 @@ defmodule SoothsayerTest do
 
       model =
         Soothsayer.new(%{
-          trend: %{enabled: true, n_changepoints: 0},
+          trend: %{enabled: true, changepoints: 0},
           seasonality: %{
             yearly: %{enabled: false},
             weekly: %{enabled: false}
