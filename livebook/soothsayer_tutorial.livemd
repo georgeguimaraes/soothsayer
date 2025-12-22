@@ -691,10 +691,13 @@ historical_subset =
   |> DataFrame.tail(180)
   |> DataFrame.put("yhat", Soothsayer.predict(fitted_energy, DataFrame.tail(real_df, 180)["ds"]))
   |> DataFrame.put("type", List.duplicate("historical", 180))
+  |> DataFrame.select(["ds", "y", "yhat", "type"])
 
 forecast_with_type =
   future_df
+  |> DataFrame.put("y", List.duplicate(nil, 90))
   |> DataFrame.put("type", List.duplicate("forecast", 90))
+  |> DataFrame.select(["ds", "y", "yhat", "type"])
 
 combined_df = DataFrame.concat_rows([historical_subset, forecast_with_type])
 
