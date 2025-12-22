@@ -305,4 +305,6 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/) f
 
 ## License
 
+Copyright 2024 George Guimarães
+
 Soothsayer is released under the Apache License 2.0. See the LICENSE file for details.

@@ -57,6 +57,13 @@ defmodule Soothsayer.MixProject do
       authors: ["George Guimarães"],
       source_url: @source_url,
       source_ref: "v#{@version}",
+      before_closing_body_tag: fn _format ->
+        """
+        <footer style="padding: 1rem 0; margin-top: 2rem; border-top: 1px solid #e1e4e8; font-size: 0.875rem; color: #586069;">
+          Copyright 2024 George Guimarães. Licensed under Apache-2.0.
+        </footer>
+        """
+      end,
       deps: [
         axon: "https://hexdocs.pm/axon/",
         nx: "https://hexdocs.pm/nx/",
