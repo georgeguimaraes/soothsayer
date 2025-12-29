@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.0...v0.6.1) (2025-12-28)
+
+
+### Bug Fixes
+
+* Align dataframe columns for concat in forecast example ([ef0d01c](https://github.com/georgeguimaraes/soothsayer/commit/ef0d01c8dd400e14b9a2b26c7599951375431ff8))
+
 ## [0.6.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.5.0...v0.6.0) (2025-12-20)
 
 
