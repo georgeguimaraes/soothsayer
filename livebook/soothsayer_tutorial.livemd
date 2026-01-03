@@ -14,6 +14,16 @@ alias Explorer.DataFrame
 alias Explorer.Series
 alias VegaLite, as: Vl
 
+# Configure EXLA backend
+# If you're sharing your GPU with other applications (like X windows or other ML processes),
+# you may need to disable memory preallocation to avoid out-of-memory errors:
+#
+#   Application.put_env(:exla, :clients, cuda: [platform: :cuda, preallocate: false])
+#
+# Or limit the memory fraction:
+#
+#   Application.put_env(:exla, :clients, cuda: [platform: :cuda, memory_fraction: 0.5])
+
 Nx.global_default_backend(EXLA.Backend)
 ```
 

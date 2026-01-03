@@ -259,6 +259,34 @@ Or set it at runtime:
 Nx.global_default_backend(EXLA.Backend)
 ```
 
+### GPU Memory Configuration
+
+By default, XLA pre-allocates 90% of GPU memory at startup for performance. This can cause issues if you're sharing the GPU with other applications (like X windows, other ML processes, or running multiple notebooks).
+
+If you see errors like `CUDNN_STATUS_INTERNAL_ERROR` or out-of-memory errors when starting, configure EXLA to disable preallocation or limit memory usage in `config/config.exs`:
+
+```elixir
+# Disable preallocation (allocates on-demand)
+config :exla, :clients,
+  cuda: [platform: :cuda, preallocate: false]
+
+# Or limit to 50% of GPU memory
+config :exla, :clients,
+  cuda: [platform: :cuda, memory_fraction: 0.5]
+```
+
+Alternatively, set environment variables before starting your application:
+
+```bash
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+# Or: export XLA_PYTHON_CLIENT_MEM_FRACTION=0.5
+```
+
+| Option | Effect |
+|--------|--------|
+| `preallocate: false` | Allocates memory on-demand instead of upfront |
+| `memory_fraction: 0.5` | Pre-allocates only 50% of GPU memory |
+
 ## Full Configuration Example
 
 Here's a model configured for daily sales data with yearly seasonality, short-term momentum, and holiday effects:

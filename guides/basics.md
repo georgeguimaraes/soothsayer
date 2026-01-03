@@ -68,6 +68,24 @@ config :nx, default_backend: EXLA.Backend
 Nx.global_default_backend(EXLA.Backend)
 ```
 
+### GPU Memory Configuration
+
+By default, XLA pre-allocates 90% of GPU memory at startup. If you're sharing the GPU with other applications (X windows, other ML processes, etc.) and see `CUDNN_STATUS_INTERNAL_ERROR` or out-of-memory errors, disable preallocation:
+
+```elixir
+# In config/config.exs
+config :exla, :clients,
+  cuda: [platform: :cuda, preallocate: false]
+```
+
+Or via environment variable (before starting):
+
+```bash
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+```
+
+See the [README](https://github.com/georgeguimaraes/soothsayer#gpu-memory-configuration) for more options.
+
 ## Making Predictions
 
 Use `Soothsayer.predict/2` with an Explorer Series of dates:
