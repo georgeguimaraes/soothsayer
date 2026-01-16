@@ -11,9 +11,4 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: googleapis/release-please-action@v4
-        with:
-          release-type: elixir
-          skip-github-release: true
+    uses: georgeguimaraes/workflows/.github/workflows/release-please.yml@main

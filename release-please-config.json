@@ -1,9 +1,10 @@
 {
   "pull-request-header": ":rocket: Want to release this?",
-  "pull-request-title-pattern": "chore: release ${version}",
-  "always-bump-patch": true,
+  "pull-request-title-pattern": "chore(main): release ${version}",
+  "include-v-in-tag": true,
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
+  "always-bump-patch": true,
   "packages": {
     ".": {
       "release-type": "elixir",
@@ -18,7 +19,8 @@
         {"type": "ci", "section": "Continuous Integration", "hidden": false},
         {"type": "perf", "section": "Performance Improvements", "hidden": false},
         {"type": "style", "section": "Styles", "hidden": true},
-        {"type": "revert", "section": "Reverts", "hidden": false}
+        {"type": "revert", "section": "Reverts", "hidden": false},
+        {"type": "", "section": "Other Changes", "hidden": false}
       ]
     }
   },
