@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.3](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.2...v0.6.3) (2026-03-04)
+
+
+### Bug Fixes
+
+* **ci:** chain hex-publish in release-please workflow ([94740ea](https://github.com/georgeguimaraes/soothsayer/commit/94740ea13d347fe82d05ab6e4c659eefd6ba7b5a))
+
+
+### Miscellaneous
+
+* remove unused on-release workflow ([a5723fb](https://github.com/georgeguimaraes/soothsayer/commit/a5723fbc5b31e93c3c1057d8f38f37fbde206430))
+
+
+### Build System
+
+* **deps-dev:** bump credo from 1.7.15 to 1.7.17 ([#28](https://github.com/georgeguimaraes/soothsayer/issues/28)) ([775da92](https://github.com/georgeguimaraes/soothsayer/commit/775da9243dd91415f0096f666ce03036c8215ee4))
+* **deps-dev:** bump ex_doc from 0.40.0 to 0.40.1 ([#27](https://github.com/georgeguimaraes/soothsayer/issues/27)) ([e1a9469](https://github.com/georgeguimaraes/soothsayer/commit/e1a946934b434dd95585ed3dabb497c4b418120a))
+
 ## [0.6.2](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.1...v0.6.2) (2026-01-21)
 
 
