@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.4](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.3...v0.6.4) (2026-04-27)
+
+
+### Build System
+
+* **deps-dev:** bump credo from 1.7.17 to 1.7.18 ([#30](https://github.com/georgeguimaraes/soothsayer/issues/30)) ([2c6bf4b](https://github.com/georgeguimaraes/soothsayer/commit/2c6bf4bbb6fd8522dfad5c247698f066babc2a5a))
+* **deps:** bump axon from 0.8.0 to 0.8.1 ([#29](https://github.com/georgeguimaraes/soothsayer/issues/29)) ([401893c](https://github.com/georgeguimaraes/soothsayer/commit/401893c1e74129ed8ec1909b681edc56f9ca35cb))
+* **deps:** bump googleapis/release-please-action from 4 to 5 ([#31](https://github.com/georgeguimaraes/soothsayer/issues/31)) ([093d4e0](https://github.com/georgeguimaraes/soothsayer/commit/093d4e05c2c0898aaa82c9f92344ef6e78a76b0d))
+
 ## [0.6.3](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.2...v0.6.3) (2026-03-04)
 
 
