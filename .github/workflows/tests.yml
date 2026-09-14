@@ -41,3 +41,24 @@ jobs:
         run: mix deps.get
       - name: Run tests
         run: mix test
+
+  benchmark:
+    runs-on: ubuntu-latest
+    name: NeuralProphet benchmark
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - name: Restore dependencies cache
+        uses: actions/cache@v5
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+      - name: Install dependencies
+        run: mix deps.get
+      - name: Run benchmark suite
+        run: mix test --only benchmark

@@ -323,6 +323,27 @@ model = Soothsayer.new(%{
 })
 ```
 
+## Benchmarks Against NeuralProphet
+
+The test suite includes a benchmark layer that fits Soothsayer on the datasets NeuralProphet uses in its own model performance tests, with the same 90/10 split, and prints validation metrics next to the numbers NeuralProphet's CI publishes. It's excluded from the default run:
+
+```bash
+mix test --only benchmark
+```
+
+Results as of September 2026 (lower is better):
+
+| Dataset | Metric | NeuralProphet | Soothsayer | Notes |
+|---------|--------|---------------|------------|-------|
+| Peyton Manning (daily) | MAE | 0.350 | 0.304 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.501 | 0.499 | identical configuration |
+| Energy price (daily, AR 14 lags) | MAE | 5.40 | 4.73 | NeuralProphet averaged 7 steps ahead with a temperature regressor, Soothsayer is one step ahead without it |
+| Energy price (daily, AR 14 lags) | RMSE | 6.71 | 6.03 | same caveat |
+| Air passengers (monthly) | MAE | 30.1 | 31.5 | NeuralProphet used multiplicative seasonality |
+| Air passengers (monthly) | RMSE | 31.1 | 40.0 | NeuralProphet used multiplicative seasonality |
+
+The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT license. NeuralProphet's Yosemite benchmark (5-minute data) is not included since Soothsayer only supports daily dates today.
+
 ## Features Not Yet Implemented
 
 The following NeuralProphet features are on the roadmap:
