@@ -165,33 +165,13 @@ defmodule Soothsayer do
     # Add AR input if enabled
     x = if ar_input != nil, do: Map.put(x, "ar", ar_input), else: x
 
-    # Add events input if configured
-    events_config = model.config[:events] || %{}
-    dates = Series.to_list(processed_data["ds"])
-
     # Events and regressors line up with the (possibly AR-truncated) targets
-    feature_dates =
-      if lags > 0 do
-        Enum.drop(dates, lags)
-      else
-        dates
-      end
+    feature_dates = Enum.drop(dates, lags)
 
     x =
-      if map_size(events_config) > 0 and events_df != nil do
-        events_input =
-          Events.build_features(Series.from_list(feature_dates), events_df, events_config)
-
-        Map.put(x, "events", events_input)
-      else
-        x
-      end
-
-    x =
-      case model.config.regressors do
-        [] -> x
-        names -> Map.put(x, "regressors", Regressors.build_features(feature_dates, data, names))
-      end
+      x
+      |> put_events_input(model, feature_dates, events_df)
+      |> put_regressors_input(model, feature_dates, data)
 
     {x_normalized, x_norm} = normalize_inputs(x)
 
@@ -358,6 +338,24 @@ defmodule Soothsayer do
     denormalize_components(predictions, model.config.normalization.y)
   end
 
+  defp put_events_input(x, model, dates, events_df) do
+    events_config = model.config[:events] || %{}
+
+    if map_size(events_config) > 0 and events_df != nil do
+      events_input = Events.build_features(Series.from_list(dates), events_df, events_config)
+      Map.put(x, "events", events_input)
+    else
+      x
+    end
+  end
+
+  defp put_regressors_input(x, model, dates, regressors_df) do
+    case model.config.regressors do
+      [] -> x
+      names -> Map.put(x, "regressors", Regressors.build_features(dates, regressors_df, names))
+    end
+  end
+
   defp ar_enabled?(model), do: model.config.ar.enabled and model.config.ar.lags > 0
 
   defp validate_regressors_option!(%Model{config: %{regressors: []}}, _regressors_df), do: :ok
@@ -380,29 +378,13 @@ defmodule Soothsayer do
 
     seasonality = Seasonality.build_features(dates, model.config)
 
-    x_input = %{
+    %{
       "trend" => trend_input,
       "yearly" => seasonality.yearly,
       "weekly" => seasonality.weekly
     }
-
-    events_config = model.config[:events] || %{}
-
-    x_input =
-      if map_size(events_config) > 0 and events_df != nil do
-        events_input = Events.build_features(Series.from_list(dates), events_df, events_config)
-        Map.put(x_input, "events", events_input)
-      else
-        x_input
-      end
-
-    case model.config.regressors do
-      [] ->
-        x_input
-
-      names ->
-        Map.put(x_input, "regressors", Regressors.build_features(dates, regressors_df, names))
-    end
+    |> put_events_input(model, dates, events_df)
+    |> put_regressors_input(model, dates, regressors_df)
   end
 
   # Observed values in normalized y space, keyed by date. Training data comes
