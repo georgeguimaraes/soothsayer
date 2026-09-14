@@ -46,7 +46,8 @@ defmodule Soothsayer do
       },
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil},
       epochs: 100,
-      learning_rate: 0.01
+      learning_rate: 0.01,
+      batch_size: nil
     }
 
     merged_config = deep_merge(default_config, config)

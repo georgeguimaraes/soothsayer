@@ -236,10 +236,13 @@ This shows how much each event (at each window position) adds to the forecast.
 
 ```elixir
 Soothsayer.new(%{
-  epochs: 100,        # training iterations (default: 100)
-  learning_rate: 0.01 # how fast to learn (default: 0.01)
+  epochs: 100,         # passes over the training data (default: 100)
+  learning_rate: 0.01, # how fast to learn (default: 0.01)
+  batch_size: nil      # rows per gradient step (default: picked from the data size)
 })
 ```
+
+Training runs in shuffled minibatches, so one epoch is one pass over the data. When `batch_size` is `nil`, Soothsayer picks a size from the number of rows (16 for a few hundred rows, 32 for a few thousand, up to 512), the same heuristic NeuralProphet uses. Smaller batches mean more gradient steps per epoch.
 
 If your model is underfitting (predictions are too smooth), try more epochs or a higher learning rate. If it's overfitting (fits training data but not new data), try fewer epochs or more regularization.
 
