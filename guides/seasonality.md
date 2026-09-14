@@ -30,6 +30,7 @@ For more details, see [NeuralProphet's Seasonality documentation](https://neural
 ```elixir
 model = Soothsayer.new(%{
   seasonality: %{
+    mode: :additive,      # :additive or :multiplicative
     yearly: %{
       enabled: true,      # Enable yearly seasonality
       fourier_terms: 6    # Number of Fourier terms
@@ -46,6 +47,7 @@ model = Soothsayer.new(%{
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `mode` | `:additive` | How seasonality combines with the trend, see below |
 | `yearly.enabled` | `true` | Enable yearly (annual) patterns |
 | `yearly.fourier_terms` | `6` | Flexibility of yearly pattern |
 | `weekly.enabled` | `true` | Enable weekly patterns |
@@ -103,6 +105,32 @@ Good for:
 | 2 | Low | Simple weekday/weekend split |
 | 3 | Medium | Most cases (default) |
 | 5+ | High | Complex day-specific patterns |
+
+## Additive vs Multiplicative
+
+By default the seasonal effect is added to the trend, so a summer peak is the same size in year one and year five:
+
+```
+y(t) = trend(t) + seasonality(t)
+```
+
+Many series don't behave like that. Airline passengers, retail sales and web traffic tend to have seasonal swings that grow as the series grows. For those, use multiplicative mode, where the seasonal effect is a fraction of the trend:
+
+```
+y(t) = trend(t) * (1 + seasonality(t))
+```
+
+```elixir
+model = Soothsayer.new(%{
+  seasonality: %{mode: :multiplicative}
+})
+```
+
+A quick way to choose: plot the series. If the peaks and troughs get wider as the level rises, go multiplicative. If they stay the same width, stay additive.
+
+`Soothsayer.predict_components/3` still returns the seasonal components in absolute units (how much was added to the trend on each date), so they keep summing to the combined forecast in either mode.
+
+Multiplicative mode only affects seasonality for now. Events and auto-regression stay additive.
 
 ## Choosing Fourier Terms
 

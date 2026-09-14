@@ -86,6 +86,25 @@ defmodule Soothsayer.TrainerTest do
     end
   end
 
+  describe "seed" do
+    test "same seed gives identical parameters, no seed gives different ones" do
+      network =
+        Axon.input("x", shape: {nil, 2})
+        |> Axon.dense(1, activation: :linear)
+        |> then(&Axon.container(%{combined: &1}))
+
+      x = %{"x" => Nx.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])}
+      y = Nx.tensor([[3.0], [7.0], [11.0], [15.0]])
+
+      kernel = fn config ->
+        Trainer.fit(network, x, y, 2, config).data["dense_0"]["kernel"] |> Nx.to_flat_list()
+      end
+
+      assert kernel.(%{learning_rate: 0.1, seed: 7}) == kernel.(%{learning_rate: 0.1, seed: 7})
+      refute kernel.(%{learning_rate: 0.1, seed: 7}) == kernel.(%{learning_rate: 0.1, seed: 8})
+    end
+  end
+
   describe "batches/3" do
     test "shuffles rows into fixed-size batches and drops the leftover" do
       x = %{"a" => Nx.iota({100, 2}), "b" => Nx.iota({100, 3})}

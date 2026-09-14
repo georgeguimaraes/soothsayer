@@ -26,6 +26,10 @@ defmodule Soothsayer.Trainer do
       - `:learning_rate` - Learning rate for the optimizer.
       - `:batch_size` - Rows per gradient step. `nil` (or missing) picks a
         size based on the number of rows, see `auto_batch_size/1`.
+      - `:seed` - Integer seed for parameter initialization and batch
+        shuffling, so two fits with the same seed produce the same model.
+        `nil` (or missing) leaves both random. Seeding the shuffle reseeds
+        `:rand` in the calling process.
       - `:ar` - Optional map with `:regularization` for AR L1 penalty.
       - `:trend` - Optional map with `:regularization` for trend L1 penalty.
 
@@ -43,7 +47,10 @@ defmodule Soothsayer.Trainer do
   @spec fit(Axon.t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer(), map()) ::
           Axon.ModelState.t(any(), any())
   def fit(network, x, y, epochs, config) do
-    {init_fn, _predict_fn} = Axon.build(network)
+    seed = config[:seed]
+    if seed, do: :rand.seed(:exsss, {seed, seed, seed})
+
+    {init_fn, _predict_fn} = Axon.build(network, build_options(seed))
     initial_params = init_fn.(x, Axon.ModelState.empty())
 
     n_rows = Nx.axis_size(y, 0)
@@ -58,6 +65,9 @@ defmodule Soothsayer.Trainer do
       train_standard(network, x, y, epochs, batch_size, initial_params, config)
     end
   end
+
+  defp build_options(nil), do: []
+  defp build_options(seed), do: [seed: seed]
 
   @doc """
   Picks a batch size from the number of training rows.

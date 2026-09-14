@@ -25,6 +25,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
   @fixtures Path.expand("../fixtures/neuralprophet", __DIR__)
   @validation_fraction 0.1
+  @seed 42
 
   setup_all do
     IO.puts("\n| Benchmark | Metric | NeuralProphet | Soothsayer | Ratio | Notes |")
@@ -34,10 +35,9 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
   describe "Peyton Manning (daily log page views)" do
     test "default configuration matches NeuralProphet's defaults" do
-      :rand.seed(:exsss, {1, 2, 3})
       {train, validation} = load_and_split("wp_log_peyton_manning.csv")
 
-      fitted_model = Soothsayer.fit(Soothsayer.new(), train)
+      fitted_model = Soothsayer.fit(Soothsayer.new(%{seed: @seed}), train)
       predictions = Soothsayer.predict(fitted_model, validation["ds"])
 
       metrics = validation_metrics(predictions, validation["y"])
@@ -49,18 +49,23 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same config: 10 changepoints, yearly 6, weekly 3, additive"
       )
 
-      # Measured 0.304 / 0.499 over three runs, ceilings are 1.25x the worst run
-      assert metrics.mean_absolute_error < 0.38
-      assert metrics.root_mean_squared_error < 0.62
+      # Seed 42 gives 0.286 / 0.473. Across six seeds: MAE 0.286 to 0.354,
+      # RMSE 0.473 to 0.535. Ceilings are 1.25x the worst seed.
+      assert metrics.mean_absolute_error < 0.45
+      assert metrics.root_mean_squared_error < 0.67
     end
   end
 
   describe "Air Passengers (monthly)" do
-    test "additive yearly seasonality on monthly data" do
-      :rand.seed(:exsss, {1, 2, 3})
+    test "multiplicative yearly seasonality on monthly data" do
       {train, validation} = load_and_split("air_passengers.csv")
 
-      model = Soothsayer.new(%{seasonality: %{weekly: %{enabled: false}}})
+      model =
+        Soothsayer.new(%{
+          seasonality: %{mode: :multiplicative, weekly: %{enabled: false}},
+          seed: @seed
+        })
+
       fitted_model = Soothsayer.fit(model, train)
       predictions = Soothsayer.predict(fitted_model, validation["ds"])
 
@@ -70,21 +75,24 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "AirPassengers",
         metrics,
         %{mean_absolute_error: 30.1315, root_mean_squared_error: 31.0835},
-        notes: "NeuralProphet used multiplicative seasonality, Soothsayer is additive only"
+        notes: "same config: multiplicative seasonality, weekly disabled for monthly rows"
       )
 
-      # Measured 31.0 to 32.1 / 38.5 to 41.8 over three runs, only 130 training rows
-      assert metrics.mean_absolute_error < 40.0
-      assert metrics.root_mean_squared_error < 52.0
+      # Seed 42 gives 23.1 / 25.0. Across six seeds: MAE 22.0 to 30.7,
+      # RMSE 24.1 to 33.2 (additive mode was 31 to 32 / 38 to 42). Only 130
+      # training rows, so init matters a lot here. Ceilings are 1.25x the worst seed.
+      assert metrics.mean_absolute_error < 38.5
+      assert metrics.root_mean_squared_error < 41.5
     end
   end
 
   describe "Energy price daily" do
     test "auto-regression with 14 lags, one step ahead" do
-      :rand.seed(:exsss, {1, 2, 3})
       {train, validation} = load_and_split("energy_price_daily.csv")
 
-      model = Soothsayer.new(%{ar: %{enabled: true, lags: 14}, trend: %{changepoints: 0}})
+      model =
+        Soothsayer.new(%{ar: %{enabled: true, lags: 14}, trend: %{changepoints: 0}, seed: @seed})
+
       fitted_model = Soothsayer.fit(model, train)
 
       # Validation actuals seed the lags, so every prediction is one step
@@ -102,9 +110,10 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
           "NeuralProphet averaged 7 forecast steps and used temperature as a lagged and future regressor"
       )
 
-      # Measured 4.729 / 6.034 over three runs
-      assert metrics.mean_absolute_error < 5.9
-      assert metrics.root_mean_squared_error < 7.55
+      # Seed 42 gives 4.80 / 6.17. Across six seeds: MAE 4.66 to 5.19,
+      # RMSE 5.97 to 6.59. Ceilings are 1.25x the worst seed.
+      assert metrics.mean_absolute_error < 6.5
+      assert metrics.root_mean_squared_error < 8.25
     end
   end
 

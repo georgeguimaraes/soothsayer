@@ -41,18 +41,30 @@ defmodule Soothsayer do
         regularization: nil
       },
       seasonality: %{
+        mode: :additive,
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3}
       },
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil},
       epochs: 100,
       learning_rate: 0.01,
-      batch_size: nil
+      batch_size: nil,
+      seed: nil
     }
 
     merged_config = deep_merge(default_config, config)
+    validate_config!(merged_config)
     Model.new(merged_config)
   end
+
+  @seasonality_modes [:additive, :multiplicative]
+
+  defp validate_config!(%{seasonality: %{mode: mode}}) when mode not in @seasonality_modes do
+    raise ArgumentError,
+          "seasonality.mode must be one of #{inspect(@seasonality_modes)}, got #{inspect(mode)}"
+  end
+
+  defp validate_config!(_config), do: :ok
 
   @doc """
   Fits the Soothsayer model to the provided data.
@@ -160,7 +172,14 @@ defmodule Soothsayer do
 
     {x_normalized, x_norm} = normalize_inputs(x)
 
-    fitted_model = Model.fit(model, x_normalized, y_normalized, model.config.epochs)
+    # The network is rebuilt now that the y normalization is known, since
+    # multiplicative seasonality needs the series level as a constant.
+    config =
+      Map.put(model.config, :normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
+
+    model = %{model | config: config, network: Model.build_network(config)}
+
+    fitted_model = Model.fit(model, x_normalized, y_normalized, config.epochs)
 
     # Store training data for prediction lookups
     training_data = %{
@@ -171,8 +190,7 @@ defmodule Soothsayer do
     %{
       fitted_model
       | config:
-          model.config
-          |> Map.put(:normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
+          config
           |> Map.put(:training_data, training_data)
           |> Map.put(:first_date, trend_metadata.first_date)
           |> Map.put(:changepoint_positions, trend_metadata.changepoint_positions)
@@ -249,6 +267,10 @@ defmodule Soothsayer do
     series, so the other components are zero-centered offsets around it.
     Components that are disabled in the config are all zeros. When trend is
     disabled, `:trend` is a flat line at the training mean.
+
+    With `seasonality: %{mode: :multiplicative}` the seasonal components are
+    still returned in absolute units (the amount added to the trend on that
+    date), not as fractions of the trend, so they keep summing to `:combined`.
 
   ## Examples
 

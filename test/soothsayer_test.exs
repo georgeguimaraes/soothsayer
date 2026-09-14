@@ -480,4 +480,85 @@ defmodule SoothsayerTest do
       assert Enum.all?(trend_values, fn v -> v > 150 and v < 400 end)
     end
   end
+
+  describe "multiplicative seasonality" do
+    # y = trend * (1 + 0.3 * yearly cycle): the seasonal swing grows with the level
+    defp multiplicative_series(dates, start_date) do
+      Enum.map(dates, fn date ->
+        days = Date.diff(date, start_date)
+        trend = 100 + 0.2 * days
+        cycle = 0.3 * :math.sin(2 * :math.pi() * days / 365.25)
+        trend * (1 + cycle) + :rand.normal(0, 2)
+      end)
+    end
+
+    defp mode_config(mode) do
+      %{
+        trend: %{changepoints: 0},
+        seasonality: %{mode: mode, weekly: %{enabled: false}},
+        epochs: 60
+      }
+    end
+
+    test "fits a series whose seasonal swing grows with the trend better than additive" do
+      :rand.seed(:exsss, {5, 6, 7})
+      start_date = ~D[2018-01-01]
+      training_dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-12-31]) |> Enum.to_list()
+
+      df =
+        DataFrame.new(%{
+          "ds" => training_dates,
+          "y" => multiplicative_series(training_dates, start_date)
+        })
+
+      holdout = multiplicative_series(holdout_dates, start_date)
+
+      mean_absolute_error = fn mode ->
+        fitted_model = Soothsayer.fit(Soothsayer.new(mode_config(mode)), df)
+        predictions = Soothsayer.predict(fitted_model, Series.from_list(holdout_dates))
+
+        predictions
+        |> Nx.flatten()
+        |> Nx.subtract(Nx.tensor(holdout))
+        |> Nx.abs()
+        |> Nx.mean()
+        |> Nx.to_number()
+      end
+
+      additive_error = mean_absolute_error.(:additive)
+      multiplicative_error = mean_absolute_error.(:multiplicative)
+
+      assert multiplicative_error < additive_error * 0.7
+    end
+
+    test "components still sum to combined" do
+      :rand.seed(:exsss, {5, 6, 7})
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      df = DataFrame.new(%{"ds" => dates, "y" => multiplicative_series(dates, start_date)})
+
+      fitted_model =
+        Soothsayer.fit(Soothsayer.new(%{mode_config(:multiplicative) | epochs: 5}), df)
+
+      future_dates = Date.range(~D[2023-01-01], ~D[2023-03-31]) |> Enum.to_list()
+      components = Soothsayer.predict_components(fitted_model, Series.from_list(future_dates))
+
+      summed =
+        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events]
+        |> Enum.map(&components[&1])
+        |> Enum.reduce(&Nx.add/2)
+
+      assert Nx.all_close(summed, components.combined, atol: 1.0e-2) |> Nx.to_number() == 1
+
+      # The seasonal effect is not a constant offset, it moves with the trend
+      assert components.yearly_seasonality |> Nx.abs() |> Nx.sum() |> Nx.to_number() > 0
+    end
+
+    test "rejects unknown modes" do
+      assert_raise ArgumentError, ~r/seasonality.mode must be one of/, fn ->
+        Soothsayer.new(%{seasonality: %{mode: :logarithmic}})
+      end
+    end
+  end
 end

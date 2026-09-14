@@ -137,6 +137,14 @@ Soothsayer.new(%{
 | 6 | Medium | Most cases (default for yearly) |
 | 10+ | High | Complex patterns with sharp peaks |
 
+**Multiplicative seasonality:** by default the seasonal effect is added to the trend. If your seasonal swings grow with the level of the series (airline passengers, retail sales), make them a fraction of the trend instead:
+
+```elixir
+Soothsayer.new(%{
+  seasonality: %{mode: :multiplicative}
+})
+```
+
 ### Auto-Regression (AR)
 
 Captures dependencies on recent values. Enable this when today's value depends on yesterday's (or the last few days). This is common in financial data, sensor readings, and anything with momentum.
@@ -246,7 +254,8 @@ This shows how much each event (at each window position) adds to the forecast.
 Soothsayer.new(%{
   epochs: 100,         # passes over the training data (default: 100)
   learning_rate: 0.01, # how fast to learn (default: 0.01)
-  batch_size: nil      # rows per gradient step (default: picked from the data size)
+  batch_size: nil,     # rows per gradient step (default: picked from the data size)
+  seed: nil            # integer for reproducible fits (default: random)
 })
 ```
 
@@ -331,16 +340,16 @@ The test suite includes a benchmark layer that fits Soothsayer on the datasets N
 mix test --only benchmark
 ```
 
-Results as of September 2026 (lower is better):
+Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over six seeds:
 
-| Dataset | Metric | NeuralProphet | Soothsayer | Notes |
-|---------|--------|---------------|------------|-------|
-| Peyton Manning (daily) | MAE | 0.350 | 0.304 | identical configuration |
-| Peyton Manning (daily) | RMSE | 0.501 | 0.499 | identical configuration |
-| Energy price (daily, AR 14 lags) | MAE | 5.40 | 4.73 | NeuralProphet averaged 7 steps ahead with a temperature regressor, Soothsayer is one step ahead without it |
-| Energy price (daily, AR 14 lags) | RMSE | 6.71 | 6.03 | same caveat |
-| Air passengers (monthly) | MAE | 30.1 | 31.5 | NeuralProphet used multiplicative seasonality |
-| Air passengers (monthly) | RMSE | 31.1 | 40.0 | NeuralProphet used multiplicative seasonality |
+| Dataset | Metric | NeuralProphet | Soothsayer | Range over seeds | Notes |
+|---------|--------|---------------|------------|------------------|-------|
+| Peyton Manning (daily) | MAE | 0.350 | 0.286 | 0.29 to 0.35 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.501 | 0.473 | 0.47 to 0.54 | identical configuration |
+| Energy price (daily, AR 14 lags) | MAE | 5.40 | 4.80 | 4.66 to 5.19 | NeuralProphet averaged 7 steps ahead with a temperature regressor, Soothsayer is one step ahead without it |
+| Energy price (daily, AR 14 lags) | RMSE | 6.71 | 6.17 | 5.97 to 6.59 | same caveat |
+| Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.1 | 22.0 to 30.7 | identical configuration, 130 training rows so the seed matters |
+| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 25.0 | 24.1 to 33.2 | same caveat |
 
 The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT license. NeuralProphet's Yosemite benchmark (5-minute data) is not included since Soothsayer only supports daily dates today.
 
@@ -355,7 +364,6 @@ The following NeuralProphet features are on the roadmap:
 - Event Regularization
 - Recurring Events (auto-expand to all years)
 - Uncertainty Estimation
-- Multiplicative Seasonality
 
 ## Contributing
 

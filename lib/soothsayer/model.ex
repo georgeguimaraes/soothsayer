@@ -101,7 +101,11 @@ defmodule Soothsayer.Model do
 
     # Seasonality
     seasonality_inputs = Seasonality.build_inputs(config)
-    seasonality = Seasonality.build_components(seasonality_inputs, config)
+
+    seasonality =
+      seasonality_inputs
+      |> Seasonality.build_components(config)
+      |> apply_seasonality_mode(trend, config)
 
     # AR
     ar_input = AR.build_network_input(config)
@@ -123,6 +127,35 @@ defmodule Soothsayer.Model do
        events: events_component
      }}
   end
+
+  # Multiplicative seasonality scales the seasonal effect by the trend. The
+  # network works in normalized y space, where the trend is centered near
+  # zero, so the multiplier is the trend plus the series level (mean / std).
+  # The level is only known after fit computes the normalization, which is
+  # why fit rebuilds the network; before that the level is zero.
+  defp apply_seasonality_mode(
+         seasonality,
+         trend,
+         %{seasonality: %{mode: :multiplicative}} = config
+       ) do
+    scale = Axon.add(trend, Axon.constant(series_level(config)))
+
+    %{
+      yearly: Axon.multiply(seasonality.yearly, scale),
+      weekly: Axon.multiply(seasonality.weekly, scale)
+    }
+  end
+
+  defp apply_seasonality_mode(seasonality, _trend, _config), do: seasonality
+
+  defp series_level(config) do
+    case get_in(config, [:normalization, :y]) do
+      %{mean: mean, std: std} -> scalar(mean) / scalar(std)
+      nil -> 0.0
+    end
+  end
+
+  defp scalar(tensor), do: tensor |> Nx.squeeze() |> Nx.to_number()
 
   @doc """
   Fits the Soothsayer model to the provided data.
