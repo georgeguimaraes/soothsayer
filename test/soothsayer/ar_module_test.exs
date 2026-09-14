@@ -20,37 +20,41 @@ defmodule Soothsayer.ARModuleTest do
     end
   end
 
-  describe "build_input/3" do
-    test "builds AR input tensor from training data and dates" do
+  describe "known_values/1" do
+    test "zips training dates with normalized values" do
       training_data = %{
-        dates: [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]],
-        y_normalized: [1.0, 2.0, 3.0, 4.0, 5.0]
+        dates: [~D[2023-01-01], ~D[2023-01-02]],
+        y_normalized: [0.5, -0.5]
       }
 
-      lags = 2
-      prediction_dates = [~D[2023-01-04], ~D[2023-01-05]]
+      assert AR.known_values(training_data) == %{~D[2023-01-01] => 0.5, ~D[2023-01-02] => -0.5}
+    end
+  end
 
-      result = AR.build_input(training_data, prediction_dates, lags)
+  describe "build_input/3" do
+    test "looks up the previous calendar days, oldest first" do
+      known_values = %{
+        ~D[2023-01-01] => 1.0,
+        ~D[2023-01-02] => 2.0,
+        ~D[2023-01-03] => 3.0,
+        ~D[2023-01-04] => 4.0,
+        ~D[2023-01-05] => 5.0
+      }
 
-      # For date 2023-01-04 (idx 3), lags are [2.0, 3.0]
-      # For date 2023-01-05 (idx 4), lags are [3.0, 4.0]
-      assert Nx.shape(result) == {2, 2}
-      assert Nx.to_flat_list(result) == [2.0, 3.0, 3.0, 4.0]
+      result = AR.build_input(known_values, [~D[2023-01-04], ~D[2023-01-05], ~D[2023-01-06]], 2)
+
+      # 01-04 uses [01-02, 01-03], 01-05 uses [01-03, 01-04], 01-06 uses [01-04, 01-05]
+      assert Nx.shape(result) == {3, 2}
+      assert Nx.to_flat_list(result) == [2.0, 3.0, 3.0, 4.0, 4.0, 5.0]
     end
 
-    test "returns zeros for dates at beginning of series" do
-      training_data = %{
-        dates: [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]],
-        y_normalized: [1.0, 2.0, 3.0]
-      }
+    test "returns zeros when any lagged day is unknown" do
+      known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-04] => 4.0}
 
-      lags = 2
-      prediction_dates = [~D[2023-01-01], ~D[2023-01-02]]
+      # 01-02 lacks 12-31, 01-05 lacks 01-03 (a gap), 01-03 has both
+      result = AR.build_input(known_values, [~D[2023-01-02], ~D[2023-01-05], ~D[2023-01-03]], 2)
 
-      result = AR.build_input(training_data, prediction_dates, lags)
-
-      # Both dates don't have enough history, should return zeros
-      assert Nx.to_flat_list(result) == [0.0, 0.0, 0.0, 0.0]
+      assert Nx.to_flat_list(result) == [0.0, 0.0, 0.0, 0.0, 1.0, 2.0]
     end
   end
 

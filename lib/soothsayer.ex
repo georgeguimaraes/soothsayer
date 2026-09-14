@@ -188,6 +188,9 @@ defmodule Soothsayer do
     * `x` - An `Explorer.Series` containing the dates for which to make predictions.
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
+      - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
+        observations newer than the training data. Only used when
+        auto-regression is enabled, see `predict_components/3`.
 
   ## Returns
 
@@ -223,6 +226,19 @@ defmodule Soothsayer do
     * `x` - An `Explorer.Series` containing the dates for which to make predictions.
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
+      - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
+        observations newer than the training data. Only used when
+        auto-regression is enabled.
+
+  ## Auto-regression and future dates
+
+    When AR is enabled, each prediction needs the `lags` values before it.
+    Dates inside the training data (or `:history`) use the observed values.
+    Dates past the last observation are forecast one day at a time from the
+    last observation forward, feeding each prediction back in as the next
+    day's lag, up to the latest requested date. Errors compound over that
+    horizon, so far-out AR forecasts revert toward the level the model
+    learned. This assumes daily, gap-free data.
 
   ## Returns
 
@@ -259,43 +275,20 @@ defmodule Soothsayer do
         }
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
+    history = Keyword.get(opts, :history)
 
     prediction_dates = Series.to_list(x)
+    x_input = build_time_inputs(model, prediction_dates, events_df)
 
-    # Build trend input using stored changepoint positions from training
-    first_date = model.config.first_date
-    changepoint_positions = model.config.changepoint_positions
-    t = Trend.date_to_numeric(prediction_dates, first_date) |> Nx.new_axis(-1)
-    changepoint_features = Trend.build_changepoint_features(t, changepoint_positions)
-    trend_input = Trend.build_trend_input(t, changepoint_features)
-
-    # Build seasonality features
-    seasonality = Seasonality.build_features(prediction_dates, model.config)
-
-    x_input = %{
-      "trend" => trend_input,
-      "yearly" => seasonality.yearly,
-      "weekly" => seasonality.weekly
-    }
-
-    # Add AR input if enabled
     x_input =
-      if model.config.ar.enabled and model.config.ar.lags > 0 do
-        ar_input =
-          AR.build_input(model.config.training_data, Series.to_list(x), model.config.ar.lags)
+      if ar_enabled?(model) do
+        known_values =
+          model
+          |> known_values(history)
+          |> forecast_missing_values(model, prediction_dates, events_df)
 
+        ar_input = AR.build_input(known_values, prediction_dates, model.config.ar.lags)
         Map.put(x_input, "ar", ar_input)
-      else
-        x_input
-      end
-
-    # Add events input if configured
-    events_config = model.config[:events] || %{}
-
-    x_input =
-      if map_size(events_config) > 0 and events_df != nil do
-        events_input = Events.build_features(x, events_df, events_config)
-        Map.put(x_input, "events", events_input)
       else
         x_input
       end
@@ -305,6 +298,97 @@ defmodule Soothsayer do
     predictions = Model.predict(model, x_normalized)
 
     denormalize_components(predictions, model.config.normalization.y)
+  end
+
+  defp ar_enabled?(model), do: model.config.ar.enabled and model.config.ar.lags > 0
+
+  # Builds every input that depends only on the date: trend, seasonality and
+  # events. AR is added separately since it depends on previous values.
+  defp build_time_inputs(model, dates, events_df) do
+    t = Trend.date_to_numeric(dates, model.config.first_date) |> Nx.new_axis(-1)
+    changepoint_features = Trend.build_changepoint_features(t, model.config.changepoint_positions)
+    trend_input = Trend.build_trend_input(t, changepoint_features)
+
+    seasonality = Seasonality.build_features(dates, model.config)
+
+    x_input = %{
+      "trend" => trend_input,
+      "yearly" => seasonality.yearly,
+      "weekly" => seasonality.weekly
+    }
+
+    events_config = model.config[:events] || %{}
+
+    if map_size(events_config) > 0 and events_df != nil do
+      events_input = Events.build_features(Series.from_list(dates), events_df, events_config)
+      Map.put(x_input, "events", events_input)
+    else
+      x_input
+    end
+  end
+
+  # Observed values in normalized y space, keyed by date. Training data comes
+  # first, then `history` overrides or extends it.
+  defp known_values(model, nil), do: AR.known_values(model.config.training_data)
+
+  defp known_values(model, %DataFrame{} = history) do
+    validate_history!(history)
+    %{mean: mean, std: std} = model.config.normalization.y
+
+    history_values =
+      history["y"]
+      |> Series.to_tensor()
+      |> Nx.as_type({:f, 32})
+      |> Nx.subtract(mean)
+      |> Nx.divide(std)
+      |> Nx.to_flat_list()
+
+    history_dates = Series.to_list(history["ds"])
+
+    Map.merge(known_values(model, nil), Map.new(Enum.zip(history_dates, history_values)))
+  end
+
+  # Walks day by day from the last known date to the latest prediction date,
+  # predicting each day from the days before it and recording the prediction
+  # as that day's known value. Returns the extended map. Nothing is stored on
+  # the model.
+  defp forecast_missing_values(known_values, model, prediction_dates, events_df) do
+    last_known_date = known_values |> Map.keys() |> Enum.max(Date)
+    last_prediction_date = Enum.max(prediction_dates, Date)
+
+    if Date.compare(last_prediction_date, last_known_date) == :gt do
+      rollout_dates = Date.range(Date.add(last_known_date, 1), last_prediction_date)
+      roll_forward(known_values, model, Enum.to_list(rollout_dates), events_df)
+    else
+      known_values
+    end
+  end
+
+  defp roll_forward(known_values, model, rollout_dates, events_df) do
+    time_inputs = build_time_inputs(model, rollout_dates, events_df)
+
+    rollout_dates
+    |> Enum.with_index()
+    |> Enum.reduce(known_values, fn {date, row}, known_values ->
+      prediction = forecast_one_day(model, known_values, date, slice_row(time_inputs, row))
+      Map.put(known_values, date, prediction)
+    end)
+  end
+
+  defp slice_row(inputs, row) do
+    Map.new(inputs, fn {key, tensor} -> {key, Nx.slice_along_axis(tensor, row, 1, axis: 0)} end)
+  end
+
+  # Returns the day's combined prediction in normalized y space, ready to be
+  # used as a lag for the following day.
+  defp forecast_one_day(model, known_values, date, time_inputs) do
+    inputs =
+      time_inputs
+      |> Map.put("ar", AR.build_input(known_values, [date], model.config.ar.lags))
+      |> normalize_with_params(model.config.normalization.x)
+
+    %{combined: combined} = Model.predict(model, inputs)
+    combined |> Nx.reshape({}) |> Nx.to_number()
   end
 
   # The network predicts in normalized y space, where every component is a
@@ -370,6 +454,17 @@ defmodule Soothsayer do
       true ->
         :ok
     end
+  end
+
+  defp validate_history!(%DataFrame{} = history) do
+    columns = DataFrame.names(history)
+
+    for required <- ["ds", "y"], required not in columns do
+      raise ArgumentError,
+            "History must contain a '#{required}' column. Available columns: #{inspect(columns)}"
+    end
+
+    :ok
   end
 
   defp deep_merge(left, right) do

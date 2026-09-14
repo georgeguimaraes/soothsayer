@@ -152,6 +152,14 @@ Soothsayer.new(%{
 
 **Choosing `lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
 
+**Forecasting ahead:** dates inside the training data use the observed values as lags. Dates past the last observation are forecast one day at a time, with each prediction feeding the next day's lags, so errors compound over long horizons. If you have observations newer than the training data, pass them as `history:` to seed the lags without refitting:
+
+```elixir
+Soothsayer.predict(fitted_model, future_dates, history: recent_df)  # recent_df has "ds" and "y"
+```
+
+See the [Auto-Regression guide](guides/autoregression.md) for details.
+
 #### Deep AR-Net
 
 For non-linear autoregressive patterns, you can add hidden layers:

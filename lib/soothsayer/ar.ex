@@ -123,14 +123,36 @@ defmodule Soothsayer.AR do
   end
 
   @doc """
-  Builds AR input tensor for prediction given training data and prediction dates.
+  Builds a map of known values keyed by date from the data stored at fit time.
 
-  For each prediction date, looks up the previous lags values from the training
-  data to use as AR features. Returns zeros for dates that don't have enough history.
+  Values are in normalized y space, the same space the network predicts in.
 
   ## Parameters
 
     * `training_data` - Map with `:dates` (list of dates) and `:y_normalized` (list of values)
+
+  ## Returns
+
+    A map from `Date.t()` to the normalized value observed on that date.
+
+  """
+  @spec known_values(%{dates: list(Date.t()), y_normalized: list(float())}) ::
+          %{Date.t() => float()}
+  def known_values(%{dates: dates, y_normalized: y_normalized}) do
+    Enum.zip(dates, y_normalized) |> Map.new()
+  end
+
+  @doc """
+  Builds the AR input tensor for a list of prediction dates.
+
+  For each prediction date, looks up the values on the `lags` previous calendar
+  days in `known_values`, oldest first, matching the column order produced by
+  `create_lagged_inputs/2`. Dates where any of those days is unknown get a row
+  of zeros.
+
+  ## Parameters
+
+    * `known_values` - Map from `Date.t()` to normalized value, see `known_values/1`
     * `prediction_dates` - List of dates to build AR inputs for
     * `lags` - Number of lagged values to include
 
@@ -138,33 +160,34 @@ defmodule Soothsayer.AR do
 
     A tensor of shape `{n_predictions, lags}` with AR features.
 
+  ## Examples
+
+      iex> known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-03] => 3.0}
+      iex> Soothsayer.AR.build_input(known_values, [~D[2023-01-03], ~D[2023-01-04]], 2)
+      #Nx.Tensor<
+        f32[2][2]
+        [
+          [1.0, 2.0],
+          [2.0, 3.0]
+        ]
+      >
+
   """
-  @spec build_input(map(), list(), non_neg_integer()) :: Nx.Tensor.t()
-  def build_input(training_data, prediction_dates, lags) do
-    training_dates = training_data.dates
-    training_y = training_data.y_normalized
-
-    # Create a map from date to index for fast lookup
-    date_to_idx =
-      training_dates
-      |> Enum.with_index()
-      |> Map.new()
-
-    # For each prediction date, get the lags previous y values
-    ar_inputs =
+  @spec build_input(%{Date.t() => float()}, list(Date.t()), non_neg_integer()) :: Nx.Tensor.t()
+  def build_input(known_values, prediction_dates, lags) do
+    rows =
       Enum.map(prediction_dates, fn date ->
-        idx = Map.get(date_to_idx, date)
+        lagged_values =
+          Enum.map(lags..1//-1, fn lag -> Map.get(known_values, Date.add(date, -lag)) end)
 
-        if idx && idx >= lags do
-          # Get y values from idx-lags to idx-1
-          Enum.slice(training_y, (idx - lags)..(idx - 1))
-        else
-          # For dates at the beginning or not in training, use zeros
+        if Enum.any?(lagged_values, &is_nil/1) do
           List.duplicate(0.0, lags)
+        else
+          lagged_values
         end
       end)
 
-    ar_inputs
+    rows
     |> Nx.tensor()
     |> Nx.as_type({:f, 32})
   end

@@ -198,7 +198,37 @@ Regularization pushes unimportant lag weights toward zero, effectively selecting
 
 **Prediction:**
 - Predictions use observed values from training data as context
-- For multi-step forecasting, the model uses its own predictions as inputs
+- For multi-step forecasting, the model uses its own predictions as inputs, see below
+
+## Forecasting Into the Future
+
+Each AR prediction needs the `lags` values before it. For dates inside the training data those are the real observations. For dates after the last observation, Soothsayer walks forward one day at a time: it predicts the first unknown day from the last `lags` observed values, records that prediction as the day's value, then predicts the next day from it, and so on up to the latest date you asked for.
+
+```elixir
+future_dates = Date.range(~D[2023-05-16], ~D[2023-06-14]) |> Enum.to_list()
+predictions = Soothsayer.predict(fitted_with_ar, Series.from_list(future_dates))
+```
+
+This is recursive forecasting, so errors compound: the first few steps are sharp, and the AR contribution fades toward the level the model learned as the horizon grows. Trend, seasonality and events keep working at any horizon since they only depend on the date.
+
+### Forecasting from newer data
+
+If you have observations newer than the training data, pass them with the `:history` option instead of refitting. History rows seed the lags and override training rows on the same dates:
+
+```elixir
+history = DataFrame.new(%{
+  "ds" => Enum.to_list(Date.range(~D[2023-05-16], ~D[2023-06-14])),
+  "y" => latest_observations
+})
+
+Soothsayer.predict(fitted_with_ar, Series.from_list([~D[2023-06-15]]), history: history)
+```
+
+### Assumptions
+
+AR forecasting assumes daily, gap-free data. Lags are looked up by calendar day, so a missing day inside the training data makes the days right after it fall back to zero lags, and the rollout always steps one day at a time.
+
+NeuralProphet avoids recursion by training a direct multi-step head (`n_forecasts`) and refusing to forecast further than that without the caller feeding predictions back in. A direct multi-step option is planned for Soothsayer; the recursive walk above will stay as the way to go past it.
 
 ## Network Architecture
 

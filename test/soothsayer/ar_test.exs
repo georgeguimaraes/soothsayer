@@ -417,4 +417,100 @@ defmodule Soothsayer.ARTest do
       end
     end
   end
+
+  describe "AR forecasting into the future" do
+    # AR(1) with coefficient 0.9 around a level of 100, no trend or seasonality.
+    # The last observation is pinned far from the level so the one-step-ahead
+    # expectation (100 + 0.9 * 6 = 105.4) is clearly distinguishable from 100.
+    defp ar1_series(start_date, n_days, last_value) do
+      :rand.seed(:exsss, {11, 22, 33})
+      dates = Enum.map(0..(n_days - 1), fn i -> Date.add(start_date, i) end)
+
+      {y, _} =
+        Enum.map_reduce(dates, 0.0, fn _date, previous ->
+          value = 0.9 * previous + :rand.normal(0, 1)
+          {100 + value, value}
+        end)
+
+      y = List.replace_at(y, -1, last_value)
+      {dates, y}
+    end
+
+    defp ar_only_model do
+      Soothsayer.new(%{
+        trend: %{enabled: false, changepoints: 0},
+        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+        ar: %{enabled: true, lags: 3},
+        epochs: 50
+      })
+    end
+
+    test "future predictions follow the last observed value and decay toward the level" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 106.0)
+      df = DataFrame.new(%{"ds" => dates, "y" => y})
+
+      fitted_model = Soothsayer.fit(ar_only_model(), df)
+
+      last_date = List.last(dates)
+      future_dates = Enum.map(1..30, fn i -> Date.add(last_date, i) end)
+
+      components = Soothsayer.predict_components(fitted_model, Series.from_list(future_dates))
+      predictions = Nx.to_flat_list(components.combined)
+      ar_component = Nx.to_flat_list(components.ar)
+
+      # One step ahead sees the real last value
+      assert_in_delta hd(predictions), 105.4, 1.0
+
+      # Later steps see the model's own predictions, so the effect decays
+      assert abs(List.last(predictions) - 100) < abs(hd(predictions) - 100)
+      assert abs(List.last(ar_component)) < abs(hd(ar_component))
+
+      # And the AR component is no longer a constant
+      assert length(Enum.uniq(ar_component)) > 1
+    end
+
+    test "history option seeds the lags with observations newer than the training data" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 100.0)
+      df = DataFrame.new(%{"ds" => dates, "y" => y})
+
+      fitted_model = Soothsayer.fit(ar_only_model(), df)
+
+      last_training_date = List.last(dates)
+      history_dates = Enum.map(1..30, fn i -> Date.add(last_training_date, i) end)
+      history_values = List.duplicate(100.0, 29) ++ [106.0]
+      history = DataFrame.new(%{"ds" => history_dates, "y" => history_values})
+
+      target_date = Series.from_list([Date.add(last_training_date, 31)])
+
+      with_history = Soothsayer.predict(fitted_model, target_date, history: history)
+      without_history = Soothsayer.predict(fitted_model, target_date)
+
+      assert_in_delta Nx.to_number(Nx.reshape(with_history, {})), 105.4, 1.0
+
+      assert abs(
+               Nx.to_number(Nx.reshape(with_history, {})) -
+                 Nx.to_number(Nx.reshape(without_history, {}))
+             ) > 3
+    end
+
+    test "history without the required columns raises" do
+      {dates, y} = ar1_series(~D[2022-01-01], 60, 100.0)
+
+      model =
+        Soothsayer.new(%{
+          trend: %{enabled: false, changepoints: 0},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          ar: %{enabled: true, lags: 3},
+          epochs: 1
+        })
+
+      fitted_model = Soothsayer.fit(model, DataFrame.new(%{"ds" => dates, "y" => y}))
+
+      bad_history = DataFrame.new(%{"ds" => [~D[2022-03-02]], "value" => [1.0]})
+
+      assert_raise ArgumentError, ~r/History must contain a 'y' column/, fn ->
+        Soothsayer.predict(fitted_model, Series.from_list([~D[2022-03-03]]), history: bad_history)
+      end
+    end
+  end
 end
