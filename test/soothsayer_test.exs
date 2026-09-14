@@ -428,4 +428,56 @@ defmodule SoothsayerTest do
       assert Map.has_key?(effects, "promo_+1")
     end
   end
+
+  describe "component decomposition" do
+    test "components sum to combined and disabled components are zero" do
+      start_date = ~D[2020-01-01]
+      end_date = ~D[2022-12-31]
+      dates = Date.range(start_date, end_date)
+      sale_dates = [~D[2021-06-15], ~D[2022-06-15]]
+
+      y =
+        Enum.map(dates, fn date ->
+          days = Date.diff(date, start_date)
+          trend = 100 + 0.2 * days
+          yearly = 15 * :math.sin(2 * :math.pi() * days / 365.25)
+          weekly = 5 * :math.cos(2 * :math.pi() * Date.day_of_week(date) / 7)
+          spike = if date in sale_dates, do: 40, else: 0
+          trend + yearly + weekly + spike + :rand.normal(0, 2)
+        end)
+
+      df = DataFrame.new(%{"ds" => dates, "y" => y})
+      events_df = DataFrame.new(%{"event" => ["sale", "sale"], "ds" => sale_dates})
+
+      model =
+        Soothsayer.new(%{
+          events: %{"sale" => %{lower_window: 0, upper_window: 0}},
+          epochs: 5
+        })
+
+      fitted_model = Soothsayer.fit(model, df, events: events_df)
+
+      future_dates = Date.range(~D[2023-01-01], ~D[2023-01-31]) |> Enum.to_list()
+      future_events = DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-15]]})
+
+      components =
+        Soothsayer.predict_components(fitted_model, Series.from_list(future_dates),
+          events: future_events
+        )
+
+      summed =
+        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events]
+        |> Enum.map(&components[&1])
+        |> Enum.reduce(&Nx.add/2)
+
+      assert Nx.all_close(summed, components.combined, atol: 1.0e-2) |> Nx.to_number() == 1
+
+      # AR is disabled by default, so its component must be exactly zero
+      assert components.ar |> Nx.abs() |> Nx.sum() |> Nx.to_number() == 0.0
+
+      # Trend carries the level, so it should sit near the actual series values
+      trend_values = Nx.to_flat_list(components.trend)
+      assert Enum.all?(trend_values, fn v -> v > 150 and v < 400 end)
+    end
+  end
 end

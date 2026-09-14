@@ -182,7 +182,9 @@ defmodule Soothsayer.Model do
           combined: Nx.Tensor.t(),
           trend: Nx.Tensor.t(),
           yearly_seasonality: Nx.Tensor.t(),
-          weekly_seasonality: Nx.Tensor.t()
+          weekly_seasonality: Nx.Tensor.t(),
+          ar: Nx.Tensor.t(),
+          events: Nx.Tensor.t()
         }
   def predict(model, x) do
     {_init_fn, predict_fn} = Axon.build(model.network)

@@ -225,7 +225,13 @@ defmodule Soothsayer do
 
   ## Returns
 
-    A map containing the predicted values for each component (trend, yearly seasonality, weekly seasonality, events) and the combined prediction.
+    A map with the combined prediction and each component: `:trend`,
+    `:yearly_seasonality`, `:weekly_seasonality`, `:ar` and `:events`.
+
+    The components add up to `:combined`. Trend carries the level of the
+    series, so the other components are zero-centered offsets around it.
+    Components that are disabled in the config are all zeros. When trend is
+    disabled, `:trend` is a flat line at the training mean.
 
   ## Examples
 
@@ -236,7 +242,9 @@ defmodule Soothsayer do
         combined: #Nx.Tensor<...>,
         trend: #Nx.Tensor<...>,
         yearly_seasonality: #Nx.Tensor<...>,
-        weekly_seasonality: #Nx.Tensor<...>
+        weekly_seasonality: #Nx.Tensor<...>,
+        ar: #Nx.Tensor<...>,
+        events: #Nx.Tensor<...>
       }
 
   """
@@ -244,7 +252,9 @@ defmodule Soothsayer do
           combined: Nx.Tensor.t(),
           trend: Nx.Tensor.t(),
           yearly_seasonality: Nx.Tensor.t(),
-          weekly_seasonality: Nx.Tensor.t()
+          weekly_seasonality: Nx.Tensor.t(),
+          ar: Nx.Tensor.t(),
+          events: Nx.Tensor.t()
         }
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
@@ -293,8 +303,21 @@ defmodule Soothsayer do
 
     predictions = Model.predict(model, x_normalized)
 
-    Map.new(predictions, fn {key, node} ->
-      {key, denormalize(node, model.config.normalization.y)}
+    denormalize_components(predictions, model.config.normalization.y)
+  end
+
+  # The network predicts in normalized y space, where every component is a
+  # zero-centered offset and the series mean lives outside the network. When
+  # denormalizing, only `combined` and `trend` get the mean added back, so
+  # trend owns the level and the components sum to `combined`. Disabled
+  # components stay at zero instead of collapsing to the series mean.
+  defp denormalize_components(predictions, %{mean: mean, std: std}) do
+    Map.new(predictions, fn
+      {key, tensor} when key in [:combined, :trend] ->
+        {key, Nx.add(Nx.multiply(tensor, std), mean)}
+
+      {key, tensor} ->
+        {key, Nx.multiply(tensor, std)}
     end)
   end
 
@@ -325,10 +348,6 @@ defmodule Soothsayer do
       {key, Nx.divide(Nx.subtract(tensor, mean), std)}
     end)
     |> Enum.into(%{})
-  end
-
-  defp denormalize(tensor, %{mean: mean, std: std}) do
-    Nx.add(Nx.multiply(tensor, std), mean)
   end
 
   defp validate_training_data!(%DataFrame{} = data) do
