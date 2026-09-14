@@ -39,7 +39,7 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Deep AR-Net | Yes | Yes |
 | Events | Yes | Yes |
 | Lagged regressors | Planned | Yes |
-| Future regressors | Planned | Yes |
+| Future regressors | Yes | Yes |
 | Country holidays | Planned | Yes |
 | Multiplicative events | Planned | Yes |
 | Event regularization | Planned | Yes |

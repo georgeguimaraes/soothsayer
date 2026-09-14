@@ -76,7 +76,8 @@ defmodule Soothsayer.MixProject do
         "guides/trends.md",
         "guides/seasonality.md",
         "guides/autoregression.md",
-        "guides/events.md"
+        "guides/events.md",
+        "guides/regressors.md"
       ],
       groups_for_extras: [
         Tutorials: [
@@ -85,7 +86,8 @@ defmodule Soothsayer.MixProject do
           "guides/trends.md",
           "guides/seasonality.md",
           "guides/autoregression.md",
-          "guides/events.md"
+          "guides/events.md",
+          "guides/regressors.md"
         ]
       ]
     ]

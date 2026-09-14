@@ -466,7 +466,7 @@ defmodule SoothsayerTest do
         )
 
       summed =
-        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events]
+        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events, :regressors]
         |> Enum.map(&components[&1])
         |> Enum.reduce(&Nx.add/2)
 
@@ -545,7 +545,7 @@ defmodule SoothsayerTest do
       components = Soothsayer.predict_components(fitted_model, Series.from_list(future_dates))
 
       summed =
-        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events]
+        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events, :regressors]
         |> Enum.map(&components[&1])
         |> Enum.reduce(&Nx.add/2)
 

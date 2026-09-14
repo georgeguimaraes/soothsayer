@@ -8,6 +8,7 @@ defmodule Soothsayer do
   alias Soothsayer.AR
   alias Soothsayer.Events
   alias Soothsayer.Model
+  alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
   alias Soothsayer.Trend
 
@@ -46,6 +47,7 @@ defmodule Soothsayer do
         weekly: %{enabled: true, fourier_terms: 3}
       },
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil},
+      regressors: [],
       epochs: 100,
       learning_rate: 0.01,
       batch_size: nil,
@@ -64,7 +66,18 @@ defmodule Soothsayer do
           "seasonality.mode must be one of #{inspect(@seasonality_modes)}, got #{inspect(mode)}"
   end
 
-  defp validate_config!(_config), do: :ok
+  defp validate_config!(%{regressors: regressors}) when not is_list(regressors) do
+    raise ArgumentError,
+          "regressors must be a list of column names, got #{inspect(regressors)}"
+  end
+
+  defp validate_config!(%{regressors: regressors}) do
+    for name <- regressors, not is_binary(name) do
+      raise ArgumentError, "regressors must be column name strings, got #{inspect(name)}"
+    end
+
+    :ok
+  end
 
   @doc """
   Fits the Soothsayer model to the provided data.
@@ -75,6 +88,9 @@ defmodule Soothsayer do
     * `data` - An `Explorer.DataFrame` containing the training data.
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
+
+    When the model config lists `regressors`, `data` must contain a column
+    for each of them.
 
   ## Returns
 
@@ -96,6 +112,7 @@ defmodule Soothsayer do
   def fit(%Model{} = model, %DataFrame{} = data, opts \\ []) do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
+    Regressors.validate_columns!(data, model.config.regressors)
     processed_data = Seasonality.add_fourier_features(data, "ds", model.config.seasonality)
     # Reorder columns to put y first
     processed_data = DataFrame.select(processed_data, ["y" | processed_data.names -- ["y"]])
@@ -152,8 +169,8 @@ defmodule Soothsayer do
     events_config = model.config[:events] || %{}
     dates = Series.to_list(processed_data["ds"])
 
-    # Truncate dates for events if AR is enabled
-    event_dates =
+    # Events and regressors line up with the (possibly AR-truncated) targets
+    feature_dates =
       if lags > 0 do
         Enum.drop(dates, lags)
       else
@@ -163,11 +180,17 @@ defmodule Soothsayer do
     x =
       if map_size(events_config) > 0 and events_df != nil do
         events_input =
-          Events.build_features(Series.from_list(event_dates), events_df, events_config)
+          Events.build_features(Series.from_list(feature_dates), events_df, events_config)
 
         Map.put(x, "events", events_input)
       else
         x
+      end
+
+    x =
+      case model.config.regressors do
+        [] -> x
+        names -> Map.put(x, "regressors", Regressors.build_features(feature_dates, data, names))
       end
 
     {x_normalized, x_norm} = normalize_inputs(x)
@@ -209,6 +232,9 @@ defmodule Soothsayer do
       - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
         observations newer than the training data. Only used when
         auto-regression is enabled, see `predict_components/3`.
+      - `:regressors` - An `Explorer.DataFrame` with "ds" plus one column per
+        configured regressor, covering every predicted date. Required when
+        the model was fitted with regressors.
 
   ## Returns
 
@@ -247,6 +273,11 @@ defmodule Soothsayer do
       - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
         observations newer than the training data. Only used when
         auto-regression is enabled.
+      - `:regressors` - An `Explorer.DataFrame` with "ds" plus one column per
+        configured regressor. Required when the model was fitted with
+        regressors, and it must cover every predicted date. With
+        auto-regression it must also cover the days between the last
+        observation and the forecast, since those get predicted too.
 
   ## Auto-regression and future dates
 
@@ -261,7 +292,8 @@ defmodule Soothsayer do
   ## Returns
 
     A map with the combined prediction and each component: `:trend`,
-    `:yearly_seasonality`, `:weekly_seasonality`, `:ar` and `:events`.
+    `:yearly_seasonality`, `:weekly_seasonality`, `:ar`, `:events` and
+    `:regressors`.
 
     The components add up to `:combined`. Trend carries the level of the
     series, so the other components are zero-centered offsets around it.
@@ -283,7 +315,8 @@ defmodule Soothsayer do
         yearly_seasonality: #Nx.Tensor<...>,
         weekly_seasonality: #Nx.Tensor<...>,
         ar: #Nx.Tensor<...>,
-        events: #Nx.Tensor<...>
+        events: #Nx.Tensor<...>,
+        regressors: #Nx.Tensor<...>
       }
 
   """
@@ -293,21 +326,24 @@ defmodule Soothsayer do
           yearly_seasonality: Nx.Tensor.t(),
           weekly_seasonality: Nx.Tensor.t(),
           ar: Nx.Tensor.t(),
-          events: Nx.Tensor.t()
+          events: Nx.Tensor.t(),
+          regressors: Nx.Tensor.t()
         }
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
     history = Keyword.get(opts, :history)
+    regressors_df = Keyword.get(opts, :regressors)
+    validate_regressors_option!(model, regressors_df)
 
     prediction_dates = Series.to_list(x)
-    x_input = build_time_inputs(model, prediction_dates, events_df)
+    x_input = build_time_inputs(model, prediction_dates, events_df, regressors_df)
 
     x_input =
       if ar_enabled?(model) do
         known_values =
           model
           |> known_values(history)
-          |> forecast_missing_values(model, prediction_dates, events_df)
+          |> forecast_missing_values(model, prediction_dates, events_df, regressors_df)
 
         ar_input = AR.build_input(known_values, prediction_dates, model.config.ar.lags)
         Map.put(x_input, "ar", ar_input)
@@ -324,9 +360,20 @@ defmodule Soothsayer do
 
   defp ar_enabled?(model), do: model.config.ar.enabled and model.config.ar.lags > 0
 
-  # Builds every input that depends only on the date: trend, seasonality and
-  # events. AR is added separately since it depends on previous values.
-  defp build_time_inputs(model, dates, events_df) do
+  defp validate_regressors_option!(%Model{config: %{regressors: []}}, _regressors_df), do: :ok
+
+  defp validate_regressors_option!(%Model{config: %{regressors: names}}, nil) do
+    raise ArgumentError,
+          "This model was fitted with regressors #{inspect(names)}. " <>
+            "Pass regressors: a dataframe with \"ds\" and those columns to predict."
+  end
+
+  defp validate_regressors_option!(_model, %DataFrame{}), do: :ok
+
+  # Builds every input that depends only on the date: trend, seasonality,
+  # events and regressors. AR is added separately since it depends on
+  # previous values.
+  defp build_time_inputs(model, dates, events_df, regressors_df) do
     t = Trend.date_to_numeric(dates, model.config.first_date) |> Nx.new_axis(-1)
     changepoint_features = Trend.build_changepoint_features(t, model.config.changepoint_positions)
     trend_input = Trend.build_trend_input(t, changepoint_features)
@@ -341,11 +388,20 @@ defmodule Soothsayer do
 
     events_config = model.config[:events] || %{}
 
-    if map_size(events_config) > 0 and events_df != nil do
-      events_input = Events.build_features(Series.from_list(dates), events_df, events_config)
-      Map.put(x_input, "events", events_input)
-    else
-      x_input
+    x_input =
+      if map_size(events_config) > 0 and events_df != nil do
+        events_input = Events.build_features(Series.from_list(dates), events_df, events_config)
+        Map.put(x_input, "events", events_input)
+      else
+        x_input
+      end
+
+    case model.config.regressors do
+      [] ->
+        x_input
+
+      names ->
+        Map.put(x_input, "regressors", Regressors.build_features(dates, regressors_df, names))
     end
   end
 
@@ -374,20 +430,20 @@ defmodule Soothsayer do
   # predicting each day from the days before it and recording the prediction
   # as that day's known value. Returns the extended map. Nothing is stored on
   # the model.
-  defp forecast_missing_values(known_values, model, prediction_dates, events_df) do
+  defp forecast_missing_values(known_values, model, prediction_dates, events_df, regressors_df) do
     last_known_date = known_values |> Map.keys() |> Enum.max(Date)
     last_prediction_date = Enum.max(prediction_dates, Date)
 
     if Date.compare(last_prediction_date, last_known_date) == :gt do
       rollout_dates = Date.range(Date.add(last_known_date, 1), last_prediction_date)
-      roll_forward(known_values, model, Enum.to_list(rollout_dates), events_df)
+      roll_forward(known_values, model, Enum.to_list(rollout_dates), events_df, regressors_df)
     else
       known_values
     end
   end
 
-  defp roll_forward(known_values, model, rollout_dates, events_df) do
-    time_inputs = build_time_inputs(model, rollout_dates, events_df)
+  defp roll_forward(known_values, model, rollout_dates, events_df, regressors_df) do
+    time_inputs = build_time_inputs(model, rollout_dates, events_df, regressors_df)
 
     rollout_dates
     |> Enum.with_index()
@@ -558,6 +614,26 @@ defmodule Soothsayer do
   @spec get_event_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
   def get_event_effects(%Model{} = model) do
     Events.get_effects(model)
+  end
+
+  @doc """
+  Extracts the learned future regressor coefficients from a fitted model.
+
+  Coefficients are in normalized units: the change in normalized y for a one
+  standard deviation change in the regressor. Positive means the regressor
+  pushes the forecast up.
+
+  ## Examples
+
+      iex> model = Soothsayer.new(%{regressors: ["temperature"]})
+      iex> fitted_model = Soothsayer.fit(model, data)
+      iex> Soothsayer.get_regressor_effects(fitted_model)
+      %{"temperature" => 0.42}
+
+  """
+  @spec get_regressor_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
+  def get_regressor_effects(%Model{} = model) do
+    Regressors.get_effects(model)
   end
 
   @doc """

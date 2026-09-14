@@ -5,6 +5,7 @@ defmodule Soothsayer.Model do
 
   alias Soothsayer.AR
   alias Soothsayer.Events
+  alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
   alias Soothsayer.Trainer
   alias Soothsayer.Trend
@@ -71,7 +72,8 @@ defmodule Soothsayer.Model do
       yearly_seasonality: components.yearly,
       weekly_seasonality: components.weekly,
       ar: components.ar,
-      events: components.events
+      events: components.events,
+      regressors: components.regressors
     })
   end
 
@@ -115,8 +117,19 @@ defmodule Soothsayer.Model do
     events_input = Events.build_network_input(%{events: config[:events] || %{}})
     events_component = Events.build_component(events_input, %{events: config[:events] || %{}})
 
+    # Future regressors
+    regressors_input = Regressors.build_network_input(config)
+    regressors_component = Regressors.build_component(regressors_input, config)
+
     combined =
-      Axon.add([trend, seasonality.yearly, seasonality.weekly, ar_component, events_component])
+      Axon.add([
+        trend,
+        seasonality.yearly,
+        seasonality.weekly,
+        ar_component,
+        events_component,
+        regressors_component
+      ])
 
     {combined,
      %{
@@ -124,7 +137,8 @@ defmodule Soothsayer.Model do
        yearly: seasonality.yearly,
        weekly: seasonality.weekly,
        ar: ar_component,
-       events: events_component
+       events: events_component,
+       regressors: regressors_component
      }}
   end
 
@@ -217,7 +231,8 @@ defmodule Soothsayer.Model do
           yearly_seasonality: Nx.Tensor.t(),
           weekly_seasonality: Nx.Tensor.t(),
           ar: Nx.Tensor.t(),
-          events: Nx.Tensor.t()
+          events: Nx.Tensor.t(),
+          regressors: Nx.Tensor.t()
         }
   def predict(model, x) do
     {_init_fn, predict_fn} = Axon.build(model.network)

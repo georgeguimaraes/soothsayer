@@ -48,6 +48,7 @@ If you call `Soothsayer.new()` without arguments, you get sensible defaults:
 | `seasonality.yearly.fourier_terms` | `6` | Flexibility of yearly pattern |
 | `seasonality.weekly.enabled` | `true` | Enable weekly seasonality |
 | `seasonality.weekly.fourier_terms` | `3` | Flexibility of weekly pattern |
+| `regressors` | `[]` | Column names of future regressors, see [Regressors](regressors.md) |
 | `epochs` | `100` | Passes over the training data |
 | `learning_rate` | `0.01` | How fast to learn |
 | `batch_size` | `nil` | Rows per gradient step, picked from the data size when `nil` |

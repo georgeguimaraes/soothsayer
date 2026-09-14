@@ -87,18 +87,27 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   end
 
   describe "Energy price daily" do
-    test "auto-regression with 14 lags, one step ahead" do
+    test "auto-regression with 14 lags and temperature as a future regressor, one step ahead" do
       {train, validation} = load_and_split("energy_price_daily.csv")
 
       model =
-        Soothsayer.new(%{ar: %{enabled: true, lags: 14}, trend: %{changepoints: 0}, seed: @seed})
+        Soothsayer.new(%{
+          ar: %{enabled: true, lags: 14},
+          trend: %{changepoints: 0},
+          regressors: ["temperature"],
+          seed: @seed
+        })
 
       fitted_model = Soothsayer.fit(model, train)
 
       # Validation actuals seed the lags, so every prediction is one step
       # ahead from observed values, the same footing as NeuralProphet's
-      # validation metrics.
-      predictions = Soothsayer.predict(fitted_model, validation["ds"], history: validation)
+      # validation metrics. Temperature is known for the validation dates.
+      predictions =
+        Soothsayer.predict(fitted_model, validation["ds"],
+          history: validation,
+          regressors: validation
+        )
 
       metrics = validation_metrics(predictions, validation["y"])
 
@@ -107,13 +116,15 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         metrics,
         %{mean_absolute_error: 5.40186, root_mean_squared_error: 6.70655},
         notes:
-          "NeuralProphet averaged 7 forecast steps and used temperature as a lagged and future regressor"
+          "one step ahead vs NeuralProphet's 7-step average; NeuralProphet also lagged temperature"
       )
 
-      # Seed 42 gives 4.80 / 6.17. Across six seeds: MAE 4.66 to 5.19,
-      # RMSE 5.97 to 6.59. Ceilings are 1.25x the worst seed.
-      assert metrics.mean_absolute_error < 6.5
-      assert metrics.root_mean_squared_error < 8.25
+      # Seed 42 gives 4.96 / 6.31. Across six seeds: MAE 4.80 to 5.28,
+      # RMSE 6.06 to 6.71. Without temperature it was 4.66 to 5.19 / 5.97
+      # to 6.59: one step ahead, 14 lags of price already carry the weather.
+      # Ceilings are 1.25x the worst seed.
+      assert metrics.mean_absolute_error < 6.6
+      assert metrics.root_mean_squared_error < 8.4
     end
   end
 
@@ -124,7 +135,6 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
       @fixtures
       |> Path.join(file)
       |> DataFrame.from_csv!(dtypes: [{"ds", :date}])
-      |> DataFrame.select(["ds", "y"])
 
     row_count = DataFrame.n_rows(dataframe)
     validation_rows = max(1, trunc(row_count * @validation_fraction))

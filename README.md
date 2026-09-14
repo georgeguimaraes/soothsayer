@@ -263,6 +263,23 @@ Training runs in shuffled minibatches, so one epoch is one pass over the data. W
 
 If your model is underfitting (predictions are too smooth), try more epochs or a higher learning rate. If it's overfitting (fits training data but not new data), try fewer epochs or more regularization.
 
+### Future Regressors
+
+External variables you know ahead of time, like a temperature forecast or planned marketing spend. Name the columns, include them in the training data, and pass their future values when predicting:
+
+```elixir
+model = Soothsayer.new(%{regressors: ["temperature"]})
+fitted_model = Soothsayer.fit(model, df)  # df has "ds", "y" and "temperature"
+
+future_regressors = DataFrame.new(%{"ds" => future_dates, "temperature" => forecast_temperatures})
+predictions = Soothsayer.predict(fitted_model, future_dates_series, regressors: future_regressors)
+
+Soothsayer.get_regressor_effects(fitted_model)
+# => %{"temperature" => 0.42}
+```
+
+Prediction raises if any requested date is missing from the regressors dataframe rather than guessing. See the [Regressors guide](guides/regressors.md).
+
 ## Using EXLA for Faster Training
 
 Soothsayer uses EXLA for training by default, which compiles to XLA for faster execution on CPU/GPU.
@@ -346,8 +363,8 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 |---------|--------|---------------|------------|------------------|-------|
 | Peyton Manning (daily) | MAE | 0.350 | 0.286 | 0.29 to 0.35 | identical configuration |
 | Peyton Manning (daily) | RMSE | 0.501 | 0.473 | 0.47 to 0.54 | identical configuration |
-| Energy price (daily, AR 14 lags) | MAE | 5.40 | 4.80 | 4.66 to 5.19 | NeuralProphet averaged 7 steps ahead with a temperature regressor, Soothsayer is one step ahead without it |
-| Energy price (daily, AR 14 lags) | RMSE | 6.71 | 6.17 | 5.97 to 6.59 | same caveat |
+| Energy price (daily, AR 14 lags + temperature) | MAE | 5.40 | 4.96 | 4.80 to 5.28 | one step ahead vs NeuralProphet's 7-step average; temperature adds nothing one step ahead (4.66 to 5.19 without it) |
+| Energy price (daily, AR 14 lags + temperature) | RMSE | 6.71 | 6.31 | 6.06 to 6.71 | same caveat |
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.1 | 22.0 to 30.7 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 25.0 | 24.1 to 33.2 | same caveat |
 
@@ -357,8 +374,7 @@ The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT li
 
 The following NeuralProphet features are on the roadmap:
 
-- Lagged Regressors (external variables that affect the forecast)
-- Future Regressors (known future values like holidays)
+- Lagged Regressors (past values of an external variable, like auto-regression on another series)
 - Country Holidays (automatic holiday detection via `:holidefs` library)
 - Multiplicative Events (events that scale with trend)
 - Event Regularization
