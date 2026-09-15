@@ -430,7 +430,7 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 26.2 | 23.2 to 29.8 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 28.1 | 25.2 to 31.8 | same caveat |
 
-The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT license.
+The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, MIT licensed by Facebook) and the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, see the NOTICE file there.
 
 ## Features Not Yet Implemented
 
