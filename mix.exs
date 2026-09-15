@@ -30,9 +30,11 @@ defmodule Soothsayer.MixProject do
   defp deps do
     [
       {:explorer, "~> 0.12.0"},
-      {:nx, "~> 0.13.0"},
+      # override: axon 0.8.x declares nx ~> 0.10 but runs fine on 1.0 (full suite and benchmark
+      # identical). Drop the override once an axon release depends on nx ~> 1.0.
+      {:nx, "~> 1.0", override: true},
       {:axon, "~> 0.8.0"},
-      {:exla, "~> 0.13.0"},
+      {:exla, "~> 1.0"},
       {:ex_doc, ">= 0.0.0", only: :docs},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
