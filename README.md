@@ -308,6 +308,21 @@ components.quantiles[0.9]  # upper line
 
 Each quantile is a linear head over the same inputs as the components, trained with the pinball loss, so intervals widen where the series is noisier. See the [Uncertainty guide](guides/uncertainty.md).
 
+### Evaluating a Configuration
+
+`Soothsayer.backtest/3` holds out the last 10% of your data, fits on the rest, and forecasts from every held out origin the way you would in production, using only what was observed up to that point:
+
+```elixir
+result = Soothsayer.backtest(model, df, horizon: 7)
+
+result.metrics              # %{mean_absolute_error: ..., root_mean_squared_error: ...}
+result.by_step[7]           # the same, for forecasts made 7 days ahead
+result.predictions          # DataFrame with origin, ds, step, y, yhat
+result.model                # the fitted model
+```
+
+This is the protocol NeuralProphet uses for its validation metrics, and what the benchmark suite runs.
+
 ## Using EXLA for Faster Training
 
 Soothsayer uses EXLA for training by default, which compiles to XLA for faster execution on CPU/GPU.

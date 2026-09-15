@@ -186,6 +186,20 @@ Vl.new(width: 800, height: 400, title: "Actual vs Predicted")
 
 See the [Interactive Livebook Tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) for more visualization examples.
 
+## Evaluating a Configuration
+
+Before trusting a configuration, backtest it. `Soothsayer.backtest/3` holds out the last part of the data (10% by default), fits on the rest, and forecasts `horizon` steps ahead from every held out origin using only what was observed up to it:
+
+```elixir
+result = Soothsayer.backtest(model, df, horizon: 7, validation_fraction: 0.1)
+
+result.metrics.mean_absolute_error
+result.by_step[1].mean_absolute_error   # one day ahead
+result.by_step[7].mean_absolute_error   # a week ahead
+```
+
+`result.predictions` is a dataframe of every forecast with its origin date, target date, step, actual and predicted value, so you can plot errors by horizon or by season. Events and regressors go in as `events:` and `regressors:` options.
+
 ## Next Steps
 
 - [Trends](trends.md) - Learn about piecewise linear trends with changepoint detection

@@ -714,6 +714,29 @@ defmodule Soothsayer do
   end
 
   @doc """
+  Evaluates a model configuration with a rolling-origin backtest.
+
+  Holds out the last `validation_fraction` of `data`, fits on the rest, and
+  forecasts `horizon` steps ahead from every validation origin using only
+  what was observed up to it. Returns the fitted model, overall and per-step
+  MAE and RMSE, and a dataframe of every forecast. See `Soothsayer.Backtest`.
+
+  ## Examples
+
+      iex> result = Soothsayer.backtest(Soothsayer.new(%{ar: %{enabled: true, lags: 14, forecast_steps: 7}}), df)
+      iex> result.metrics
+      %{mean_absolute_error: 5.65, root_mean_squared_error: 7.04}
+      iex> result.by_step[7].mean_absolute_error
+      6.9
+
+  """
+  @spec backtest(Soothsayer.Model.t(), Explorer.DataFrame.t(), keyword()) ::
+          Soothsayer.Backtest.result()
+  def backtest(%Model{} = model, %DataFrame{} = data, opts \\ []) do
+    Soothsayer.Backtest.run(model, data, opts)
+  end
+
+  @doc """
   Extracts the raw AR layer weights from a fitted model.
 
   For linear AR models, returns the output layer weights.
