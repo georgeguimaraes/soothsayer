@@ -248,7 +248,7 @@ Soothsayer.predict(fitted_with_ar, Series.from_list([~D[2023-06-15]]), history: 
 
 AR forecasting assumes gap-free data at the model's frequency (inferred at fit, see [The Basics](basics.md)). Lags are looked up one step back at a time, so a missing row inside the training data makes the rows right after it fall back to zero lags, and blocks always advance one step of the frequency: a day for daily data, an hour for hourly data.
 
-Every requested timestamp has to sit on that grid. An hourly model can forecast 14:00 but not 14:30, and asking for the latter raises an error naming the timestamp and the frequency.
+Every requested timestamp has to sit on that grid. An hourly model can forecast 14:00 but not 14:30, and asking for the latter raises an error naming the timestamp and the frequency. Monthly data works on either month starts or month ends: a month-end timestamp always steps to the next or previous month end, so Jan 31, Feb 28 and Mar 31 form one grid.
 
 When regressors are configured, the regressors dataframe must cover every timestamp in every block up to the latest requested one, since those get predicted too.
 

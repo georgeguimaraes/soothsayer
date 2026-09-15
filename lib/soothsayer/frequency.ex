@@ -110,13 +110,20 @@ defmodule Soothsayer.Frequency do
   @doc """
   Moves a timestamp by `steps` steps of the frequency, negative steps
   going back. A `Date` stays a `Date` for day and month frequencies and
-  becomes a `NaiveDateTime` for shorter ones. Month steps land on the same
-  day of the month, clamped to the month's length.
+  becomes a `NaiveDateTime` for shorter ones. Month steps keep the day of
+  the month, and a timestamp on the last day of its month lands on the last
+  day of the target month, so month-end series stay on their own grid.
 
   ## Examples
 
       iex> Soothsayer.Frequency.shift(~D[2023-01-31], 1, {1, :month})
       ~D[2023-02-28]
+
+      iex> Soothsayer.Frequency.shift(~D[2023-02-28], 1, {1, :month})
+      ~D[2023-03-31]
+
+      iex> Soothsayer.Frequency.shift(~D[2023-02-28], -1, {1, :month})
+      ~D[2023-01-31]
 
       iex> Soothsayer.Frequency.shift(~N[2023-01-01 00:00:00], -2, {5, :minute})
       ~N[2022-12-31 23:50:00]
@@ -127,14 +134,27 @@ defmodule Soothsayer.Frequency do
   """
   @spec shift(Timestamp.input(), integer(), t()) :: Timestamp.input()
   def shift(%Date{} = date, steps, {amount, :day}), do: Date.add(date, steps * amount)
-  def shift(%Date{} = date, steps, {amount, :month}), do: Date.shift(date, month: steps * amount)
+
+  def shift(%Date{} = date, steps, {amount, :month}) do
+    shifted = Date.shift(date, month: steps * amount)
+    if month_end?(date), do: Date.end_of_month(shifted), else: shifted
+  end
 
   def shift(%Date{} = date, steps, frequency) do
     shift(Timestamp.to_naive_datetime(date), steps, frequency)
   end
 
   def shift(%NaiveDateTime{} = timestamp, steps, {amount, :month}) do
-    NaiveDateTime.shift(timestamp, month: steps * amount)
+    shifted = NaiveDateTime.shift(timestamp, month: steps * amount)
+
+    if month_end?(NaiveDateTime.to_date(timestamp)) do
+      NaiveDateTime.new!(
+        shifted |> NaiveDateTime.to_date() |> Date.end_of_month(),
+        NaiveDateTime.to_time(shifted)
+      )
+    else
+      shifted
+    end
   end
 
   def shift(%NaiveDateTime{} = timestamp, steps, {amount, unit}) do
@@ -189,6 +209,8 @@ defmodule Soothsayer.Frequency do
       _ -> raise_off_grid(from, to, frequency)
     end
   end
+
+  defp month_end?(%Date{} = date), do: date == Date.end_of_month(date)
 
   defp raise_off_grid(from, to, frequency) do
     raise ArgumentError,
