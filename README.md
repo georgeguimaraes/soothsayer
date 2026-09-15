@@ -310,6 +310,19 @@ Soothsayer.new(%{
 
 See the [Regressors guide](guides/regressors.md).
 
+### Missing Data
+
+Gaps in the data are handled at fit the way NeuralProphet does. Without auto-regression the rows with a missing `y` (nil or NaN) are dropped. With auto-regression the data is put on the frequency grid, trailing gaps are dropped and the rest are imputed: linearly up to 10 values from each side of a gap, then with a rolling mean over 10 more. Whatever is still missing raises, unless you let fit skip the training samples that touch it:
+
+```elixir
+Soothsayer.new(%{
+  ar: %{enabled: true, lags: 24},
+  missing: %{impute_linear: 10, impute_rolling: 10, drop_samples: true}
+})
+```
+
+Regressor columns are imputed the same way, and so is the `history:` passed to predict. See the [Missing Data guide](guides/missing_data.md).
+
 ### Uncertainty
 
 Ask for quantiles and you get prediction intervals next to the median:
@@ -427,7 +440,7 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 | Peyton Manning (daily) | RMSE | 0.501 | 0.480 | 0.480 to 0.483 | identical configuration |
 | Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.38 | 5.37 to 5.42 | identical configuration and metric (average over horizons 1 to 7) |
 | Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.72 | 6.70 to 6.77 | same |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.500 | 0.49 to 0.55 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 missing readings linearly interpolated |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.500 | 0.49 to 0.55 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit |
 | Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.728 | 0.72 to 0.76 | same |
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 27.1 | 24.8 to 27.1 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 29.0 | 26.7 to 29.0 | same caveat |

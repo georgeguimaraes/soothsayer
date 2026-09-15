@@ -176,13 +176,19 @@ defmodule Soothsayer.Regressors do
   end
 
   @doc """
-  Raw values of one column by timestamp, for storing at fit time.
+  Raw values of one column by timestamp, for storing at fit time. Missing
+  values (nil or NaN) are left out, so a lookup at those timestamps raises
+  instead of feeding NaN to the network.
   """
   @spec values_by_timestamp(DataFrame.t(), String.t()) :: %{Timestamp.t() => float()}
   def values_by_timestamp(%DataFrame{} = dataframe, name) do
     timestamps = Timestamp.from_series(dataframe["ds"])
     values = dataframe[name] |> Series.cast({:f, 64}) |> Series.to_list()
-    Enum.zip(timestamps, values) |> Map.new()
+
+    for {timestamp, value} <- Enum.zip(timestamps, values),
+        not is_nil(value) and value != :nan,
+        into: %{},
+        do: {timestamp, value}
   end
 
   @doc """

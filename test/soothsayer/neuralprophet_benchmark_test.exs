@@ -116,12 +116,9 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
           seed: @seed
         })
 
-      # One hour of readings (12 rows) is missing on 2017-06-10. NeuralProphet
-      # imputes them before fitting, so the same is done here.
-      data =
-        "yosemite_temps.csv"
-        |> load({:naive_datetime, :microsecond})
-        |> interpolate_missing_targets()
+      # One hour of readings (12 rows) is NaN on 2017-06-10. Fit imputes
+      # them linearly, as NeuralProphet does.
+      data = load("yosemite_temps.csv", {:naive_datetime, :microsecond})
 
       result = Soothsayer.backtest(model, data)
 
@@ -135,7 +132,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes:
           "same config: 36 lags, 12 steps, 30 changepoints, daily seasonality; " <>
             "yearly off explicitly, NeuralProphet's auto rule turns it off on 65 days of data; " <>
-            "12 missing readings linearly interpolated"
+            "12 missing readings imputed at fit"
       )
 
       # Seed 42 gives 0.500 / 0.728. Across six seeds: MAE 0.49 to 0.55,
@@ -148,30 +145,6 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
   defp load(file, ds_dtype \\ :date) do
     @fixtures |> Path.join(file) |> DataFrame.from_csv!(dtypes: [{"ds", ds_dtype}])
-  end
-
-  # Linear interpolation across runs of NaN, the way NeuralProphet's
-  # impute_missing fills short gaps.
-  defp interpolate_missing_targets(data) do
-    values = data["y"] |> Explorer.Series.cast({:f, 64}) |> Explorer.Series.to_list()
-    known = values |> Enum.with_index() |> Enum.reject(fn {value, _} -> value == :nan end)
-    known_indices = Enum.map(known, &elem(&1, 1))
-    known_values = Map.new(known, fn {value, index} -> {index, value} end)
-
-    filled =
-      Enum.with_index(values)
-      |> Enum.map(fn
-        {:nan, index} ->
-          previous = known_indices |> Enum.filter(&(&1 < index)) |> Enum.max()
-          next = known_indices |> Enum.filter(&(&1 > index)) |> Enum.min()
-          fraction = (index - previous) / (next - previous)
-          known_values[previous] + fraction * (known_values[next] - known_values[previous])
-
-        {value, _index} ->
-          value
-      end)
-
-    DataFrame.put(data, "y", Explorer.Series.from_list(filled))
   end
 
   defp report(benchmark, result, reference, notes: notes) do

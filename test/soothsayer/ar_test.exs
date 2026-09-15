@@ -493,6 +493,34 @@ defmodule Soothsayer.ARTest do
              ) > 3
     end
 
+    test "history with missing values is imputed before seeding the lags" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 100.0)
+      fitted_model = Soothsayer.fit(ar_only_model(), DataFrame.new(%{"ds" => dates, "y" => y}))
+
+      last_training_date = List.last(dates)
+      history_dates = Enum.map(1..30, fn i -> Date.add(last_training_date, i) end)
+      clean = DataFrame.new(%{"ds" => history_dates, "y" => List.duplicate(100.0, 29) ++ [106.0]})
+
+      # one nil in the middle and a NaN where the lags start, both between 100s
+      with_gaps =
+        DataFrame.new(%{
+          "ds" => history_dates,
+          "y" =>
+            List.duplicate(100.0, 10) ++
+              [nil] ++ List.duplicate(100.0, 15) ++ [:nan] ++ [100.0, 100.0, 106.0]
+        })
+
+      target_date = Series.from_list([Date.add(last_training_date, 31)])
+
+      from_clean =
+        Soothsayer.predict(fitted_model, target_date, history: clean) |> Nx.to_flat_list()
+
+      from_gaps =
+        Soothsayer.predict(fitted_model, target_date, history: with_gaps) |> Nx.to_flat_list()
+
+      assert from_gaps == from_clean
+    end
+
     test "history without the required columns raises" do
       {dates, y} = ar1_series(~D[2022-01-01], 60, 100.0)
 

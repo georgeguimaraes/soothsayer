@@ -156,6 +156,10 @@ defmodule Soothsayer.AR do
     * `:max_lags` - the longest lag window any input needs, which decides
       the first usable origin. Defaults to `lags`. Lagged regressors with
       more lags than the AR component raise it.
+    * `:skip_positions` - a `MapSet` of positions in `y` that are missing.
+      An origin is left out when its widest window, `max_lags` values up
+      to and including it and `forecast_steps` after it, touches one of
+      them. Raises when no origin is left.
 
   ## Returns
 
@@ -164,6 +168,7 @@ defmodule Soothsayer.AR do
     * `:targets` - `{samples, forecast_steps}` target values
     * `:position_indices` - `{samples, lags + forecast_steps}` positions in `y`
     * `:origin_indices` - list of the origin positions
+    * `:skipped_origins` - how many origins `:skip_positions` left out
 
   ## Examples
 
@@ -178,16 +183,31 @@ defmodule Soothsayer.AR do
       iex> samples.origin_indices
       [1, 2, 3]
 
+      iex> y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+      iex> samples = Soothsayer.AR.training_samples(y, 2, 2, skip_positions: MapSet.new([4]))
+      iex> {samples.origin_indices, samples.skipped_origins}
+      {[1], 2}
+
   """
   @spec training_samples(Nx.Tensor.t(), pos_integer(), pos_integer(), keyword()) :: %{
           lagged: Nx.Tensor.t(),
           targets: Nx.Tensor.t(),
           position_indices: Nx.Tensor.t(),
-          origin_indices: list(non_neg_integer())
+          origin_indices: list(non_neg_integer()),
+          skipped_origins: non_neg_integer()
         }
   def training_samples(y, lags, forecast_steps, opts \\ []) do
     max_lags = Keyword.get(opts, :max_lags, lags)
-    origin_indices = origin_indices(Nx.size(y), max_lags, forecast_steps)
+    skip_positions = Keyword.get(opts, :skip_positions, MapSet.new())
+    all_origins = origin_indices(Nx.size(y), max_lags, forecast_steps)
+
+    origin_indices =
+      Enum.reject(all_origins, &touches?(&1, skip_positions, max_lags, forecast_steps))
+
+    if origin_indices == [] do
+      raise ArgumentError,
+            "Every training sample touches a missing value. Fill the gaps before fitting."
+    end
 
     lag_indices = Enum.map(origin_indices, &window_indices(&1, lags))
 
@@ -198,8 +218,17 @@ defmodule Soothsayer.AR do
       lagged: y |> Nx.take(Nx.tensor(lag_indices)) |> Nx.as_type({:f, 32}),
       targets: y |> Nx.take(Nx.tensor(target_indices)) |> Nx.as_type({:f, 32}),
       position_indices: Enum.zip_with(lag_indices, target_indices, &Kernel.++/2) |> Nx.tensor(),
-      origin_indices: origin_indices
+      origin_indices: origin_indices,
+      skipped_origins: length(all_origins) - length(origin_indices)
     }
+  end
+
+  defp touches?(origin, skip_positions, max_lags, forecast_steps) do
+    MapSet.size(skip_positions) > 0 and
+      Enum.any?(
+        (origin - max_lags + 1)..(origin + forecast_steps),
+        &MapSet.member?(skip_positions, &1)
+      )
   end
 
   @doc """

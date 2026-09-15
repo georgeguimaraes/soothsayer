@@ -45,7 +45,10 @@ defmodule Soothsayer.Backtest do
 
     A map with the fitted `:model`, overall `:metrics`, `:by_step` metrics
     keyed by step ahead, and a `:predictions` dataframe with columns
-    `origin`, `ds`, `step`, `y` and `yhat`.
+    `origin`, `ds`, `step`, `y` and `yhat`. Validation dates whose `y` is
+    missing (nil or NaN) can't be scored and are left out of both; they
+    still flow into the history each forecast is made from, where they are
+    imputed like training data (see `Soothsayer.MissingData`).
 
   """
   @spec run(Soothsayer.Model.t(), DataFrame.t(), keyword()) :: result()
@@ -101,6 +104,8 @@ defmodule Soothsayer.Backtest do
     }
   end
 
+  defp missing?(value), do: is_nil(value) or value == :nan
+
   defp fit_options(nil), do: []
   defp fit_options(events), do: [events: events]
 
@@ -125,12 +130,14 @@ defmodule Soothsayer.Backtest do
 
         predicted =
           fitted_model
-          |> Soothsayer.predict(Series.from_list(target_dates), predict_options)
+          |> Soothsayer.predict_components(Series.from_list(target_dates), predict_options)
+          |> Map.fetch!(:combined)
           |> Nx.to_flat_list()
 
         target_dates
         |> Enum.zip(predicted)
         |> Enum.with_index(1)
+        |> Enum.reject(fn {{date, _yhat}, _step} -> missing?(actual_by_date[date]) end)
         |> Enum.map(fn {{date, yhat}, step} ->
           %{origin: origin_date, ds: date, step: step, y: actual_by_date[date], yhat: yhat}
         end)

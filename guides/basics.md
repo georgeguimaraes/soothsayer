@@ -26,6 +26,8 @@ df = DataFrame.from_csv!("readings.csv", dtypes: [{"ds", {:naive_datetime, :micr
 
 The step between rows (the frequency) is inferred at fit from the most common gap in `ds`, so daily, hourly, 5-minute and monthly data all work without configuration. It can also be set explicitly with `frequency: {5, :minute}` (units `:minute`, `:hour`, `:day`, `:month`). Auto-regression lags, forecast blocks and event windows all move by that step.
 
+Missing values and missing rows are fine: fit drops or imputes them the way NeuralProphet does and logs what it did. See [Missing Data](missing_data.md).
+
 ## Creating a Model
 
 Use `Soothsayer.new/1` to create a model with your configuration:

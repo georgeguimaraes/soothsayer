@@ -678,29 +678,123 @@ defmodule SoothsayerTest do
       end
     end
 
-    test "rejects missing target values" do
-      model = Soothsayer.new(%{epochs: 1})
-      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]]
-
-      with_nil = DataFrame.new(%{"ds" => dates, "y" => [1.0, nil, 3.0, 4.0]})
-
-      assert_raise ArgumentError, ~r/y column has 1 missing values/, fn ->
-        Soothsayer.fit(model, with_nil)
-      end
-
-      with_nan = DataFrame.new(%{"ds" => dates, "y" => [1.0, :nan, :nan, 4.0]})
-
-      assert_raise ArgumentError, ~r/y column has 2 missing values/, fn ->
-        Soothsayer.fit(model, with_nan)
-      end
-    end
-
     test "rejects bad seasonality enabled values" do
       assert_raise ArgumentError,
                    ~r/seasonality.daily.enabled must be true, false or :auto/,
                    fn ->
                      Soothsayer.new(%{seasonality: %{daily: %{enabled: :always}}})
                    end
+    end
+  end
+
+  describe "missing data" do
+    defp gapped_frame(rows, missing_indices) do
+      dates = Enum.map(0..(rows - 1), &Date.add(~D[2023-01-01], &1))
+
+      y =
+        Enum.map(0..(rows - 1), fn index ->
+          if index in missing_indices, do: nil, else: 10.0 + index * 0.5
+        end)
+
+      {dates, DataFrame.new(%{"ds" => dates, "y" => y})}
+    end
+
+    defp ar_model(overrides \\ %{}) do
+      Soothsayer.new(
+        Map.merge(
+          %{
+            seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+            ar: %{enabled: true, lags: 3},
+            epochs: 1,
+            learning_rate: 0.01
+          },
+          overrides
+        )
+      )
+    end
+
+    test "without auto-regression the rows with a missing y are dropped" do
+      {dates, data} = gapped_frame(40, [5, 6])
+      fitted = Soothsayer.fit(Soothsayer.new(%{epochs: 1, learning_rate: 0.01}), data)
+
+      assert length(fitted.config.training_data.timestamps) == 38
+
+      refute Enum.at(dates, 5) in Enum.map(
+               fitted.config.training_data.timestamps,
+               &NaiveDateTime.to_date/1
+             )
+
+      predictions = Soothsayer.predict(fitted, Series.from_list(Enum.take(dates, 3)))
+      assert Nx.shape(predictions) == {3, 1}
+    end
+
+    test "with auto-regression a short gap is imputed linearly" do
+      {dates, data} = gapped_frame(40, [10, 11])
+      fitted = Soothsayer.fit(ar_model(), data)
+
+      %{mean: mean, std: std} = fitted.config.normalization.y
+      mean = mean |> Nx.squeeze() |> Nx.to_number()
+      std = std |> Nx.squeeze() |> Nx.to_number()
+      gap_timestamp = dates |> Enum.at(10) |> NaiveDateTime.new!(~T[00:00:00])
+
+      assert length(fitted.config.training_data.timestamps) == 40
+
+      assert_in_delta fitted.config.training_data.known_values[gap_timestamp],
+                      (15.0 - mean) / std,
+                      1.0e-4
+    end
+
+    test "with auto-regression a missing row is inserted on the grid" do
+      {dates, data} = gapped_frame(40, [])
+      without_row = DataFrame.filter_with(data, &Series.not_equal(&1["ds"], Enum.at(dates, 20)))
+      assert DataFrame.n_rows(without_row) == 39
+
+      fitted = Soothsayer.fit(ar_model(), without_row)
+      assert length(fitted.config.training_data.timestamps) == 40
+      assert fitted.config.training_data.known_values |> Map.keys() |> length() == 40
+    end
+
+    test "with auto-regression an off-grid row raises" do
+      # daily rows on a two day grid: the second row is already off it
+      {_dates, data} = gapped_frame(41, [])
+
+      assert_raise ArgumentError, ~r/2023-01-02 is not on the 2 day grid/, fn ->
+        Soothsayer.fit(ar_model(%{frequency: {2, :day}}), data)
+      end
+    end
+
+    test "a gap too long to impute raises unless samples may be dropped" do
+      {dates, data} = gapped_frame(120, Enum.to_list(40..79))
+
+      assert_raise ArgumentError,
+                   ~r/training samples touch missing values that couldn't be imputed \(gaps longer than 30 steps\)/,
+                   fn -> Soothsayer.fit(ar_model(), data) end
+
+      fitted = Soothsayer.fit(ar_model(%{missing: %{drop_samples: true}}), data)
+      known = fitted.config.training_data.known_values
+
+      # 10 imputed from each side, the 20 in the middle stay unknown
+      assert map_size(known) == 100
+      refute Map.has_key?(known, NaiveDateTime.new!(Enum.at(dates, 60), ~T[00:00:00]))
+      assert Map.has_key?(known, NaiveDateTime.new!(Enum.at(dates, 45), ~T[00:00:00]))
+    end
+
+    test "imputation can be turned off" do
+      {_dates, data} = gapped_frame(40, [10])
+
+      assert_raise ArgumentError, ~r/training samples touch missing values/, fn ->
+        Soothsayer.fit(ar_model(%{missing: %{impute: false}}), data)
+      end
+    end
+
+    test "rejects bad missing options" do
+      assert_raise ArgumentError, ~r/missing.impute_linear must be a non-negative integer/, fn ->
+        Soothsayer.new(%{missing: %{impute_linear: -1}})
+      end
+
+      assert_raise ArgumentError, ~r/missing.drop_samples must be true or false/, fn ->
+        Soothsayer.new(%{missing: %{drop_samples: :maybe}})
+      end
     end
   end
 

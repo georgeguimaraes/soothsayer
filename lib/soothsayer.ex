@@ -3,12 +3,15 @@ defmodule Soothsayer do
   The main module for the Soothsayer library, providing functions for creating, fitting, and using time series forecasting models.
   """
 
+  require Logger
+
   alias Explorer.DataFrame
   alias Explorer.Series
   alias Soothsayer.AR
   alias Soothsayer.Events
   alias Soothsayer.Frequency
   alias Soothsayer.LaggedRegressors
+  alias Soothsayer.MissingData
   alias Soothsayer.Model
   alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
@@ -57,6 +60,7 @@ defmodule Soothsayer do
       regressors: [],
       lagged_regressors: %{},
       quantiles: [],
+      missing: %{impute: true, impute_linear: 10, impute_rolling: 10, drop_samples: false},
       epochs: :auto,
       learning_rate: :auto,
       schedule: :one_cycle,
@@ -82,7 +86,23 @@ defmodule Soothsayer do
     validate_regressors!(config)
     validate_lagged_regressors!(config)
     validate_forecast_steps!(config)
+    validate_missing!(config)
     validate_training_options!(config)
+  end
+
+  defp validate_missing!(%{missing: missing}) do
+    for key <- [:impute, :drop_samples], value = Map.get(missing, key), not is_boolean(value) do
+      raise ArgumentError, "missing.#{key} must be true or false, got #{inspect(value)}"
+    end
+
+    for key <- [:impute_linear, :impute_rolling],
+        value = Map.get(missing, key),
+        not (is_integer(value) and value >= 0) do
+      raise ArgumentError,
+            "missing.#{key} must be a non-negative integer, got #{inspect(value)}"
+    end
+
+    :ok
   end
 
   defp validate_training_options!(config) do
@@ -198,6 +218,18 @@ defmodule Soothsayer do
     When the model config lists `regressors`, `data` must contain a column
     for each of them.
 
+  ## Missing data
+
+    Missing values (`nil` or NaN) and missing rows are handled the way
+    NeuralProphet does, see `Soothsayer.MissingData` and the missing data
+    guide. Without auto-regression the rows with a missing `y` are dropped.
+    With auto-regression the data is put on the frequency grid, trailing
+    gaps are dropped and the rest are imputed, linearly up to
+    `missing.impute_linear` values from each side of a gap and then with a
+    rolling mean over `missing.impute_rolling` more. Gaps left open after
+    that raise, unless `missing: %{drop_samples: true}` skips the training
+    samples that touch them.
+
   ## Frequency and seasonality
 
     With `frequency: :auto` the step between rows is inferred from the most
@@ -234,6 +266,12 @@ defmodule Soothsayer do
     Timestamp.validate_sorted!(timestamps)
     frequency = resolve_frequency(model.config.frequency, timestamps)
 
+    # Missing rows and values are dropped, regridded or imputed before
+    # anything is built, so every component sees the same rows. Whatever is
+    # still missing is NaN in `data` and listed in `unfilled` by row.
+    {data, unfilled} = MissingData.prepare(data, model.config, frequency)
+    timestamps = Timestamp.from_series(data["ds"])
+
     # The frequency and the :auto seasonalities are settled before anything
     # is built from the config, so every component sees the same answer.
     config =
@@ -243,9 +281,13 @@ defmodule Soothsayer do
 
     model = %{model | config: config}
 
-    y_full = data["y"] |> Series.to_tensor() |> Nx.as_type({:f, 32})
-    {y_full_normalized, y_mean, y_std} = normalize(Nx.new_axis(y_full, -1))
-    y_full_normalized = Nx.flatten(y_full_normalized)
+    # The mean and std come from the known values only, so the NaNs left at
+    # unfilled positions stay NaN and never reach a training sample.
+    y_values = data["y"] |> Series.cast({:f, 64}) |> Series.to_list()
+    y_full = Nx.tensor(y_values, type: {:f, 32})
+    known_y = y_values |> Enum.reject(&(&1 == :nan)) |> Nx.tensor(type: {:f, 32})
+    {_known_normalized, y_mean, y_std} = normalize(Nx.new_axis(known_y, -1))
+    y_full_normalized = Nx.divide(Nx.subtract(y_full, y_mean), y_std)
 
     # One training sample per forecast origin. Without AR that is every
     # timestamp on its own. With AR a sample is the origin's lags followed
@@ -255,11 +297,23 @@ defmodule Soothsayer do
     {y_normalized, ar_inputs, position_indices} =
       if ar_enabled?(model) do
         max_lags = max(config.ar.lags, LaggedRegressors.max_lags(config))
+        skip_positions = unfilled |> Map.values() |> Enum.reduce(MapSet.new(), &MapSet.union/2)
 
         samples =
           AR.training_samples(y_full_normalized, config.ar.lags, AR.forecast_steps(config),
-            max_lags: max_lags
+            max_lags: max_lags,
+            skip_positions: skip_positions
           )
+
+        if samples.skipped_origins > 0 and not config.missing.drop_samples do
+          MissingData.raise_unfilled!(samples.skipped_origins, config.missing)
+        end
+
+        if samples.skipped_origins > 0 do
+          Logger.info(
+            "Skipped #{samples.skipped_origins} training samples touching missing values"
+          )
+        end
 
         ar_inputs =
           %{"ar" => samples.lagged}
@@ -312,10 +366,16 @@ defmodule Soothsayer do
     # so the lag positions of a forecast can reach into the training period.
     y_normalized_values = Nx.to_flat_list(y_full_normalized)
 
+    known_values =
+      timestamps
+      |> Enum.zip(y_normalized_values)
+      |> Enum.reject(fn {_timestamp, value} -> value == :nan end)
+      |> Map.new()
+
     training_data = %{
       timestamps: timestamps,
       y_normalized: y_normalized_values,
-      known_values: Map.new(Enum.zip(timestamps, y_normalized_values)),
+      known_values: known_values,
       last_timestamp: Enum.max(timestamps, NaiveDateTime),
       regressors: Map.new(config.regressors, &{&1, Regressors.values_by_timestamp(data, &1)}),
       lagged_regressors:
@@ -725,17 +785,35 @@ defmodule Soothsayer do
     {AR.known_values(training_data), training_data.last_timestamp}
   end
 
+  # History gets the same treatment as training data with lags: put on the
+  # frequency grid and imputed. Values still missing stay unknown, and the
+  # origins whose lags need them fall back to zero lags.
   defp known_values(model, %DataFrame{} = history) do
     validate_history!(history)
     %{mean: mean, std: std} = model.config.normalization.y
     mean = mean |> Nx.squeeze() |> Nx.to_number()
     std = std |> Nx.squeeze() |> Nx.to_number()
 
-    history_values = Enum.map(Series.to_list(history["y"]), &((&1 - mean) / std))
     history_timestamps = Timestamp.from_series(history["ds"])
+    Timestamp.validate_sorted!(history_timestamps)
+
+    {history_timestamps, history_values} =
+      MissingData.fill_history(
+        history_timestamps,
+        Series.to_list(history["y"]),
+        model.config.frequency,
+        model.config.missing
+      )
+
+    history_known =
+      for {timestamp, value} <- Enum.zip(history_timestamps, history_values),
+          not is_nil(value),
+          into: %{},
+          do: {timestamp, (value - mean) / std}
+
     {training_values, last_training_timestamp} = known_values(model, nil)
 
-    {Map.merge(training_values, Map.new(Enum.zip(history_timestamps, history_values))),
+    {Map.merge(training_values, history_known),
      Enum.max([last_training_timestamp | history_timestamps], NaiveDateTime)}
   end
 
@@ -873,23 +951,8 @@ defmodule Soothsayer do
               "Training data must contain a 'y' (target values) column. Available columns: #{inspect(columns)}"
 
       true ->
-        validate_no_missing_targets!(data["y"])
+        :ok
     end
-  end
-
-  # A single nil or NaN in y turns every weight into NaN a few steps into
-  # training, so it's better to stop here and say so.
-  defp validate_no_missing_targets!(y) do
-    nan_count = y |> Series.cast({:f, 64}) |> Series.is_nan() |> Series.sum()
-    missing = Series.nil_count(y) + (nan_count || 0)
-
-    if missing > 0 do
-      raise ArgumentError,
-            "The y column has #{missing} missing values (nil or NaN). " <>
-              "Fill or drop them before fitting, for example with Explorer.Series.fill_missing/2."
-    end
-
-    :ok
   end
 
   defp validate_history!(%DataFrame{} = history) do

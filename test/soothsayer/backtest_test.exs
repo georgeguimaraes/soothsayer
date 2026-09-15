@@ -73,6 +73,29 @@ defmodule Soothsayer.BacktestTest do
       assert result.by_step[2].mean_absolute_error > result.by_step[1].mean_absolute_error
     end
 
+    test "validation dates with a missing y are not scored" do
+      dates = Date.range(~D[2023-01-01], ~D[2023-03-31]) |> Enum.to_list()
+      y = Enum.map(dates, fn date -> 10.0 + Date.diff(date, ~D[2023-01-01]) * 0.1 end)
+      y = List.replace_at(y, length(y) - 3, :nan)
+      data = DataFrame.new(%{"ds" => dates, "y" => y})
+
+      model =
+        Soothsayer.new(%{
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 2,
+          learning_rate: 0.01,
+          seed: 1
+        })
+
+      result = Soothsayer.backtest(model, data, validation_fraction: 0.1)
+
+      validation_rows = trunc(length(dates) * 0.1)
+      assert DataFrame.n_rows(result.predictions) == validation_rows - 1
+      refute Enum.at(dates, length(dates) - 3) in Series.to_list(result.predictions["ds"])
+      assert is_float(result.metrics.mean_absolute_error)
+      assert result.metrics.mean_absolute_error == result.metrics.mean_absolute_error
+    end
+
     test "without auto-regression the horizon defaults to 1 and forecasts don't depend on the origin" do
       dates = Date.range(~D[2022-01-01], ~D[2022-06-30]) |> Enum.to_list()
 
