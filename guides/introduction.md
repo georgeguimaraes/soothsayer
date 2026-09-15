@@ -12,7 +12,7 @@ y(t) = trend(t) + seasonality(t) + ar(t) + events(t)
 
 Where:
 - **trend(t)** captures long-term growth or decline
-- **seasonality(t)** captures repeating patterns (yearly, weekly)
+- **seasonality(t)** captures repeating patterns (yearly, weekly, daily)
 - **ar(t)** captures dependencies on recent values (auto-regression)
 - **events(t)** captures the impact of special occasions (holidays, promotions)
 
@@ -35,6 +35,8 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Changepoints | Yes | Yes |
 | Yearly seasonality | Yes | Yes |
 | Weekly seasonality | Yes | Yes |
+| Daily seasonality | Yes | Yes |
+| Sub-daily data (hourly, 5-minute, ...) with inferred frequency | Yes | Yes |
 | Auto-regression (AR) | Yes | Yes |
 | Deep AR-Net | Yes | Yes |
 | Direct multi-step forecasting (`n_forecasts`) | Yes | Yes |
@@ -74,14 +76,14 @@ predictions = Soothsayer.predict(fitted_model, future_dates)
 
 # Get individual components
 components = Soothsayer.predict_components(fitted_model, future_dates)
-# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ..., events: ...}
+# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., daily_seasonality: ..., ar: ..., events: ...}
 ```
 
 ## Next Steps
 
 - [The Basics](basics.md) - Learn the fundamentals with trend and seasonality
 - [Trends](trends.md) - Piecewise linear trends with changepoint detection
-- [Seasonality](seasonality.md) - Yearly and weekly patterns with Fourier terms
+- [Seasonality](seasonality.md) - Yearly, weekly and daily patterns with Fourier terms
 - [Auto-Regression](autoregression.md) - Capture dependencies on recent values
 - [Events](events.md) - Model holidays, promotions, and special occasions
 
