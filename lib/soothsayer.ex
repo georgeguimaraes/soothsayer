@@ -416,7 +416,8 @@ defmodule Soothsayer do
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
       - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
-        observations newer than the training data. Only used when
+        observations newer than the training data, sorted by "ds". Missing
+        values in it are imputed like training data. Only used when
         auto-regression is enabled, see `predict_components/3`.
       - `:regressors` - An `Explorer.DataFrame` with "ds" plus one column per
         configured regressor, covering every predicted date. Required when
@@ -517,8 +518,9 @@ defmodule Soothsayer do
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
       - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
-        observations newer than the training data. Only used when
-        auto-regression is enabled.
+        observations newer than the training data, sorted by "ds". Missing
+        values in it are imputed like training data, see
+        `Soothsayer.MissingData`. Only used when auto-regression is enabled.
       - `:regressors` - An `Explorer.DataFrame` with "ds" plus one column per
         configured regressor. Required when the model was fitted with
         regressors, and it must cover every predicted date. With
@@ -540,9 +542,10 @@ defmodule Soothsayer do
     its predictions as lags, and so on up to the latest requested
     timestamp. Within a block there is no error compounding; across blocks
     there is, so far-out AR forecasts revert toward the level the model
-    learned. Steps are steps of the model's frequency, so the data must be
-    gap-free at that frequency and every requested timestamp must sit on
-    the same grid (an hourly model can't forecast half past the hour).
+    learned. Steps are steps of the model's frequency. Training data and
+    history are put on that grid at fit (see `Soothsayer.MissingData`), and
+    every requested timestamp must sit on it too (an hourly model can't
+    forecast half past the hour).
 
   ## Returns
 
