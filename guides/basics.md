@@ -52,8 +52,10 @@ If you call `Soothsayer.new()` without arguments, you get sensible defaults:
 | `regressors` | `[]` | Column names of future regressors, see [Regressors](regressors.md) |
 | `lagged_regressors` | `%{}` | Column name to `%{lags: n}` for lagged regressors, needs AR |
 | `quantiles` | `[]` | Prediction interval quantiles, e.g. `[0.1, 0.9]`, see [Uncertainty](uncertainty.md) |
-| `epochs` | `100` | Passes over the training data |
-| `learning_rate` | `0.01` | How fast to learn |
+| `epochs` | `:auto` | Passes over the training data, picked from the data size, or a number |
+| `learning_rate` | `:auto` | Found by a learning rate range test before training, or a number |
+| `schedule` | `:one_cycle` | Learning rate schedule, `:one_cycle` or `:constant` |
+| `optimizer` | `:adam` | `:adam` or `:adamw` |
 | `batch_size` | `nil` | Rows per gradient step, picked from the data size when `nil` |
 | `seed` | `nil` | Integer seed for reproducible fits, random when `nil` |
 

@@ -253,16 +253,20 @@ This shows how much each event (at each window position) adds to the forecast.
 
 ```elixir
 Soothsayer.new(%{
-  epochs: 100,         # passes over the training data (default: 100)
-  learning_rate: 0.01, # how fast to learn (default: 0.01)
-  batch_size: nil,     # rows per gradient step (default: picked from the data size)
-  seed: nil            # integer for reproducible fits (default: random)
+  epochs: :auto,         # passes over the data, or a number (default: from the data size)
+  learning_rate: :auto,  # or a number (default: found by a range test)
+  schedule: :one_cycle,  # or :constant (default: one-cycle)
+  optimizer: :adam,      # or :adamw
+  batch_size: nil,       # rows per gradient step (default: from the data size)
+  seed: nil              # integer for reproducible fits (default: random)
 })
 ```
 
-Training runs in shuffled minibatches, so one epoch is one pass over the data. When `batch_size` is `nil`, Soothsayer picks a size from the number of rows (16 for a few hundred rows, 32 for a few thousand, up to 512), the same heuristic NeuralProphet uses. Smaller batches mean more gradient steps per epoch.
+The defaults follow NeuralProphet. Training runs in shuffled minibatches, so one epoch is one pass over the data, and `batch_size` and `epochs` are picked from the number of rows when left at their defaults: small datasets get more passes, large ones fewer.
 
-If your model is underfitting (predictions are too smooth), try more epochs or a higher learning rate. If it's overfitting (fits training data but not new data), try fewer epochs or more regularization.
+With `learning_rate: :auto`, Soothsayer runs a learning rate range test before training: about a hundred steps with the rate climbing from `1.0e-6` to `10`, watching the training loss, and picking the rate where the loss falls fastest. That rate is the peak of the one-cycle schedule, which warms up from a tenth of it, peaks at 30% of training, and cools down to a hundredth by the end. The values actually used are recorded on the fitted model's config.
+
+If your model is underfitting (predictions are too smooth), try more epochs or a fixed higher learning rate. If it's overfitting (fits training data but not new data), try fewer epochs or more regularization.
 
 ### Future Regressors
 
@@ -405,12 +409,12 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 
 | Dataset | Metric | NeuralProphet | Soothsayer | Range over seeds | Notes |
 |---------|--------|---------------|------------|------------------|-------|
-| Peyton Manning (daily) | MAE | 0.350 | 0.286 | 0.29 to 0.35 | identical configuration |
-| Peyton Manning (daily) | RMSE | 0.501 | 0.473 | 0.47 to 0.54 | identical configuration |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.65 | 5.57 to 6.11 | identical configuration and metric (average over horizons 1 to 7); lagged temperature didn't help here, it was 5.48 to 5.96 without it |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 7.04 | 6.95 to 7.70 | same |
-| Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.1 | 22.0 to 30.7 | identical configuration, 130 training rows so the seed matters |
-| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 25.0 | 24.1 to 33.2 | same caveat |
+| Peyton Manning (daily) | MAE | 0.350 | 0.296 | 0.296 to 0.300 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.501 | 0.490 | 0.487 to 0.496 | identical configuration |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.44 | 5.42 to 5.47 | identical configuration and metric (average over horizons 1 to 7) |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.76 | 6.74 to 6.81 | same |
+| Air passengers (monthly, multiplicative) | MAE | 30.1 | 26.2 | 23.2 to 29.8 | identical configuration, 130 training rows so the seed matters |
+| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 28.1 | 25.2 to 31.8 | same caveat |
 
 The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT license. NeuralProphet's Yosemite benchmark (5-minute data) is not included since Soothsayer only supports daily dates today.
 

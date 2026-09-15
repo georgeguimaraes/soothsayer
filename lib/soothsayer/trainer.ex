@@ -10,10 +10,23 @@ defmodule Soothsayer.Trainer do
   from the number of rows when that is `nil`.
   """
 
+  import Nx.Defn
+
   alias Soothsayer.Quantiles
 
   @min_auto_batch_size 16
   @max_auto_batch_size 512
+  @min_auto_epochs 20
+  @max_auto_epochs 500
+
+  # Learning rate range test bounds, the same as NeuralProphet's
+  @range_test_min_learning_rate 1.0e-6
+  @range_test_max_learning_rate 10.0
+  @range_test_skip_begin 10
+  @range_test_skip_end 3
+  @range_test_smoothing_half_window 5
+
+  @adamw_weight_decay 1.0e-3
 
   @doc """
   Trains a network on the provided data.
@@ -32,6 +45,14 @@ defmodule Soothsayer.Trainer do
         shuffling, so two fits with the same seed produce the same model.
         `nil` (or missing) leaves both random. Seeding the shuffle reseeds
         `:rand` in the calling process.
+      - `:schedule` - `:constant` (default) keeps the learning rate fixed,
+        `:one_cycle` runs NeuralProphet's three-phase one-cycle schedule
+        peaking at the learning rate, see `one_cycle/3`.
+      - `:optimizer` - `:adam` (default) or `:adamw` with weight decay
+        `1.0e-3`, NeuralProphet's default optimizer.
+
+    `learning_rate` and `epochs` must be concrete numbers here. Resolve
+    `:auto` with `resolve_learning_rate/4` and `auto_epochs/1` first.
       - `:ar` - Optional map with `:regularization` for AR L1 penalty.
       - `:trend` - Optional map with `:regularization` for trend L1 penalty.
 
@@ -58,13 +79,288 @@ defmodule Soothsayer.Trainer do
     n_rows = Nx.axis_size(y, 0)
     batch_size = min(config[:batch_size] || auto_batch_size(n_rows), n_rows)
 
+    unless is_number(config.learning_rate) and is_integer(epochs) do
+      raise ArgumentError,
+            "Trainer.fit needs a numeric learning_rate and integer epochs, got " <>
+              "#{inspect(config.learning_rate)} and #{inspect(epochs)}. " <>
+              "Resolve :auto with resolve_learning_rate/4 and auto_epochs/1 first."
+    end
+
+    total_steps = epochs * div(n_rows, batch_size)
+    optimizer = build_optimizer(config, config.learning_rate, total_steps)
+
     ar_reg = get_in(config, [:ar, :regularization])
     trend_reg = get_in(config, [:trend, :regularization])
 
     if ar_reg || trend_reg do
-      train_with_regularization(network, x, y, epochs, batch_size, initial_params, config)
+      train_with_regularization(
+        network,
+        x,
+        y,
+        epochs,
+        batch_size,
+        initial_params,
+        config,
+        optimizer
+      )
     else
-      train_standard(network, x, y, epochs, batch_size, initial_params, config)
+      train_standard(network, x, y, epochs, batch_size, initial_params, config, optimizer)
+    end
+  end
+
+  @doc """
+  Picks the number of epochs from the number of training rows.
+
+  NeuralProphet's heuristic: `10 * ceil(100 / n * 2 ** (2.25 * log10(10 + n)))`,
+  clamped to 20..500. Small datasets get many passes, large ones fewer.
+
+  ## Examples
+
+      iex> Soothsayer.Trainer.auto_epochs(130)
+      220
+      iex> Soothsayer.Trainer.auto_epochs(2615)
+      80
+
+  """
+  @spec auto_epochs(pos_integer()) :: pos_integer()
+  def auto_epochs(n_rows) when n_rows > 0 do
+    epochs = 10 * ceil(100 / n_rows * :math.pow(2, 2.25 * :math.log10(10 + n_rows)))
+
+    epochs
+    |> max(@min_auto_epochs)
+    |> min(@max_auto_epochs)
+  end
+
+  @doc """
+  Resolves `config.learning_rate`, running the range test when it is `:auto`.
+
+  Returns the learning rate as a float.
+  """
+  @spec resolve_learning_rate(Axon.t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), map()) ::
+          float()
+  def resolve_learning_rate(network, x, y, %{learning_rate: :auto} = config) do
+    find_learning_rate(network, x, y, config)
+  end
+
+  def resolve_learning_rate(_network, _x, _y, %{learning_rate: learning_rate}) do
+    learning_rate
+  end
+
+  @doc """
+  Learning rate range test, as NeuralProphet runs it through Lightning.
+
+  Trains fresh parameters for about a hundred minibatch steps while the
+  learning rate climbs exponentially from `1.0e-6` to `10`, records the
+  loss after every step, smooths the curve with a Hamming window and returns
+  the learning rate at its steepest descent, skipping the first 10 and last
+  3 points. The number of steps grows slowly with the size of the real
+  training run: `100 + 30 * log10(1 + total_steps / 1000)`.
+
+  The suggested rate is where the loss is falling fastest, which is a
+  good peak for a one-cycle schedule and a reasonable constant rate.
+  """
+  @spec find_learning_rate(Axon.t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), map()) ::
+          float()
+  def find_learning_rate(network, x, y, config) do
+    seed = config[:seed]
+    if seed, do: :rand.seed(:exsss, {seed, seed, seed})
+
+    {init_fn, predict_fn} = Axon.build(network, build_options(seed))
+    initial_params = init_fn.(x, Axon.ModelState.empty())
+
+    n_rows = Nx.axis_size(y, 0)
+    batch_size = min(config[:batch_size] || auto_batch_size(n_rows), n_rows)
+    epochs = if is_integer(config.epochs), do: config.epochs, else: auto_epochs(n_rows)
+    main_total_steps = epochs * div(n_rows, batch_size)
+    num_training = 100 + trunc(:math.log10(1 + main_total_steps / 1000) * 30)
+
+    learning_rates = range_test_learning_rates(num_training)
+
+    schedule = fn count ->
+      ratio = @range_test_max_learning_rate / @range_test_min_learning_rate
+      Nx.multiply(@range_test_min_learning_rate, Nx.pow(ratio, Nx.divide(count, num_training)))
+    end
+
+    {init_optimizer_fn, update_fn} = Polaris.Optimizers.adam(learning_rate: schedule)
+    quantiles = config[:quantiles] || []
+
+    objective_fn = fn params, x_input, y_target ->
+      loss(y_target, predict_fn.(params, x_input), quantiles)
+    end
+
+    train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
+
+    # Each step updates on one minibatch like real training, but the loss
+    # that goes on the curve is measured on the whole training set, since a
+    # single minibatch loss is too noisy to find the steepest descent.
+    full_loss = EXLA.jit(objective_fn)
+
+    {losses, _params, _opt_state} =
+      x
+      |> batches(y, batch_size)
+      |> Stream.cycle()
+      |> Enum.take(num_training)
+      |> Enum.reduce({[], initial_params, init_optimizer_fn.(initial_params)}, fn
+        {x_batch, y_batch}, {losses, params, opt_state} ->
+          {_batch_loss, params, opt_state} = train_step.(params, opt_state, x_batch, y_batch)
+          {[Nx.to_number(full_loss.(params, x, y)) | losses], params, opt_state}
+      end)
+
+    suggest_learning_rate(Enum.reverse(losses), learning_rates)
+  end
+
+  defp range_test_learning_rates(num_training) do
+    ratio = @range_test_max_learning_rate / @range_test_min_learning_rate
+
+    Enum.map(0..(num_training - 1), fn step ->
+      @range_test_min_learning_rate * :math.pow(ratio, step / num_training)
+    end)
+  end
+
+  @doc """
+  Picks the learning rate at the steepest descent of a smoothed loss curve.
+
+  Non-finite losses (the run diverged) are replaced by the largest finite
+  loss before smoothing. Exposed for testing.
+  """
+  @spec suggest_learning_rate(list(number()), list(float())) :: float()
+  def suggest_learning_rate(losses, learning_rates) do
+    finite = Enum.filter(losses, &finite?/1)
+    ceiling = if finite == [], do: 0.0, else: Enum.max(finite)
+    losses = Enum.map(losses, fn loss -> if finite?(loss), do: loss, else: ceiling end)
+
+    smoothed = hamming_smooth(losses, @range_test_smoothing_half_window)
+    gradient = central_gradient(smoothed)
+
+    candidates =
+      gradient
+      |> Enum.with_index()
+      |> Enum.drop(@range_test_skip_begin)
+      |> Enum.drop(-@range_test_skip_end)
+
+    {_steepest, index} = Enum.min_by(candidates, fn {slope, _index} -> slope end)
+    Enum.at(learning_rates, index)
+  end
+
+  # Nx.to_number returns :nan, :infinity or :neg_infinity for non-finite values
+  defp finite?(value), do: is_number(value)
+
+  defp hamming_smooth(values, half_window) do
+    window_size = 2 * half_window
+
+    weights =
+      Enum.map(0..(window_size - 1), fn i ->
+        0.54 - 0.46 * :math.cos(2 * :math.pi() * i / (window_size - 1))
+      end)
+
+    weight_sum = Enum.sum(weights)
+
+    padded =
+      List.duplicate(hd(values), half_window) ++
+        values ++ List.duplicate(List.last(values), half_window)
+
+    padded
+    |> Enum.chunk_every(window_size, 1, :discard)
+    |> Enum.take(length(values))
+    |> Enum.map(fn window ->
+      Enum.zip_with(window, weights, &(&1 * &2)) |> Enum.sum() |> Kernel./(weight_sum)
+    end)
+  end
+
+  defp central_gradient(values) do
+    count = length(values)
+    indexed = List.to_tuple(values)
+
+    Enum.map(0..(count - 1), fn i ->
+      cond do
+        count == 1 -> 0.0
+        i == 0 -> elem(indexed, 1) - elem(indexed, 0)
+        i == count - 1 -> elem(indexed, i) - elem(indexed, i - 1)
+        true -> (elem(indexed, i + 1) - elem(indexed, i - 1)) / 2
+      end
+    end)
+  end
+
+  @doc """
+  NeuralProphet's three-phase one-cycle learning rate schedule.
+
+  Over `total_steps` the rate rises with a cosine from `max / 10` to `max`
+  during the first 30% of steps, falls back to `max / 10` during the next
+  30%, then decays to `max / 100` over the rest. Returns a function of the
+  step count usable as a Polaris `learning_rate`.
+
+  ## Options
+
+    * `:pct_start` - share of steps in each of the first two phases, default `0.3`
+    * `:div_factor` - `max / initial`, default `10.0`
+    * `:final_div_factor` - `initial / final`, default `10.0`
+
+  """
+  @spec one_cycle(float(), pos_integer(), keyword()) :: (Nx.Tensor.t() -> Nx.Tensor.t())
+  def one_cycle(max_learning_rate, total_steps, opts \\ []) do
+    pct_start = Keyword.get(opts, :pct_start, 0.3)
+    div_factor = Keyword.get(opts, :div_factor, 10.0)
+    final_div_factor = Keyword.get(opts, :final_div_factor, 10.0)
+
+    initial = max_learning_rate / div_factor
+    final = initial / final_div_factor
+    phase_1_end = max(pct_start * total_steps, 1.0)
+    phase_2_end = max(2 * pct_start * total_steps, phase_1_end + 1.0)
+    total = max(total_steps * 1.0, phase_2_end + 1.0)
+
+    fn step ->
+      apply_one_cycle(step,
+        max: max_learning_rate,
+        initial: initial,
+        final: final,
+        phase_1_end: phase_1_end,
+        phase_2_end: phase_2_end,
+        total: total
+      )
+    end
+  end
+
+  defnp apply_one_cycle(step, opts) do
+    step = Nx.as_type(step, :f32)
+
+    warmup = cosine_anneal(opts[:initial], opts[:max], step / opts[:phase_1_end])
+
+    cooldown =
+      cosine_anneal(
+        opts[:max],
+        opts[:initial],
+        (step - opts[:phase_1_end]) / (opts[:phase_2_end] - opts[:phase_1_end])
+      )
+
+    tail =
+      cosine_anneal(
+        opts[:initial],
+        opts[:final],
+        (step - opts[:phase_2_end]) / (opts[:total] - opts[:phase_2_end])
+      )
+
+    Nx.select(
+      step < opts[:phase_1_end],
+      warmup,
+      Nx.select(step < opts[:phase_2_end], cooldown, tail)
+    )
+  end
+
+  defnp cosine_anneal(start, finish, pct) do
+    pct = Nx.clip(pct, 0.0, 1.0)
+    finish + (start - finish) / 2 * (1 + Nx.cos(Nx.Constants.pi() * pct))
+  end
+
+  defp build_optimizer(config, learning_rate, total_steps) do
+    rate =
+      case config[:schedule] || :constant do
+        :one_cycle -> one_cycle(learning_rate, total_steps)
+        :constant -> learning_rate
+      end
+
+    case config[:optimizer] || :adam do
+      :adamw -> Polaris.Optimizers.adamw(learning_rate: rate, decay: @adamw_weight_decay)
+      :adam -> Polaris.Optimizers.adam(learning_rate: rate)
     end
   end
 
@@ -178,7 +474,7 @@ defmodule Soothsayer.Trainer do
     end
   end
 
-  defp train_standard(network, x, y, epochs, batch_size, initial_params, config) do
+  defp train_standard(network, x, y, epochs, batch_size, initial_params, config, optimizer) do
     # Axon.Loop re-enumerates the data on every epoch, and Stream.resource
     # calls its start function each time, so each epoch gets a fresh shuffle.
     data =
@@ -194,10 +490,7 @@ defmodule Soothsayer.Trainer do
     quantiles = config[:quantiles] || []
 
     network
-    |> Axon.Loop.trainer(
-      &loss(&1, &2, quantiles),
-      Polaris.Optimizers.adam(learning_rate: config.learning_rate)
-    )
+    |> Axon.Loop.trainer(&loss(&1, &2, quantiles), optimizer)
     |> Axon.Loop.run(data, initial_params, epochs: epochs, compiler: EXLA)
   end
 
@@ -230,14 +523,23 @@ defmodule Soothsayer.Trainer do
     end)
   end
 
-  defp train_with_regularization(network, x, y, epochs, batch_size, initial_params, config) do
+  defp train_with_regularization(
+         network,
+         x,
+         y,
+         epochs,
+         batch_size,
+         initial_params,
+         config,
+         optimizer
+       ) do
     ar_reg = get_in(config, [:ar, :regularization]) || 0.0
     trend_reg = get_in(config, [:trend, :regularization]) || 0.0
 
     regularization_layers = build_regularization_layers(initial_params, ar_reg, trend_reg)
 
     {_init_fn, predict_fn} = Axon.build(network)
-    {init_optim_fn, update_fn} = Polaris.Optimizers.adam(learning_rate: config.learning_rate)
+    {init_optim_fn, update_fn} = optimizer
 
     objective_fn = build_objective_fn(predict_fn, regularization_layers, config[:quantiles] || [])
     train_step_fn = build_train_step_fn(objective_fn, update_fn)

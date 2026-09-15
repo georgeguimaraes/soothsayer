@@ -39,6 +39,9 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Deep AR-Net | Yes | Yes |
 | Direct multi-step forecasting (`n_forecasts`) | Yes | Yes |
 | Rolling-origin backtest / validation metrics | Yes | Yes |
+| Learning rate range test | Yes | Yes |
+| One-cycle learning rate schedule | Yes | Yes |
+| Auto batch size and epochs | Yes | Yes |
 | Events | Yes | Yes |
 | Lagged regressors | Yes | Yes |
 | Future regressors | Yes | Yes |

@@ -577,4 +577,47 @@ defmodule SoothsayerTest do
       end
     end
   end
+
+  describe "training defaults" do
+    test "auto learning rate and epochs are resolved and recorded on the fitted model" do
+      dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()
+
+      y =
+        Enum.map(dates, fn date ->
+          10 + 0.05 * Date.diff(date, ~D[2022-01-01]) + :rand.normal(0, 1)
+        end)
+
+      df = DataFrame.new(%{"ds" => dates, "y" => y})
+
+      model = Soothsayer.new(%{seed: 1})
+      assert model.config.learning_rate == :auto
+      assert model.config.epochs == :auto
+      assert model.config.schedule == :one_cycle
+
+      fitted_model = Soothsayer.fit(model, df)
+
+      assert is_float(fitted_model.config.learning_rate)
+
+      assert fitted_model.config.learning_rate > 1.0e-5 and
+               fitted_model.config.learning_rate < 1.0
+
+      assert fitted_model.config.epochs == Soothsayer.Trainer.auto_epochs(365)
+    end
+
+    test "rejects unknown schedules and optimizers and bad rates" do
+      assert_raise ArgumentError, ~r/schedule must be/, fn ->
+        Soothsayer.new(%{schedule: :cyclic})
+      end
+
+      assert_raise ArgumentError, ~r/optimizer must be/, fn ->
+        Soothsayer.new(%{optimizer: :sgd})
+      end
+
+      assert_raise ArgumentError, ~r/learning_rate must be/, fn ->
+        Soothsayer.new(%{learning_rate: -1})
+      end
+
+      assert_raise ArgumentError, ~r/epochs must be/, fn -> Soothsayer.new(%{epochs: 0}) end
+    end
+  end
 end

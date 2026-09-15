@@ -44,10 +44,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same config: 10 changepoints, yearly 6, weekly 3, additive"
       )
 
-      # Seed 42 gives 0.286 / 0.473. Across six seeds: MAE 0.286 to 0.354,
-      # RMSE 0.473 to 0.535. Ceilings are 1.25x the worst seed.
-      assert result.metrics.mean_absolute_error < 0.45
-      assert result.metrics.root_mean_squared_error < 0.67
+      # Seed 42 gives 0.296 / 0.490. Across six seeds: MAE 0.296 to 0.300,
+      # RMSE 0.487 to 0.496 (with a fixed 0.01 rate and 100 epochs it was
+      # 0.286 to 0.354). Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 0.375
+      assert result.metrics.root_mean_squared_error < 0.62
     end
   end
 
@@ -68,11 +69,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same config: multiplicative seasonality, weekly disabled for monthly rows"
       )
 
-      # Seed 42 gives 23.1 / 25.0. Across six seeds: MAE 22.0 to 30.7,
-      # RMSE 24.1 to 33.2 (additive mode was 31 to 32 / 38 to 42). Only 130
+      # Seed 42 gives 26.2 / 28.1. Across six seeds: MAE 23.2 to 29.8,
+      # RMSE 25.2 to 31.8 (additive mode was 31 to 32 / 38 to 42). Only 130
       # training rows, so init matters a lot here. Ceilings are 1.25x the worst seed.
-      assert result.metrics.mean_absolute_error < 38.5
-      assert result.metrics.root_mean_squared_error < 41.5
+      assert result.metrics.mean_absolute_error < 37.3
+      assert result.metrics.root_mean_squared_error < 39.7
     end
   end
 
@@ -98,11 +99,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same configuration and metric"
       )
 
-      # Seed 42 gives 5.65 / 7.04. Across six seeds: MAE 5.57 to 6.11,
-      # RMSE 6.95 to 7.70. Without the lagged temperature it was 5.48 to
-      # 5.96 / 6.88 to 7.54. Ceilings are 1.25x the worst seed.
-      assert result.metrics.mean_absolute_error < 7.65
-      assert result.metrics.root_mean_squared_error < 9.65
+      # Seed 42 gives 5.44 / 6.76. Across six seeds: MAE 5.42 to 5.47,
+      # RMSE 6.74 to 6.81 (with a fixed 0.01 rate and 100 epochs it was
+      # 5.57 to 6.11). Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 6.85
+      assert result.metrics.root_mean_squared_error < 8.5
     end
   end
 

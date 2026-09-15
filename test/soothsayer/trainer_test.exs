@@ -105,6 +105,59 @@ defmodule Soothsayer.TrainerTest do
     end
   end
 
+  describe "one_cycle/3" do
+    test "rises to the peak at 30%, falls back by 60%, then decays to a tenth of the start" do
+      schedule = Trainer.one_cycle(0.1, 100)
+      at = fn step -> schedule.(Nx.tensor(step)) |> Nx.to_number() end
+
+      assert_in_delta at.(0), 0.01, 1.0e-4
+      assert_in_delta at.(30), 0.1, 1.0e-4
+      assert_in_delta at.(60), 0.01, 1.0e-4
+      assert at.(15) > at.(0) and at.(15) < at.(30)
+      assert at.(99) < 0.0015
+    end
+  end
+
+  describe "suggest_learning_rate/2" do
+    test "picks the rate where the smoothed loss falls fastest, ignoring the edges and blow-ups" do
+      # flat, then a steady drop between points 40 and 60, then flat, then divergence
+      losses =
+        List.duplicate(2.0, 40) ++
+          Enum.map(1..20, &(2.0 - &1 * 0.075)) ++
+          List.duplicate(0.5, 20) ++ [:infinity, :nan, 50.0]
+
+      learning_rates = Enum.map(0..(length(losses) - 1), &(&1 * 1.0))
+
+      picked = Trainer.suggest_learning_rate(losses, learning_rates)
+      assert picked >= 42.0 and picked <= 58.0, "picked #{picked}"
+    end
+  end
+
+  describe "auto_epochs/1" do
+    test "gives small datasets many passes and large ones few, within 20..500" do
+      assert Trainer.auto_epochs(130) == 220
+      assert Trainer.auto_epochs(2615) == 80
+      assert Trainer.auto_epochs(10) == 500
+      assert Trainer.auto_epochs(1_000_000) == 20
+    end
+  end
+
+  describe "fit/5 with unresolved options" do
+    test "refuses :auto values, they must be resolved first" do
+      network =
+        Axon.input("x", shape: {nil, 1})
+        |> Axon.dense(1)
+        |> then(&Axon.container(%{combined: &1}))
+
+      x = %{"x" => Nx.tensor([[1.0], [2.0]])}
+      y = Nx.tensor([[1.0], [2.0]])
+
+      assert_raise ArgumentError, ~r/Resolve :auto/, fn ->
+        Trainer.fit(network, x, y, 2, %{learning_rate: :auto})
+      end
+    end
+  end
+
   describe "batches/3" do
     test "shuffles rows into fixed-size batches and drops the leftover" do
       x = %{"a" => Nx.iota({100, 2}), "b" => Nx.iota({100, 3})}

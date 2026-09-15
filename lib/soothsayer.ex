@@ -12,6 +12,7 @@ defmodule Soothsayer do
   alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
+  alias Soothsayer.Trainer
   alias Soothsayer.Trend
 
   @doc """
@@ -28,7 +29,7 @@ defmodule Soothsayer do
   ## Examples
 
       iex> Soothsayer.new()
-      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: 100, learning_rate: 0.01}, network: %Axon.Node{}, params: nil}
+      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: :auto, learning_rate: :auto, schedule: :one_cycle, ...}, network: %Axon.Node{}, params: nil}
 
       iex> Soothsayer.new(%{epochs: 200, learning_rate: 0.005})
       %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: 200, learning_rate: 0.005}, network: %Axon.Node{}, params: nil}
@@ -52,8 +53,10 @@ defmodule Soothsayer do
       regressors: [],
       lagged_regressors: %{},
       quantiles: [],
-      epochs: 100,
-      learning_rate: 0.01,
+      epochs: :auto,
+      learning_rate: :auto,
+      schedule: :one_cycle,
+      optimizer: :adam,
       batch_size: nil,
       seed: nil
     }
@@ -73,6 +76,31 @@ defmodule Soothsayer do
     validate_regressors!(config)
     validate_lagged_regressors!(config)
     validate_forecast_steps!(config)
+    validate_training_options!(config)
+  end
+
+  defp validate_training_options!(config) do
+    unless config.learning_rate == :auto or
+             (is_number(config.learning_rate) and config.learning_rate > 0) do
+      raise ArgumentError,
+            "learning_rate must be a positive number or :auto, got #{inspect(config.learning_rate)}"
+    end
+
+    unless config.epochs == :auto or (is_integer(config.epochs) and config.epochs > 0) do
+      raise ArgumentError,
+            "epochs must be a positive integer or :auto, got #{inspect(config.epochs)}"
+    end
+
+    unless config.schedule in [:constant, :one_cycle] do
+      raise ArgumentError,
+            "schedule must be :constant or :one_cycle, got #{inspect(config.schedule)}"
+    end
+
+    unless config.optimizer in [:adam, :adamw] do
+      raise ArgumentError, "optimizer must be :adam or :adamw, got #{inspect(config.optimizer)}"
+    end
+
+    :ok
   end
 
   defp validate_lagged_regressors!(%{lagged_regressors: lagged}) when lagged == %{}, do: :ok
@@ -236,7 +264,25 @@ defmodule Soothsayer do
     config =
       Map.put(model.config, :normalization, %{x: x_norm, y: %{mean: y_mean, std: y_std}})
 
-    model = %{model | config: config, network: Model.build_network(config)}
+    network = Model.build_network(config)
+
+    # :auto epochs and learning rate are resolved here so the fitted model
+    # records the values that were actually used.
+    config =
+      config
+      |> Map.update!(:epochs, fn
+        :auto -> Trainer.auto_epochs(Nx.axis_size(y_normalized, 0))
+        epochs -> epochs
+      end)
+      |> then(fn config ->
+        Map.put(
+          config,
+          :learning_rate,
+          Trainer.resolve_learning_rate(network, x_normalized, y_normalized, config)
+        )
+      end)
+
+    model = %{model | config: config, network: network}
 
     fitted_model = Model.fit(model, x_normalized, y_normalized, config.epochs)
 
