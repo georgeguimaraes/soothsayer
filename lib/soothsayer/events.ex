@@ -240,7 +240,7 @@ defmodule Soothsayer.Events do
   def frame_dates(%DataFrame{} = events_df), do: build_event_dates_map(events_df)
 
   @doc """
-  The range of years the timestamps span, `nil..nil` when there are none.
+  The range of years the timestamps span, an empty range when there are none.
   """
   @spec years(list(Timestamp.input())) :: Range.t()
   def years([]), do: 0..-1//1
