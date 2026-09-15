@@ -28,12 +28,19 @@ defmodule Soothsayer.Model do
   alias Soothsayer.Trainer
   alias Soothsayer.Trend
 
-  defstruct [:network, :params, :config]
+  defstruct [:network, :params, :config, :predict_fn]
 
+  @typedoc """
+  A model. `predict_fn` is the network's predict function compiled with
+  EXLA, set by `fit/4` so that `predict/2` doesn't rebuild the network on
+  every call. When it is `nil` (a model assembled by hand) `predict/2`
+  builds the network eagerly instead.
+  """
   @type t :: %__MODULE__{
           network: Axon.t(),
           params: term() | nil,
-          config: map()
+          config: map(),
+          predict_fn: (term(), map() -> map()) | nil
         }
 
   @doc """
@@ -299,7 +306,8 @@ defmodule Soothsayer.Model do
   @spec fit(t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer()) :: t()
   def fit(model, x, y, epochs) do
     trained_params = Trainer.fit(model.network, x, y, epochs, model.config)
-    %{model | params: trained_params}
+    {_init_fn, predict_fn} = Axon.build(model.network, compiler: EXLA)
+    %{model | params: trained_params, predict_fn: predict_fn}
   end
 
   @doc """
@@ -341,8 +349,10 @@ defmodule Soothsayer.Model do
           regressors: Nx.Tensor.t(),
           lagged_regressors: Nx.Tensor.t()
         }
-  def predict(model, x) do
+  def predict(%{predict_fn: nil} = model, x) do
     {_init_fn, predict_fn} = Axon.build(model.network)
     predict_fn.(model.params, x)
   end
+
+  def predict(model, x), do: model.predict_fn.(model.params, x)
 end

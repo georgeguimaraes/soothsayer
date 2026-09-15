@@ -182,15 +182,10 @@ defmodule Soothsayer.Trend do
   def build_changepoint_features(_t, []), do: nil
 
   def build_changepoint_features(t, changepoint_positions) do
-    t_flat = Nx.flatten(t)
-
-    changepoint_positions
-    |> Enum.map(fn s_j ->
-      t_flat
-      |> Nx.subtract(s_j)
-      |> Nx.max(0)
-    end)
-    |> Nx.stack(axis: 1)
+    t
+    |> Nx.reshape({:auto, 1})
+    |> Nx.subtract(Nx.tensor([changepoint_positions]))
+    |> Nx.max(0)
     |> Nx.as_type({:f, 32})
   end
 

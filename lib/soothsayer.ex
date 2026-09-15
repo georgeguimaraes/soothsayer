@@ -31,10 +31,10 @@ defmodule Soothsayer do
   ## Examples
 
       iex> Soothsayer.new()
-      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: :auto, learning_rate: :auto, schedule: :one_cycle, ...}, network: %Axon.Node{}, params: nil}
+      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: :auto, learning_rate: :auto, schedule: :one_cycle, ...}, network: %Axon.Node{}, params: nil, predict_fn: nil}
 
       iex> Soothsayer.new(%{epochs: 200, learning_rate: 0.005})
-      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: 200, learning_rate: 0.005}, network: %Axon.Node{}, params: nil}
+      %Soothsayer.Model{config: %{trend: %{enabled: true}, seasonality: %{yearly: %{enabled: true, fourier_terms: 6}, weekly: %{enabled: true, fourier_terms: 3}}, epochs: 200, learning_rate: 0.005}, network: %Axon.Node{}, params: nil, predict_fn: nil}
 
   """
   @spec new(map()) :: Soothsayer.Model.t()
@@ -216,11 +216,11 @@ defmodule Soothsayer do
       iex> model = Soothsayer.new()
       iex> data = Explorer.DataFrame.new(%{"ds" => [...], "y" => [...]})
       iex> fitted_model = Soothsayer.fit(model, data)
-      %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}}
+      %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}, predict_fn: #Function<...>}
 
       iex> events_df = Explorer.DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-01]]})
       iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
-      %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}}
+      %Soothsayer.Model{config: %{}, network: %Axon.Node{}, params: %{}, predict_fn: #Function<...>}
 
   """
   @spec fit(Soothsayer.Model.t(), Explorer.DataFrame.t(), keyword()) :: Soothsayer.Model.t()
@@ -310,9 +310,13 @@ defmodule Soothsayer do
 
     # Store training data for prediction lookups. Regressor values are kept
     # so the lag positions of a forecast can reach into the training period.
+    y_normalized_values = Nx.to_flat_list(y_full_normalized)
+
     training_data = %{
       timestamps: timestamps,
-      y_normalized: Nx.to_flat_list(y_full_normalized),
+      y_normalized: y_normalized_values,
+      known_values: Map.new(Enum.zip(timestamps, y_normalized_values)),
+      last_timestamp: Enum.max(timestamps, NaiveDateTime),
       regressors: Map.new(config.regressors, &{&1, Regressors.values_by_timestamp(data, &1)}),
       lagged_regressors:
         Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)})
@@ -475,13 +479,13 @@ defmodule Soothsayer do
 
     {x_input, step_numbers} =
       if ar_enabled?(model) do
-        observed_values = known_values(model, history)
-        last_observed = observed_values |> Map.keys() |> Enum.max(NaiveDateTime)
+        {observed_values, last_observed} = known_values(model, history)
         forecast_steps = AR.forecast_steps(model.config)
 
         known_values =
           forecast_missing_values(
             observed_values,
+            last_observed,
             regressor_values,
             model,
             prediction_timestamps,
@@ -713,25 +717,26 @@ defmodule Soothsayer do
     end)
   end
 
-  # Observed values in normalized y space, keyed by timestamp. Training data
-  # comes first, then `history` overrides or extends it.
-  defp known_values(model, nil), do: AR.known_values(model.config.training_data)
+  # Observed values in normalized y space, keyed by timestamp, and the last
+  # observed timestamp. Training data comes first, then `history` overrides
+  # or extends it.
+  defp known_values(model, nil) do
+    training_data = model.config.training_data
+    {AR.known_values(training_data), training_data.last_timestamp}
+  end
 
   defp known_values(model, %DataFrame{} = history) do
     validate_history!(history)
     %{mean: mean, std: std} = model.config.normalization.y
+    mean = mean |> Nx.squeeze() |> Nx.to_number()
+    std = std |> Nx.squeeze() |> Nx.to_number()
 
-    history_values =
-      history["y"]
-      |> Series.to_tensor()
-      |> Nx.as_type({:f, 32})
-      |> Nx.subtract(mean)
-      |> Nx.divide(std)
-      |> Nx.to_flat_list()
-
+    history_values = Enum.map(Series.to_list(history["y"]), &((&1 - mean) / std))
     history_timestamps = Timestamp.from_series(history["ds"])
+    {training_values, last_training_timestamp} = known_values(model, nil)
 
-    Map.merge(known_values(model, nil), Map.new(Enum.zip(history_timestamps, history_values)))
+    {Map.merge(training_values, Map.new(Enum.zip(history_timestamps, history_values))),
+     Enum.max([last_training_timestamp | history_timestamps], NaiveDateTime)}
   end
 
   # Forecasts the steps between the last observed timestamp and the latest
@@ -741,12 +746,12 @@ defmodule Soothsayer do
   # Nothing is stored on the model.
   defp forecast_missing_values(
          known_values,
+         last_observed,
          regressor_values,
          model,
          prediction_timestamps,
          events_df
        ) do
-    last_observed = known_values |> Map.keys() |> Enum.max(NaiveDateTime)
     last_prediction = Enum.max(prediction_timestamps, NaiveDateTime)
 
     last_observed

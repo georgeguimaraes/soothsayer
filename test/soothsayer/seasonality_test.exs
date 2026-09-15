@@ -187,6 +187,24 @@ defmodule Soothsayer.SeasonalityTest do
       assert Nx.to_flat_list(result.weekly) |> Enum.all?(&(&1 == 0.0))
     end
 
+    test "columns are sin and cos of each term in order" do
+      dates = [~D[2023-01-01], ~D[2023-03-15]]
+      config = %{seasonality: %{yearly: %{enabled: true, fourier_terms: 3}}}
+      %{yearly: features} = Seasonality.build_features(dates, config)
+
+      expected =
+        dates
+        |> Seasonality.compute_period_fractions(:yearly)
+        |> Enum.map(fn fraction ->
+          Enum.flat_map(1..3, fn term ->
+            angle = 2 * :math.pi() * term * fraction
+            [:math.sin(angle), :math.cos(angle)]
+          end)
+        end)
+
+      assert Nx.all_close(features, Nx.tensor(expected), atol: 1.0e-6) |> Nx.to_number() == 1
+    end
+
     test "tensors are f32 type" do
       dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
 

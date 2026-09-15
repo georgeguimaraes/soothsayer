@@ -29,6 +29,16 @@ defmodule Soothsayer.ARModuleTest do
 
       assert AR.known_values(training_data) == %{~D[2023-01-01] => 0.5, ~D[2023-01-02] => -0.5}
     end
+
+    test "returns the map a fitted model already carries" do
+      training_data = %{
+        timestamps: [~D[2023-01-01], ~D[2023-01-02]],
+        y_normalized: [0.5, -0.5],
+        known_values: %{~D[2023-01-01] => 0.5}
+      }
+
+      assert AR.known_values(training_data) == %{~D[2023-01-01] => 0.5}
+    end
   end
 
   describe "build_input/4" do

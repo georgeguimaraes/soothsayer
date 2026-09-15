@@ -300,15 +300,23 @@ defmodule Soothsayer.AR do
 
   ## Parameters
 
-    * `training_data` - Map with `:timestamps` and `:y_normalized` (list of values)
+    * `training_data` - Map with `:timestamps` and `:y_normalized` (list of
+      values). A fitted model also carries the zipped map as `:known_values`,
+      which is returned as is.
 
   ## Returns
 
     A map from timestamp to the normalized value observed then.
 
   """
-  @spec known_values(%{timestamps: list(Timestamp.input()), y_normalized: list(float())}) ::
+  @spec known_values(%{
+          optional(:known_values) => %{Timestamp.input() => float()},
+          timestamps: list(Timestamp.input()),
+          y_normalized: list(float())
+        }) ::
           %{Timestamp.input() => float()}
+  def known_values(%{known_values: %{} = known_values}), do: known_values
+
   def known_values(%{timestamps: timestamps, y_normalized: y_normalized}) do
     Enum.zip(timestamps, y_normalized) |> Map.new()
   end

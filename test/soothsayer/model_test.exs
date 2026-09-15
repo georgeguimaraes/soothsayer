@@ -110,12 +110,18 @@ defmodule Soothsayer.ModelTest do
     y = Nx.tensor([[1.0], [2.0], [3.0]])
 
     trained_model = Model.fit(model, x, y, 1)
+    assert is_function(trained_model.predict_fn, 2)
     predictions = Model.predict(trained_model, x)
 
     assert is_map(predictions)
     assert Map.has_key?(predictions, :combined)
     assert is_tensor(predictions.combined)
     assert Nx.shape(predictions.combined) == {3, 1}
+
+    # a model without a compiled predict function builds the network eagerly
+    # and lands on the same numbers
+    eager_predictions = Model.predict(%{trained_model | predict_fn: nil}, x)
+    assert Nx.all_close(eager_predictions.combined, predictions.combined) |> Nx.to_number() == 1
   end
 
   describe "events support" do

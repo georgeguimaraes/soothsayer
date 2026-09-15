@@ -176,19 +176,21 @@ defmodule Soothsayer.Seasonality do
     end)
   end
 
+  # Columns are sin_1, cos_1, sin_2, cos_2, ... The angles are computed in
+  # f64: the yearly angle reaches 2 * pi * 6 at the highest term, where f32
+  # has already lost more precision than the sine is worth.
   defp build_period_features(timestamps, period, fourier_terms) do
-    t = compute_period_fractions(timestamps, period)
+    fractions = Nx.tensor([compute_period_fractions(timestamps, period)], type: {:f, 64})
+    terms = Nx.tensor([Enum.to_list(1..fourier_terms)], type: {:f, 64})
 
-    features =
-      Enum.flat_map(1..fourier_terms, fn i ->
-        sin_vals = Enum.map(t, fn t_val -> :math.sin(2 * :math.pi() * i * t_val) end)
-        cos_vals = Enum.map(t, fn t_val -> :math.cos(2 * :math.pi() * i * t_val) end)
-        [sin_vals, cos_vals]
-      end)
+    angles =
+      fractions
+      |> Nx.transpose()
+      |> Nx.multiply(terms)
+      |> Nx.multiply(2 * :math.pi())
 
-    features
-    |> Enum.map(&Nx.tensor/1)
-    |> Nx.stack(axis: 1)
+    Nx.stack([Nx.sin(angles), Nx.cos(angles)], axis: -1)
+    |> Nx.reshape({length(timestamps), 2 * fourier_terms})
     |> Nx.as_type({:f, 32})
   end
 
