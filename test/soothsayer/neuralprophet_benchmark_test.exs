@@ -38,7 +38,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
       report(
         "PeytonManning",
-        result.metrics,
+        result,
         %{mean_absolute_error: 0.35033, root_mean_squared_error: 0.50095},
         notes: "same config: 10 changepoints, yearly 6, weekly 3, additive"
       )
@@ -63,7 +63,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
       report(
         "AirPassengers",
-        result.metrics,
+        result,
         %{mean_absolute_error: 30.1315, root_mean_squared_error: 31.0835},
         notes: "same config: multiplicative seasonality, weekly disabled for monthly rows"
       )
@@ -93,7 +93,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
       report(
         "EnergyPriceDaily",
-        result.metrics,
+        result,
         %{mean_absolute_error: 5.40186, root_mean_squared_error: 6.70655},
         notes: "same configuration and metric"
       )
@@ -106,17 +106,88 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
     end
   end
 
-  defp load(file) do
-    @fixtures |> Path.join(file) |> DataFrame.from_csv!(dtypes: [{"ds", :date}])
+  describe "Yosemite temperatures (every 5 minutes)" do
+    test "auto-regression with 36 lags and 12 direct forecast steps on sub-daily data" do
+      model =
+        Soothsayer.new(%{
+          ar: %{enabled: true, lags: 36, forecast_steps: 12},
+          trend: %{changepoints: 30, changepoints_range: 0.9},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          seed: @seed
+        })
+
+      # One hour of readings (12 rows) is missing on 2017-06-10. NeuralProphet
+      # imputes them before fitting, so the same is done here.
+      data =
+        "yosemite_temps.csv"
+        |> load({:naive_datetime, :microsecond})
+        |> interpolate_missing_targets()
+
+      result = Soothsayer.backtest(model, data)
+
+      assert result.model.config.frequency == {5, :minute}
+      assert result.model.config.seasonality.daily.enabled
+
+      report(
+        "YosemiteTemps",
+        result,
+        %{mean_absolute_error: 0.57336, root_mean_squared_error: 0.84714},
+        notes:
+          "same config: 36 lags, 12 steps, 30 changepoints, daily seasonality; " <>
+            "yearly off explicitly, NeuralProphet's auto rule turns it off on 65 days of data; " <>
+            "12 missing readings linearly interpolated"
+      )
+
+      # Seed 42 gives 0.738 / 1.000. Across six seeds: MAE 0.63 to 1.00,
+      # RMSE 0.88 to 1.25, a wider spread than the daily sets since the range
+      # test lands anywhere between 0.005 and 0.025 here. Ceilings are 1.25x
+      # the worst seed.
+      assert result.metrics.mean_absolute_error < 1.25
+      assert result.metrics.root_mean_squared_error < 1.56
+    end
   end
 
-  defp report(benchmark, metrics, reference, notes: notes) do
+  defp load(file, ds_dtype \\ :date) do
+    @fixtures |> Path.join(file) |> DataFrame.from_csv!(dtypes: [{"ds", ds_dtype}])
+  end
+
+  # Linear interpolation across runs of NaN, the way NeuralProphet's
+  # impute_missing fills short gaps.
+  defp interpolate_missing_targets(data) do
+    values = data["y"] |> Explorer.Series.cast({:f, 64}) |> Explorer.Series.to_list()
+    known = values |> Enum.with_index() |> Enum.reject(fn {value, _} -> value == :nan end)
+    known_indices = Enum.map(known, &elem(&1, 1))
+    known_values = Map.new(known, fn {value, index} -> {index, value} end)
+
+    filled =
+      Enum.with_index(values)
+      |> Enum.map(fn
+        {:nan, index} ->
+          previous = known_indices |> Enum.filter(&(&1 < index)) |> Enum.max()
+          next = known_indices |> Enum.filter(&(&1 > index)) |> Enum.min()
+          fraction = (index - previous) / (next - previous)
+          known_values[previous] + fraction * (known_values[next] - known_values[previous])
+
+        {value, _index} ->
+          value
+      end)
+
+    DataFrame.put(data, "y", Explorer.Series.from_list(filled))
+  end
+
+  defp report(benchmark, result, reference, notes: notes) do
+    config = result.model.config
+
+    training =
+      "lr #{:erlang.float_to_binary(config.learning_rate, [:short])}, #{config.epochs} epochs"
+
     for {metric, label} <- [mean_absolute_error: "MAE", root_mean_squared_error: "RMSE"] do
-      ours = metrics[metric]
+      ours = result.metrics[metric]
       theirs = reference[metric]
 
       IO.puts(
-        "| #{benchmark} | #{label} | #{format(theirs)} | #{format(ours)} | #{Float.round(ours / theirs, 2)}x | #{notes} |"
+        "| #{benchmark} | #{label} | #{format(theirs)} | #{format(ours)} | " <>
+          "#{Float.round(ours / theirs, 2)}x | #{notes} (#{training}) |"
       )
     end
   end

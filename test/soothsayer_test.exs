@@ -678,6 +678,23 @@ defmodule SoothsayerTest do
       end
     end
 
+    test "rejects missing target values" do
+      model = Soothsayer.new(%{epochs: 1})
+      dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]]
+
+      with_nil = DataFrame.new(%{"ds" => dates, "y" => [1.0, nil, 3.0, 4.0]})
+
+      assert_raise ArgumentError, ~r/y column has 1 missing values/, fn ->
+        Soothsayer.fit(model, with_nil)
+      end
+
+      with_nan = DataFrame.new(%{"ds" => dates, "y" => [1.0, :nan, :nan, 4.0]})
+
+      assert_raise ArgumentError, ~r/y column has 2 missing values/, fn ->
+        Soothsayer.fit(model, with_nan)
+      end
+    end
+
     test "rejects bad seasonality enabled values" do
       assert_raise ArgumentError,
                    ~r/seasonality.daily.enabled must be true, false or :auto/,

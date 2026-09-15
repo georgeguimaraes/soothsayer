@@ -794,8 +794,23 @@ defmodule Soothsayer do
               "Training data must contain a 'y' (target values) column. Available columns: #{inspect(columns)}"
 
       true ->
-        :ok
+        validate_no_missing_targets!(data["y"])
     end
+  end
+
+  # A single nil or NaN in y turns every weight into NaN a few steps into
+  # training, so it's better to stop here and say so.
+  defp validate_no_missing_targets!(y) do
+    nan_count = y |> Series.cast({:f, 64}) |> Series.is_nan() |> Series.sum()
+    missing = Series.nil_count(y) + (nan_count || 0)
+
+    if missing > 0 do
+      raise ArgumentError,
+            "The y column has #{missing} missing values (nil or NaN). " <>
+              "Fill or drop them before fitting, for example with Explorer.Series.fill_missing/2."
+    end
+
+    :ok
   end
 
   defp validate_history!(%DataFrame{} = history) do

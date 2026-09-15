@@ -425,10 +425,12 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 | Peyton Manning (daily) | RMSE | 0.501 | 0.490 | 0.487 to 0.496 | identical configuration |
 | Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.44 | 5.42 to 5.47 | identical configuration and metric (average over horizons 1 to 7) |
 | Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.76 | 6.74 to 6.81 | same |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.738 | 0.63 to 1.00 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 missing readings linearly interpolated |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 1.000 | 0.88 to 1.25 | same |
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 26.2 | 23.2 to 29.8 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 28.1 | 25.2 to 31.8 | same caveat |
 
-The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT license. NeuralProphet's Yosemite benchmark (5-minute data) is not included since Soothsayer only supports daily dates today.
+The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT license.
 
 ## Features Not Yet Implemented
 

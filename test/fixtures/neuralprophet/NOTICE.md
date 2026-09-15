@@ -9,6 +9,7 @@ https://github.com/ourownstory/neural_prophet at commit `5e6b23145473`
 | `wp_log_peyton_manning.csv` | `wp_log_peyton_manning.csv` | Daily log page views, 2905 rows |
 | `air_passengers.csv` | `air_passengers.csv` | Monthly passengers, 144 rows, line endings converted from CR to LF |
 | `energy_price_daily.csv` | `tutorial04_kaggle_energy_daily_temperature.csv` | Daily energy price with a temperature column, 1461 rows |
+| `yosemite_temps.csv` | `yosemite_temps.csv` | Temperature every 5 minutes, 18721 rows over 65 days |
 
 They back `test/soothsayer/neuralprophet_benchmark_test.exs`, which fits
 Soothsayer on the same splits NeuralProphet's `tests/test_model_performance.py`
