@@ -2,14 +2,21 @@ defmodule Soothsayer.Events do
   @moduledoc """
   Event component for Soothsayer models.
 
-  Handles network building and feature engineering for events (holidays, promotions, etc.).
-  Each event becomes binary features indicating whether the event occurs on a given date.
+  Handles network building and feature engineering for events (promotions,
+  launches, holidays). Each event becomes one binary feature per window
+  offset, 1.0 where the event is that many steps away.
+
+  Where the dates come from, see `event_dates/3`: the events dataframe
+  given to fit or predict, the occurrences the fitted model remembers from
+  fit, yearly recurrence for events configured with `recurring: :yearly`,
+  and the country holidays of `Soothsayer.Holidays`.
   """
 
   alias Explorer.DataFrame
   alias Explorer.Series
   alias Soothsayer.AR
   alias Soothsayer.Frequency
+  alias Soothsayer.Holidays
   alias Soothsayer.Layers
   alias Soothsayer.Timestamp
 
@@ -175,7 +182,84 @@ defmodule Soothsayer.Events do
   end
 
   @doc """
-  Builds event features tensor from timestamps and an events DataFrame.
+  Every occurrence of every configured event, by event name, for the
+  timestamps about to be featurized.
+
+  Takes the union of the occurrences the fitted model remembers
+  (`config.training_data.event_dates`) and the ones in `events_df` (`nil`
+  for none), repeats the events configured with `recurring: :yearly` on
+  their month and day over the years of `timestamps` (February 29 only in
+  leap years), and adds the country holidays named in `config.holidays`
+  for those years.
+
+  ## Examples
+
+      iex> config = %{events: %{"launch" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}}
+      iex> events_df = Explorer.DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2022-03-01]]})
+      iex> timestamps = [~N[2022-01-01 00:00:00], ~N[2023-12-31 00:00:00]]
+      iex> Soothsayer.Events.event_dates(events_df, config, timestamps)
+      %{"launch" => [~N[2022-03-01 00:00:00], ~N[2023-03-01 00:00:00]]}
+
+  """
+  @spec event_dates(DataFrame.t() | nil, map(), list(Timestamp.t())) ::
+          %{String.t() => list(Timestamp.t())}
+  def event_dates(events_df, config, timestamps) do
+    events_config = config[:events] || %{}
+    remembered = get_in(config, [:training_data, :event_dates]) || %{}
+    from_frame = frame_dates(events_df)
+    years = years(timestamps)
+
+    given =
+      remembered
+      |> Map.merge(from_frame, fn _name, older, newer -> older ++ newer end)
+      |> Map.take(Map.keys(events_config))
+
+    recurring =
+      for {name, %{recurring: :yearly}} <- events_config, into: %{} do
+        {name, Enum.flat_map(Map.get(given, name, []), &repeat_yearly(&1, years))}
+      end
+
+    holidays =
+      for name <- get_in(config, [:holidays, :names]) || [],
+          dates = Holidays.dates(config.holidays, years),
+          into: %{} do
+        {name, Enum.map(Map.get(dates, name, []), &Timestamp.to_naive_datetime/1)}
+      end
+
+    [given, recurring, holidays]
+    |> Enum.reduce(&Map.merge(&1, &2, fn _name, left, right -> left ++ right end))
+    |> Map.new(fn {name, dates} -> {name, dates |> Enum.uniq() |> Enum.sort(NaiveDateTime)} end)
+  end
+
+  @doc """
+  The occurrences in an events dataframe by event name, as naive datetimes.
+  `nil` or an empty dataframe give an empty map.
+  """
+  @spec frame_dates(DataFrame.t() | nil) :: %{String.t() => list(Timestamp.t())}
+  def frame_dates(nil), do: %{}
+  def frame_dates(%DataFrame{} = events_df), do: build_event_dates_map(events_df)
+
+  @doc """
+  The range of years the timestamps span, `nil..nil` when there are none.
+  """
+  @spec years(list(Timestamp.input())) :: Range.t()
+  def years([]), do: 0..-1//1
+
+  def years(timestamps) do
+    {first, last} = Enum.min_max_by(timestamps, & &1.year)
+    first.year..last.year//1
+  end
+
+  defp repeat_yearly(timestamp, years) do
+    naive = Timestamp.to_naive_datetime(timestamp)
+
+    for year <- years,
+        {:ok, date} <- [Date.new(year, naive.month, naive.day)],
+        do: NaiveDateTime.new!(date, NaiveDateTime.to_time(naive))
+  end
+
+  @doc """
+  Builds event features tensor from timestamps and the event dates.
 
   For each timestamp, creates binary features indicating whether each event
   (with its window offsets) occurs then. Window offsets are steps of
@@ -186,7 +270,8 @@ defmodule Soothsayer.Events do
   ## Parameters
 
     * `dates` - An Explorer Series of dates or naive datetimes.
-    * `events_df` - A DataFrame with "event" and "ds" columns.
+    * `event_dates` - A DataFrame with "event" and "ds" columns, or a map
+      from event name to occurrences as built by `event_dates/3`.
     * `events_config` - Map of event configurations.
     * `frequency` - The data frequency, `{1, :day}` by default.
 
@@ -210,18 +295,20 @@ defmodule Soothsayer.Events do
       >
 
   """
-  @spec build_features(Series.t(), DataFrame.t(), map(), Frequency.t()) :: Nx.Tensor.t() | nil
-  def build_features(dates, events_df, events_config, frequency \\ {1, :day})
+  @spec build_features(Series.t(), DataFrame.t() | map(), map(), Frequency.t()) ::
+          Nx.Tensor.t() | nil
+  def build_features(dates, event_dates, events_config, frequency \\ {1, :day})
 
-  def build_features(_dates, _events_df, events_config, _frequency) when events_config == %{} do
+  def build_features(_dates, _event_dates, events_config, _frequency) when events_config == %{} do
     nil
   end
 
-  def build_features(dates, events_df, events_config, frequency) do
-    dates_list = Timestamp.from_series(dates)
+  def build_features(dates, %DataFrame{} = events_df, events_config, frequency) do
+    build_features(dates, build_event_dates_map(events_df), events_config, frequency)
+  end
 
-    # Build a map of event_name -> list of dates for quick lookup
-    event_dates_map = build_event_dates_map(events_df)
+  def build_features(dates, event_dates_map, events_config, frequency) do
+    dates_list = Timestamp.from_series(dates)
 
     # For each event (sorted by name) and each window position, create a column
     columns =

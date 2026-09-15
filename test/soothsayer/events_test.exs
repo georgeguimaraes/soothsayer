@@ -366,6 +366,64 @@ defmodule Soothsayer.EventsTest do
     end
   end
 
+  describe "event_dates/3" do
+    test "repeats yearly events on their month and day over the years asked for" do
+      config = %{events: %{"launch" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}}
+      events_df = DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2022-03-01]]})
+      timestamps = [~N[2022-01-01 00:00:00], ~N[2023-12-31 00:00:00]]
+
+      assert Events.event_dates(events_df, config, timestamps) ==
+               %{"launch" => [~N[2022-03-01 00:00:00], ~N[2023-03-01 00:00:00]]}
+    end
+
+    test "a leap day recurs only in leap years and keeps its time of day" do
+      config = %{events: %{"leap" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}}
+      events_df = DataFrame.new(%{"event" => ["leap"], "ds" => [~N[2020-02-29 09:00:00]]})
+      timestamps = Enum.map(2020..2024, &NaiveDateTime.new!(&1, 6, 1, 0, 0, 0))
+
+      assert Events.event_dates(events_df, config, timestamps) ==
+               %{"leap" => [~N[2020-02-29 09:00:00], ~N[2024-02-29 09:00:00]]}
+    end
+
+    test "unions what the model remembers with the frame, and ignores unconfigured events" do
+      config = %{
+        events: %{"sale" => %{lower_window: 0, upper_window: 0}},
+        training_data: %{
+          event_dates: %{"sale" => [~N[2022-05-01 00:00:00]], "old" => [~N[2022-01-01 00:00:00]]}
+        }
+      }
+
+      events_df =
+        DataFrame.new(%{"event" => ["sale", "other"], "ds" => [~D[2023-05-01], ~D[2023-06-01]]})
+
+      timestamps = [~N[2023-01-01 00:00:00]]
+
+      assert Events.event_dates(events_df, config, timestamps) ==
+               %{"sale" => [~N[2022-05-01 00:00:00], ~N[2023-05-01 00:00:00]]}
+
+      assert Events.event_dates(nil, config, timestamps) == %{"sale" => [~N[2022-05-01 00:00:00]]}
+    end
+
+    test "adds the country holidays named on the config as midnight timestamps" do
+      config = %{
+        events: %{"Christmas Day" => %{lower_window: 0, upper_window: 0}},
+        holidays: %{
+          countries: [:us],
+          lower_window: 0,
+          upper_window: 0,
+          regions: [],
+          include_informal: false,
+          names: ["Christmas Day"]
+        }
+      }
+
+      timestamps = [~N[2022-06-01 12:00:00], ~N[2023-06-01 12:00:00]]
+
+      assert Events.event_dates(nil, config, timestamps) ==
+               %{"Christmas Day" => [~N[2022-12-25 00:00:00], ~N[2023-12-25 00:00:00]]}
+    end
+  end
+
   describe "build_features/4 with a frequency" do
     test "windows are steps of the frequency and event dates mean midnight" do
       hours = Enum.map(0..47, &NaiveDateTime.add(~N[2023-01-04 00:00:00], &1, :hour))

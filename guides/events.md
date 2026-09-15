@@ -1,6 +1,6 @@
 # Events
 
-Events capture the impact of special occasions that affect your time series - holidays, promotions, product launches, and other one-off or recurring occurrences.
+Events capture the impact of special occasions that affect your time series - holidays, promotions, product launches, and other one-off or recurring occurrences. Country holidays come built in through the [holidefs](https://hex.pm/packages/holidefs) package, see [Country Holidays](#country-holidays).
 
 This is useful for:
 - Holiday effects (Christmas, Black Friday)
@@ -152,7 +152,7 @@ fitted = Soothsayer.fit(model, df, events: events_df)
 
 ## Prediction with Events
 
-When predicting, you must provide events for the prediction dates:
+The model remembers the occurrences it was fitted with, so predicting inside the training period needs nothing extra. For a one-off occurrence in the future, pass it:
 
 ```elixir
 # Future dates
@@ -167,7 +167,7 @@ future_events = DataFrame.new(%{
 predictions = Soothsayer.predict(fitted, future_dates, events: future_events)
 ```
 
-If you omit the `events:` option during prediction, the model won't include event effects.
+Without `events:` the remembered occurrences, the yearly recurring events and the country holidays still apply; only occurrences the model has never seen are left out.
 
 ## Inspecting Event Effects
 
@@ -206,7 +206,7 @@ Each event type learns independent coefficients.
 
 ## Recurring Events
 
-The same event can occur multiple times (e.g., annual holidays). Just include all occurrences in the events DataFrame:
+The same event can occur multiple times. Listing every occurrence works, and the model learns a single coefficient per event (per window position) applied to all of them:
 
 ```elixir
 events_df = DataFrame.new(%{
@@ -215,7 +215,57 @@ events_df = DataFrame.new(%{
 })
 ```
 
-The model learns a single coefficient per event (per window position), applied to all occurrences.
+For something that falls on the same month and day every year, say so once with `recurring: :yearly` and give one occurrence:
+
+```elixir
+model = Soothsayer.new(%{
+  events: %{"founders_day" => %{lower_window: 0, upper_window: 1, recurring: :yearly}}
+})
+
+events_df = DataFrame.new(%{"event" => ["founders_day"], "ds" => [~D[2022-05-10]]})
+fitted = Soothsayer.fit(model, df, events: events_df)
+```
+
+Every year in the training data gets its May 10, and so does every year you predict, with nothing passed at predict. A February 29 recurs in leap years only, and a naive datetime keeps its time of day. For holidays that move around the calendar, use country holidays.
+
+## Country Holidays
+
+Every holiday of a country becomes an event of its own, the way NeuralProphet's `add_country_holidays` works. The dates come from the [holidefs](https://hex.pm/packages/holidefs) package, an optional dependency, so add it to your project first:
+
+```elixir
+{:holidefs, "~> 0.4"}
+```
+
+Then name the countries and, optionally, one window for all of their holidays:
+
+```elixir
+model = Soothsayer.new(%{
+  holidays: %{countries: [:us], lower_window: -1, upper_window: 1}
+})
+
+fitted = Soothsayer.fit(model, df)
+```
+
+That is all. Fit generates the holiday dates for the years in your data, prediction generates them for the years being forecast, and the fitted `config.events` lists the holidays next to your own events:
+
+```elixir
+Soothsayer.get_event_effects(fitted)
+# => %{
+#   "Christmas Day_-1" => 12.1, "Christmas Day_0" => 48.5, "Christmas Day_+1" => -3.2,
+#   "Independence Day_-1" => ..., "Thanksgiving_0" => ..., ...
+# }
+```
+
+Holidays are named as holidefs names them in English ("Independence Day", "Thanksgiving", "Christmas Day"), whatever Gettext locale your process has set. The same name from two countries is one event, so `countries: [:us, :gb]` has a single "Christmas Day". Your own events can't reuse a holiday name; fit raises if they do.
+
+| Option | Description |
+|--------|-------------|
+| `countries` | holidefs locale codes, `:us`, `:gb`, `:br`, `:de`, ... Ask `Soothsayer.Holidays.supported/0` for the list. |
+| `lower_window`, `upper_window` | One window for every holiday, steps before and after like event windows. |
+| `regions` | holidefs regions such as `["us_ca"]`, added to the national holidays. |
+| `include_informal` | Include holidays holidefs marks informal, like Good Friday in the US. Default `false`. |
+
+A holiday is a plain date, so on hourly data it lands on midnight like any date event; use the window to cover the rest of the day. NeuralProphet's holiday regularization and multiplicative mode aren't there yet.
 
 ## Network Architecture
 
@@ -225,10 +275,10 @@ Events add an input branch to the network:
 # Each event with window creates multiple binary features
 # e.g., "sale" with window -1 to +1 = 3 features
 
-events_input_shape = {nil, n_event_features}
+events_input_shape = {nil, positions, n_event_features}
 ```
 
-The `events_dense` layer learns weights for all event features.
+`positions` is the number of timestamps in a training sample (one without auto-regression, the lags plus the forecast steps with it). The `events_dense` layer learns one weight per event feature, shared across positions.
 
 ## Next Steps
 

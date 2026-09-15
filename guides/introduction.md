@@ -47,10 +47,10 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Events | Yes | Yes |
 | Lagged regressors | Yes | Yes |
 | Future regressors | Yes | Yes |
-| Country holidays | Planned | Yes |
+| Country holidays | Yes | Yes |
 | Multiplicative events | Planned | Yes |
 | Event regularization | Planned | Yes |
-| Recurring events | Planned | Yes |
+| Recurring events | Yes | No |
 | Uncertainty estimation | Yes | Yes |
 | Multiplicative seasonality | Yes | Yes |
 

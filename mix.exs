@@ -35,6 +35,8 @@ defmodule Soothsayer.MixProject do
       {:nx, "~> 1.0", override: true},
       {:axon, "~> 0.8.0"},
       {:exla, "~> 1.0"},
+      # Country holidays. Optional: only needed with holidays: %{countries: [...]}.
+      {:holidefs, "~> 0.4", optional: true},
       {:ex_doc, ">= 0.0.0", only: :docs},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}

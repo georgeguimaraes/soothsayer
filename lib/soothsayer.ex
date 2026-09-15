@@ -10,6 +10,7 @@ defmodule Soothsayer do
   alias Soothsayer.AR
   alias Soothsayer.Events
   alias Soothsayer.Frequency
+  alias Soothsayer.Holidays
   alias Soothsayer.LaggedRegressors
   alias Soothsayer.MissingData
   alias Soothsayer.Model
@@ -57,6 +58,14 @@ defmodule Soothsayer do
       },
       frequency: :auto,
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil, forecast_steps: 1},
+      events: %{},
+      holidays: %{
+        countries: [],
+        lower_window: 0,
+        upper_window: 0,
+        regions: [],
+        include_informal: false
+      },
       regressors: [],
       lagged_regressors: %{},
       quantiles: [],
@@ -74,6 +83,7 @@ defmodule Soothsayer do
 
     merged_config
     |> Map.update!(:quantiles, &Quantiles.normalize_config!/1)
+    |> Map.update!(:holidays, &Holidays.normalize_config!/1)
     |> Model.new()
   end
 
@@ -87,7 +97,31 @@ defmodule Soothsayer do
     validate_lagged_regressors!(config)
     validate_forecast_steps!(config)
     validate_missing!(config)
+    validate_events!(config)
     validate_training_options!(config)
+  end
+
+  defp validate_events!(%{events: events}) when is_map(events) do
+    for {name, spec} <- events do
+      unless is_binary(name) and is_map(spec) and is_integer(spec[:lower_window]) and
+               is_integer(spec[:upper_window]) and spec[:lower_window] <= 0 and
+               spec[:upper_window] >= 0 do
+        raise ArgumentError,
+              "events must map names to %{lower_window: integer <= 0, upper_window: integer >= 0}, " <>
+                "got #{inspect(name)} => #{inspect(spec)}"
+      end
+
+      unless spec[:recurring] in [nil, :yearly] do
+        raise ArgumentError,
+              "events.#{name}.recurring must be :yearly or left out, got #{inspect(spec[:recurring])}"
+      end
+    end
+
+    :ok
+  end
+
+  defp validate_events!(%{events: events}) do
+    raise ArgumentError, "events must be a map of event names to windows, got #{inspect(events)}"
   end
 
   defp validate_missing!(%{missing: missing}) do
@@ -213,10 +247,16 @@ defmodule Soothsayer do
     * `data` - An `Explorer.DataFrame` with a "ds" column of dates or naive
       datetimes, strictly increasing, and a numeric "y" column.
     * `opts` - Optional keyword list:
-      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
+      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns,
+        one row per occurrence of each configured event. The dates are
+        remembered by the model, so predicting inside the training period
+        doesn't need them again. Events with `recurring: :yearly` repeat
+        every year on the same month and day.
 
     When the model config lists `regressors`, `data` must contain a column
-    for each of them.
+    for each of them. With `holidays: %{countries: [...]}` every holiday of
+    those countries becomes an event of its own, named as holidefs names it,
+    see `Soothsayer.Holidays`; the fitted `config.events` lists them.
 
   ## Missing data
 
@@ -278,6 +318,7 @@ defmodule Soothsayer do
       model.config
       |> Map.put(:frequency, frequency)
       |> Map.update!(:seasonality, &Seasonality.resolve_auto(&1, timestamps, frequency))
+      |> put_holiday_events(timestamps)
 
     model = %{model | config: config}
 
@@ -379,7 +420,8 @@ defmodule Soothsayer do
       last_timestamp: Enum.max(timestamps, NaiveDateTime),
       regressors: Map.new(config.regressors, &{&1, Regressors.values_by_timestamp(data, &1)}),
       lagged_regressors:
-        Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)})
+        Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)}),
+      event_dates: Events.frame_dates(events_df)
     }
 
     %{
@@ -414,7 +456,9 @@ defmodule Soothsayer do
     * `model` - A fitted `Soothsayer.Model` struct.
     * `x` - An `Explorer.Series` of dates or naive datetimes to predict for.
     * `opts` - Optional keyword list:
-      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
+      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns
+        for occurrences the model doesn't know yet. Occurrences given at
+        fit, yearly recurring events and country holidays apply without it.
       - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
         observations newer than the training data, sorted by "ds". Missing
         values in it are imputed like training data. Only used when
@@ -521,7 +565,9 @@ defmodule Soothsayer do
     * `x` - An `Explorer.Series` of dates or naive datetimes to predict for.
       Plain dates mean midnight, which matters for sub-daily models.
     * `opts` - Optional keyword list:
-      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns.
+      - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns
+        for occurrences the model doesn't know yet. Occurrences given at
+        fit, yearly recurring events and country holidays apply without it.
       - `:history` - An `Explorer.DataFrame` with "ds" and "y" columns holding
         observations newer than the training data, sorted by "ds". Missing
         values in it are imputed like training data, see
@@ -705,14 +751,19 @@ defmodule Soothsayer do
     end)
   end
 
+  # Built whenever events are configured, with or without a dataframe: the
+  # dates come from the frame, from what the model remembers, from yearly
+  # recurrence and from the country holidays.
   defp put_events_input(x, model, timestamps, events_df) do
     events_config = model.config[:events] || %{}
 
-    if map_size(events_config) > 0 and events_df != nil do
+    if map_size(events_config) > 0 do
+      event_dates = Events.event_dates(events_df, model.config, timestamps)
+
       events_input =
         Events.build_features(
           Series.from_list(timestamps),
-          events_df,
+          event_dates,
           events_config,
           model.config.frequency
         )
@@ -721,6 +772,34 @@ defmodule Soothsayer do
     else
       x
     end
+  end
+
+  # Every holiday of the configured countries becomes an event with the
+  # shared holiday window. The names found in the training years are what
+  # the network gets columns for.
+  defp put_holiday_events(%{holidays: %{countries: []}} = config, _timestamps), do: config
+
+  defp put_holiday_events(config, timestamps) do
+    names = Holidays.names(config.holidays, Events.years(timestamps))
+
+    case Enum.filter(names, &Map.has_key?(config.events, &1)) do
+      [] ->
+        :ok
+
+      taken ->
+        raise ArgumentError,
+              "#{inspect(taken)} are both configured events and country holidays. " <>
+                "Rename the events or leave the holidays to the holidays config."
+    end
+
+    window = %{
+      lower_window: config.holidays.lower_window,
+      upper_window: config.holidays.upper_window
+    }
+
+    config
+    |> Map.update!(:events, &Map.merge(&1, Map.new(names, fn name -> {name, window} end)))
+    |> put_in([:holidays, :names], names)
   end
 
   defp seasonality_inputs(timestamps, config) do
@@ -1122,7 +1201,9 @@ defmodule Soothsayer do
 
   ## Parameters
 
-    * `model` - A fitted `Soothsayer.Model` struct with events configured.
+    * `model` - A fitted `Soothsayer.Model` struct with events or holidays
+      configured. Country holidays show up under their holidefs names, for
+      example `"Christmas Day_0"`.
 
   ## Returns
 

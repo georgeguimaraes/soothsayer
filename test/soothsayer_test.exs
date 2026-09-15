@@ -221,6 +221,123 @@ defmodule SoothsayerTest do
       assert "events" in DataFrame.names(predictions)
     end
 
+    defp holiday_frame(spike_on) do
+      dates = Date.range(~D[2022-01-01], ~D[2023-12-31]) |> Enum.to_list()
+
+      y =
+        Enum.map(dates, fn date ->
+          spike = if spike_on.(date), do: 50.0, else: 0.0
+          100 + 0.05 * Date.diff(date, ~D[2022-01-01]) + spike + :rand.normal(0, 2)
+        end)
+
+      DataFrame.new(%{"ds" => dates, "y" => y})
+    end
+
+    defp event_model(overrides) do
+      Soothsayer.new(
+        Map.merge(
+          %{
+            trend: %{changepoints: 0},
+            seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+            epochs: 15,
+            learning_rate: 0.05,
+            seed: 3
+          },
+          overrides
+        )
+      )
+    end
+
+    test "country holidays become events with their own effects, no dataframe needed" do
+      :rand.seed(:exsss, {4, 4, 4})
+      df = holiday_frame(&((&1.month == 7 and &1.day == 4) or (&1.month == 12 and &1.day == 25)))
+      fitted = Soothsayer.fit(event_model(%{holidays: %{countries: [:us]}}), df)
+
+      assert "Independence Day" in Map.keys(fitted.config.events)
+      assert fitted.config.holidays.names == Enum.sort(fitted.config.holidays.names)
+      assert length(fitted.config.holidays.names) == 9
+
+      effects = Soothsayer.get_event_effects(fitted)
+
+      strongest =
+        effects
+        |> Enum.sort_by(fn {_name, effect} -> -effect end)
+        |> Enum.take(2)
+        |> Enum.map(&elem(&1, 0))
+
+      assert Enum.sort(strongest) == ["Christmas Day_0", "Independence Day_0"]
+
+      # next year's holiday is known without an events dataframe
+      around = Series.from_list([~D[2024-07-03], ~D[2024-07-04], ~D[2024-07-05]])
+
+      [before, on_the_day, after_the_day] =
+        Soothsayer.predict(fitted, around)["yhat"] |> Series.to_list()
+
+      assert on_the_day > before + 20 and on_the_day > after_the_day + 20
+    end
+
+    test "a yearly recurring event given once applies to every year" do
+      :rand.seed(:exsss, {5, 5, 5})
+      df = holiday_frame(&(&1.month == 5 and &1.day == 10))
+      events_df = DataFrame.new(%{"event" => ["founders_day"], "ds" => [~D[2022-05-10]]})
+
+      model =
+        event_model(%{
+          events: %{"founders_day" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}
+        })
+
+      fitted = Soothsayer.fit(model, df, events: events_df)
+
+      # the 2023 occurrence was never listed, in-sample and next year alike
+      in_sample = Soothsayer.predict(fitted, Series.from_list([~D[2023-05-09], ~D[2023-05-10]]))
+      [before, on_the_day] = Series.to_list(in_sample["yhat"])
+      assert on_the_day > before + 20
+
+      next_year = Soothsayer.predict(fitted, Series.from_list([~D[2024-05-09], ~D[2024-05-10]]))
+      [before, on_the_day] = Series.to_list(next_year["yhat"])
+      assert on_the_day > before + 20
+    end
+
+    test "occurrences given at fit are remembered when predicting without events" do
+      :rand.seed(:exsss, {6, 6, 6})
+      df = holiday_frame(&(&1 == ~D[2023-03-15]))
+      events_df = DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-03-15]]})
+      model = event_model(%{events: %{"sale" => %{lower_window: 0, upper_window: 0}}})
+      fitted = Soothsayer.fit(model, df, events: events_df)
+
+      predictions = Soothsayer.predict(fitted, Series.from_list([~D[2023-03-14], ~D[2023-03-15]]))
+      [before, on_the_day] = Series.to_list(predictions["yhat"])
+      assert on_the_day > before + 20
+    end
+
+    test "an event named like a holiday raises" do
+      df = holiday_frame(fn _ -> false end)
+
+      model =
+        event_model(%{
+          events: %{"Christmas Day" => %{lower_window: 0, upper_window: 0}},
+          holidays: %{countries: [:us]}
+        })
+
+      assert_raise ArgumentError,
+                   ~r/\["Christmas Day"\] are both configured events and country holidays/,
+                   fn ->
+                     Soothsayer.fit(model, df)
+                   end
+    end
+
+    test "rejects bad event windows and recurrence" do
+      assert_raise ArgumentError, ~r/lower_window: integer <= 0/, fn ->
+        Soothsayer.new(%{events: %{"sale" => %{lower_window: 1, upper_window: 0}}})
+      end
+
+      assert_raise ArgumentError, ~r/events.sale.recurring must be :yearly/, fn ->
+        Soothsayer.new(%{
+          events: %{"sale" => %{lower_window: 0, upper_window: 0, recurring: :monthly}}
+        })
+      end
+    end
+
     test "predict_components returns events component" do
       start_date = ~D[2023-01-01]
       end_date = ~D[2023-06-30]
