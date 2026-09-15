@@ -42,9 +42,9 @@ defmodule Soothsayer.ModelTest do
     {init_fn, _predict_fn} = Axon.build(network)
 
     input = %{
-      "trend" => Nx.tensor([[1.0]]),
-      "yearly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]),
-      "weekly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0]])
+      "trend" => Nx.tensor([[[1.0]]]),
+      "yearly" => Nx.tensor([[[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]]),
+      "weekly" => Nx.tensor([[[1.0, 2.0, 3.0, 4.0]]])
     }
 
     assert %Axon.ModelState{} = init_fn.(input, Axon.ModelState.empty())
@@ -64,14 +64,15 @@ defmodule Soothsayer.ModelTest do
     model = Model.new(config)
 
     x = %{
-      "trend" => Nx.tensor([[1.0], [2.0], [3.0]]),
+      "trend" => Nx.tensor([[[1.0]], [[2.0]], [[3.0]]]),
       "yearly" =>
         Nx.tensor([
-          [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-          [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-          [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+          [[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]],
+          [[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]],
+          [[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]]
         ]),
-      "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]])
+      "weekly" =>
+        Nx.tensor([[[0.1, 0.2, 0.3, 0.4]], [[0.2, 0.3, 0.4, 0.5]], [[0.3, 0.4, 0.5, 0.6]]])
     }
 
     y = Nx.tensor([[1.0], [2.0], [3.0]])
@@ -95,14 +96,15 @@ defmodule Soothsayer.ModelTest do
     model = Model.new(config)
 
     x = %{
-      "trend" => Nx.tensor([[1.0], [2.0], [3.0]]),
+      "trend" => Nx.tensor([[[1.0]], [[2.0]], [[3.0]]]),
       "yearly" =>
         Nx.tensor([
-          [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-          [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-          [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+          [[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]],
+          [[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]],
+          [[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]]
         ]),
-      "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]])
+      "weekly" =>
+        Nx.tensor([[[0.1, 0.2, 0.3, 0.4]], [[0.2, 0.3, 0.4, 0.5]], [[0.3, 0.4, 0.5, 0.6]]])
     }
 
     y = Nx.tensor([[1.0], [2.0], [3.0]])
@@ -141,10 +143,10 @@ defmodule Soothsayer.ModelTest do
 
       # sale: 1 feature, holiday: 3 features = 4 total event features
       input = %{
-        "trend" => Nx.tensor([[1.0]]),
-        "yearly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]),
-        "weekly" => Nx.tensor([[1.0, 2.0, 3.0, 4.0]]),
-        "events" => Nx.tensor([[1.0, 0.0, 0.0, 0.0]])
+        "trend" => Nx.tensor([[[1.0]]]),
+        "yearly" => Nx.tensor([[[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]]),
+        "weekly" => Nx.tensor([[[1.0, 2.0, 3.0, 4.0]]]),
+        "events" => Nx.tensor([[[1.0, 0.0, 0.0, 0.0]]])
       }
 
       assert %Axon.ModelState{} = init_fn.(input, Axon.ModelState.empty())
@@ -167,15 +169,16 @@ defmodule Soothsayer.ModelTest do
       model = Model.new(config)
 
       x = %{
-        "trend" => Nx.tensor([[1.0], [2.0], [3.0]]),
+        "trend" => Nx.tensor([[[1.0]], [[2.0]], [[3.0]]]),
         "yearly" =>
           Nx.tensor([
-            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-            [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            [[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]],
+            [[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]],
+            [[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]]
           ]),
-        "weekly" => Nx.tensor([[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5, 0.6]]),
-        "events" => Nx.tensor([[1.0], [0.0], [0.0]])
+        "weekly" =>
+          Nx.tensor([[[0.1, 0.2, 0.3, 0.4]], [[0.2, 0.3, 0.4, 0.5]], [[0.3, 0.4, 0.5, 0.6]]]),
+        "events" => Nx.tensor([[[1.0]], [[0.0]], [[0.0]]])
       }
 
       y = Nx.tensor([[5.0], [2.0], [3.0]])

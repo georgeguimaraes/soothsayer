@@ -24,12 +24,12 @@ defmodule Soothsayer.ARTest do
     end
   end
 
-  describe "build_component/2" do
+  describe "build_component/3" do
     test "returns constant 0 when AR is disabled" do
       config = %{ar: %{enabled: false, lags: 0}}
       input = Axon.input("ar", shape: {nil, 3})
 
-      component = AR.build_component(input, config)
+      component = AR.build_component(input, Axon.constant(0), config)
 
       {init_fn, predict_fn} = Axon.build(component)
       params = init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0]])}, Axon.ModelState.empty())
@@ -42,7 +42,7 @@ defmodule Soothsayer.ARTest do
       config = %{ar: %{enabled: true, lags: 3, layers: []}}
       input = Axon.input("ar", shape: {nil, 3})
 
-      component = AR.build_component(input, config)
+      component = AR.build_component(input, Axon.constant(0), config)
 
       {init_fn, _predict_fn} = Axon.build(component)
       params = init_fn.(%{"ar" => Nx.tensor([[1.0, 2.0, 3.0]])}, Axon.ModelState.empty())
@@ -56,7 +56,7 @@ defmodule Soothsayer.ARTest do
       config = %{ar: %{enabled: true, lags: 5, layers: [32, 16]}}
       input = Axon.input("ar", shape: {nil, 5})
 
-      component = AR.build_component(input, config)
+      component = AR.build_component(input, Axon.constant(0), config)
 
       {init_fn, _predict_fn} = Axon.build(component)
 
@@ -155,9 +155,9 @@ defmodule Soothsayer.ARTest do
       {init_fn, predict_fn} = Axon.build(network)
 
       input = %{
-        "trend" => Nx.tensor([[1.0]]),
-        "yearly" => Nx.broadcast(0.0, {1, 8}),
-        "weekly" => Nx.broadcast(0.0, {1, 4}),
+        "trend" => Nx.tensor([[[1.0]]]),
+        "yearly" => Nx.broadcast(0.0, {1, 1, 8}),
+        "weekly" => Nx.broadcast(0.0, {1, 1, 4}),
         "ar" => Nx.tensor([[1.0, 2.0, 3.0, 4.0, 5.0]])
       }
 
@@ -192,9 +192,9 @@ defmodule Soothsayer.ARTest do
 
       # Create training data
       input = %{
-        "trend" => Nx.tensor([[1.0], [2.0], [3.0], [4.0], [5.0]]),
-        "yearly" => Nx.broadcast(0.0, {5, 8}),
-        "weekly" => Nx.broadcast(0.0, {5, 4}),
+        "trend" => Nx.tensor([[[1.0]], [[2.0]], [[3.0]], [[4.0]], [[5.0]]]),
+        "yearly" => Nx.broadcast(0.0, {5, 1, 8}),
+        "weekly" => Nx.broadcast(0.0, {5, 1, 4}),
         "ar" =>
           Nx.tensor([
             [1.0, 2.0, 3.0],
@@ -366,7 +366,7 @@ defmodule Soothsayer.ARTest do
 
       # Kernel should be {lags, 1}
       assert Nx.shape(weights["ar_dense_out"].kernel) == {3, 1}
-      assert Nx.shape(weights["ar_dense_out"].bias) == {1}
+      refute Map.has_key?(weights["ar_dense_out"], :bias)
     end
 
     test "returns all layer weights for deep AR-Net" do

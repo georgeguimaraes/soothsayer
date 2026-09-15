@@ -11,8 +11,8 @@ defmodule Soothsayer.LaggedRegressorsTest do
       y = Nx.iota({10}, type: :f32)
       regressor = Nx.multiply(Nx.iota({10}, type: :f32), 10)
 
-      rows = AR.training_rows(y, 2, 1, max_lags: 4)
-      regressor_rows = AR.lagged_rows(regressor, rows.origin_indices, 4, 1)
+      rows = AR.training_samples(y, 2, 1, max_lags: 4)
+      regressor_rows = AR.lagged_rows(regressor, rows.origin_indices, 4)
 
       assert rows.origin_indices == [3, 4, 5, 6, 7, 8]
       assert Nx.shape(rows.lagged) == {6, 2}

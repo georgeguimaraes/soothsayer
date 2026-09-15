@@ -1,11 +1,27 @@
 defmodule Soothsayer.Model do
   @moduledoc """
   Defines the structure and operations for the Soothsayer forecasting model.
+
+  ## Network layout
+
+  Every sample the network sees is one forecast origin, laid out as
+  `positions = lags + forecast_steps` timestamps: the auto-regression lags
+  (oldest first) followed by the forecast targets. Without auto-regression
+  a sample is a single timestamp.
+
+  The components that depend only on the timestamp (trend, seasonality,
+  events, regressors) take `{batch, positions, features}` inputs and produce
+  `{batch, positions}` outputs through one shared linear layer each. Their
+  sum at the lag positions is subtracted from the lags before the AR
+  network, see `Soothsayer.AR`, and their values at the target positions
+  are the component outputs, `{batch, forecast_steps}`, which add up to
+  `combined`.
   """
 
   alias Soothsayer.AR
   alias Soothsayer.Events
   alias Soothsayer.LaggedRegressors
+  alias Soothsayer.Layers
   alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
@@ -100,7 +116,7 @@ defmodule Soothsayer.Model do
   ## Examples
 
       iex> model = Soothsayer.new(config)
-      iex> input = %{"trend" => Nx.template({1, 1}, :f32), ...}
+      iex> input = %{"trend" => Nx.template({1, 1, 1}, :f32), ...}
       iex> Axon.Display.as_graph(Soothsayer.Model.display_network(model.config), input)
 
   """
@@ -111,6 +127,9 @@ defmodule Soothsayer.Model do
   end
 
   defp build_network_components(config) do
+    lags = AR.lags(config)
+    positions = AR.positions(config)
+
     # Trend
     trend_input = Trend.build_input(config)
     trend = Trend.build_component(trend_input, config)
@@ -127,30 +146,56 @@ defmodule Soothsayer.Model do
         Map.new(Seasonality.periods(), &{&1, Map.get(components, &1, Axon.constant(0))})
       end)
 
-    # AR
-    ar_input = AR.build_network_input(config)
-    step_mask_input = AR.build_step_mask_input(config)
-    ar_component = AR.build_component(ar_input, step_mask_input, config)
-
     # Events
-    events_input = Events.build_network_input(%{events: config[:events] || %{}})
-    events_component = Events.build_component(events_input, %{events: config[:events] || %{}})
+    events_input = Events.build_network_input(config)
+    events = Events.build_component(events_input, config)
 
     # Future regressors
     regressors_input = Regressors.build_network_input(config)
-    regressors_component = Regressors.build_component(regressors_input, config)
+    regressors = Regressors.build_component(regressors_input, config)
+
+    # Everything that depends only on the timestamp, over all positions.
+    # Its values at the lag positions are what the AR network subtracts
+    # from the lags, its values at the target positions are the forecast.
+    nonstationary =
+      Axon.add(
+        [trend] ++ Enum.map(Seasonality.periods(), &seasonality[&1]) ++ [events, regressors],
+        name: "nonstationary"
+      )
+
+    nonstationary_at_lags =
+      if lags > 0 do
+        Layers.slice_positions(nonstationary, 0..(lags - 1), "nonstationary_at_lags")
+      else
+        Axon.constant(0)
+      end
+
+    # AR
+    ar_input = AR.build_network_input(config)
+    ar = AR.build_component(ar_input, nonstationary_at_lags, config)
 
     # Lagged regressors
     lagged_regressors_input = LaggedRegressors.build_network_input(config)
+    lagged_regressors = LaggedRegressors.build_component(lagged_regressors_input, config)
 
-    lagged_regressors_component =
-      LaggedRegressors.build_component(lagged_regressors_input, config)
+    target_range = lags..(positions - 1)
+    trend_at_targets = Layers.slice_positions(trend, target_range, "trend_at_targets")
+
+    seasonality_at_targets =
+      Map.new(seasonality, fn {period, component} ->
+        {period, Layers.slice_positions(component, target_range, "#{period}_at_targets")}
+      end)
+
+    events_at_targets = Layers.slice_positions(events, target_range, "events_at_targets")
+
+    regressors_at_targets =
+      Layers.slice_positions(regressors, target_range, "regressors_at_targets")
 
     combined =
       Axon.add(
-        [trend] ++
-          Enum.map(Seasonality.periods(), &seasonality[&1]) ++
-          [ar_component, events_component, regressors_component, lagged_regressors_component]
+        [trend_at_targets] ++
+          Enum.map(Seasonality.periods(), &seasonality_at_targets[&1]) ++
+          [ar, events_at_targets, regressors_at_targets, lagged_regressors]
       )
 
     # Quantile heads see every input the components see
@@ -158,7 +203,7 @@ defmodule Soothsayer.Model do
       Enum.reject(
         [trend_input] ++
           Enum.map(Seasonality.periods(), &seasonality_inputs[&1]) ++
-          [ar_input, step_mask_input, events_input, regressors_input, lagged_regressors_input],
+          [ar_input, events_input, regressors_input, lagged_regressors_input],
         &is_nil/1
       )
 
@@ -166,12 +211,12 @@ defmodule Soothsayer.Model do
 
     {combined,
      %{
-       trend: trend,
-       seasonality: seasonality,
-       ar: ar_component,
-       events: events_component,
-       regressors: regressors_component,
-       lagged_regressors: lagged_regressors_component,
+       trend: trend_at_targets,
+       seasonality: seasonality_at_targets,
+       ar: ar,
+       events: events_at_targets,
+       regressors: regressors_at_targets,
+       lagged_regressors: lagged_regressors,
        quantiles: quantiles
      }}
   end
@@ -186,11 +231,38 @@ defmodule Soothsayer.Model do
          trend,
          %{seasonality: %{mode: :multiplicative}} = config
        ) do
-    scale = Axon.add(trend, Axon.constant(series_level(config)))
+    scale =
+      Axon.add(detach_at_lags(trend, AR.lags(config)), Axon.constant(series_level(config)))
+
     Map.new(seasonality, fn {period, component} -> {period, Axon.multiply(component, scale)} end)
   end
 
   defp apply_seasonality_mode(seasonality, _trend, _config), do: seasonality
+
+  # At the lag positions the seasonal terms are only there to be subtracted
+  # from the lags, and NeuralProphet detaches the trend inside them so that
+  # subtraction doesn't train the trend a second time through the lags.
+  defp detach_at_lags(trend, 0), do: trend
+
+  defp detach_at_lags(trend, lags) do
+    Axon.nx(
+      trend,
+      fn tensor ->
+        if Nx.rank(tensor) == 0 do
+          tensor
+        else
+          Nx.concatenate(
+            [
+              Nx.Defn.Kernel.stop_grad(tensor[[.., 0..(lags - 1)]]),
+              tensor[[.., lags..(Nx.axis_size(tensor, 1) - 1)]]
+            ],
+            axis: 1
+          )
+        end
+      end,
+      name: "trend_detached_at_lags"
+    )
+  end
 
   defp series_level(config) do
     case get_in(config, [:normalization, :y]) do
@@ -208,7 +280,7 @@ defmodule Soothsayer.Model do
 
     * `model` - A `Soothsayer.Model` struct.
     * `x` - A map of input tensors.
-    * `y` - A tensor of target values.
+    * `y` - A tensor of target values, `{samples, forecast_steps}`.
     * `epochs` - The number of training epochs.
 
   ## Returns
@@ -240,7 +312,8 @@ defmodule Soothsayer.Model do
 
   ## Returns
 
-    A map containing the predicted values for each component and the combined prediction.
+    A map containing the predicted values for each component and the
+    combined prediction, each `{samples, forecast_steps}`.
 
   ## Examples
 

@@ -4,8 +4,9 @@ defmodule Soothsayer.Quantiles do
 
   With `quantiles: [0.1, 0.9]` the network grows one linear head per
   quantile on top of the same inputs the components use (trend features,
-  Fourier terms, lags, step mask, events and regressors). Each head learns
-  how far that quantile sits from the median forecast, and is trained with
+  Fourier terms, lags, events and regressors, over every position of the
+  sample, flattened). Each head has one output per forecast step and learns
+  how far that quantile sits from the median forecast. It is trained with
   the pinball loss for its quantile while the median keeps training on the
   Huber loss. The median is detached before the heads are added to it, so
   the quantile losses don't pull it around.
@@ -16,13 +17,15 @@ defmodule Soothsayer.Quantiles do
   it, which is what NeuralProphet does at predict time too.
   """
 
+  alias Soothsayer.AR
+
   @doc """
   Builds one quantile head per configured quantile.
 
   ## Parameters
 
-    * `inputs` - Every Axon input node in the network, concatenated as the
-      head's features.
+    * `inputs` - Every Axon input node in the network, flattened and
+      concatenated as the head's features.
     * `combined` - The median forecast node.
     * `config` - Model configuration with a sorted `:quantiles` list.
 
@@ -35,12 +38,13 @@ defmodule Soothsayer.Quantiles do
   @spec build_components(list(Axon.t()), Axon.t(), map()) :: list(Axon.t())
   def build_components(_inputs, _combined, %{quantiles: []}), do: []
 
-  def build_components(inputs, combined, %{quantiles: quantiles}) do
-    features = concatenate(inputs)
+  def build_components(inputs, combined, %{quantiles: quantiles} = config) do
+    features = inputs |> Enum.map(&Axon.flatten/1) |> concatenate()
     median = Axon.nx(combined, &Nx.Defn.Kernel.stop_grad/1, name: "median_detached")
+    steps = AR.forecast_steps(config)
 
     Enum.map(quantiles, fn quantile ->
-      deviation = Axon.dense(features, 1, activation: :linear, name: layer_name(quantile))
+      deviation = Axon.dense(features, steps, activation: :linear, name: layer_name(quantile))
 
       if quantile > 0.5 do
         Axon.add(median, deviation)

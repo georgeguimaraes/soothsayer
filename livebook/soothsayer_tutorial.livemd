@@ -95,11 +95,15 @@ Soothsayer uses a neural network under the hood. Each component (trend, seasonal
 changepoints = model.config.trend[:changepoints] || 0
 yearly_terms = model.config.seasonality.yearly.fourier_terms
 weekly_terms = model.config.seasonality.weekly.fourier_terms
+daily_terms = model.config.seasonality.daily.fourier_terms
 
+# Inputs are {batch, positions, features}: one position per timestamp in a
+# sample, which is a single timestamp without auto-regression
 input = %{
-  "trend" => Nx.template({1, 1 + changepoints}, :f32),
-  "yearly" => Nx.template({1, 2 * yearly_terms}, :f32),
-  "weekly" => Nx.template({1, 2 * weekly_terms}, :f32)
+  "trend" => Nx.template({1, 1, 1 + changepoints}, :f32),
+  "yearly" => Nx.template({1, 1, 2 * yearly_terms}, :f32),
+  "weekly" => Nx.template({1, 1, 2 * weekly_terms}, :f32),
+  "daily" => Nx.template({1, 1, 2 * daily_terms}, :f32)
 }
 
 Axon.Display.as_graph(Soothsayer.display_network(model), input)
@@ -262,9 +266,10 @@ With changepoints enabled, the trend input includes additional features:
 
 ```elixir
 input_with_cp = %{
-  "trend" => Nx.template({1, 11}, :f32),  # 1 + 10 changepoints
-  "yearly" => Nx.template({1, 12}, :f32),
-  "weekly" => Nx.template({1, 6}, :f32)
+  "trend" => Nx.template({1, 1, 11}, :f32),  # 1 + 10 changepoints
+  "yearly" => Nx.template({1, 1, 12}, :f32),
+  "weekly" => Nx.template({1, 1, 6}, :f32),
+  "daily" => Nx.template({1, 1, 12}, :f32)
 }
 
 Axon.Display.as_graph(Soothsayer.display_network(model_piecewise), input_with_cp)
@@ -380,10 +385,13 @@ Lag 1 has the highest weight, matching our AR(1) data generation.
 ### Network with AR
 
 ```elixir
+# With 7 lags and one forecast step a sample has 8 positions: the 7 lag
+# timestamps followed by the target, so the time inputs get an axis for them
 input_with_ar = %{
-  "trend" => Nx.template({1, 6}, :f32),
-  "yearly" => Nx.template({1, 12}, :f32),
-  "weekly" => Nx.template({1, 6}, :f32),
+  "trend" => Nx.template({1, 8, 6}, :f32),
+  "yearly" => Nx.template({1, 8, 12}, :f32),
+  "weekly" => Nx.template({1, 8, 6}, :f32),
+  "daily" => Nx.template({1, 8, 12}, :f32),
   "ar" => Nx.template({1, 7}, :f32)  # 7 lags
 }
 
@@ -586,10 +594,11 @@ With all features enabled, the network combines trend (with changepoints), yearl
 
 ```elixir
 full_input = %{
-  "trend" => Nx.template({1, 16}, :f32),   # 1 + 15 changepoints
-  "yearly" => Nx.template({1, 16}, :f32),  # 2 * 8 fourier terms
-  "weekly" => Nx.template({1, 6}, :f32),   # 2 * 3 fourier terms
-  "ar" => Nx.template({1, 7}, :f32)        # 7 lags
+  "trend" => Nx.template({1, 8, 16}, :f32),   # 8 positions (7 lags + 1 target), 1 + 15 changepoints
+  "yearly" => Nx.template({1, 8, 16}, :f32),  # 2 * 8 fourier terms
+  "weekly" => Nx.template({1, 8, 6}, :f32),   # 2 * 3 fourier terms
+  "daily" => Nx.template({1, 8, 12}, :f32),   # 2 * 6 fourier terms (the default)
+  "ar" => Nx.template({1, 7}, :f32)           # 7 lags
 }
 
 Axon.Display.as_graph(Soothsayer.display_network(energy_model), full_input)

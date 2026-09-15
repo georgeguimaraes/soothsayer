@@ -25,6 +25,7 @@ defmodule Soothsayer.Trainer do
   @range_test_skip_begin 10
   @range_test_skip_end 3
   @range_test_smoothing_half_window 5
+  @range_test_divergence_factor 4.0
 
   @adamw_weight_decay 1.0e-3
 
@@ -220,15 +221,15 @@ defmodule Soothsayer.Trainer do
   @doc """
   Picks the learning rate at the steepest descent of a smoothed loss curve.
 
-  Non-finite losses (the run diverged) are replaced by the largest finite
-  loss before smoothing. Exposed for testing.
+  The curve is cut where the run diverges: the first loss above four times
+  the best loss so far (Lightning's early stop threshold for the range
+  test) or a non-finite loss. Past that point the losses are huge and
+  bounce around, and a bounce downwards would look like the steepest
+  descent of the whole curve. Exposed for testing.
   """
   @spec suggest_learning_rate(list(number()), list(float())) :: float()
   def suggest_learning_rate(losses, learning_rates) do
-    finite = Enum.filter(losses, &finite?/1)
-    ceiling = if finite == [], do: 0.0, else: Enum.max(finite)
-    losses = Enum.map(losses, fn loss -> if finite?(loss), do: loss, else: ceiling end)
-
+    losses = truncate_at_divergence(losses)
     smoothed = hamming_smooth(losses, @range_test_smoothing_half_window)
     gradient = central_gradient(smoothed)
 
@@ -244,6 +245,32 @@ defmodule Soothsayer.Trainer do
 
   # Nx.to_number returns :nan, :infinity or :neg_infinity for non-finite values
   defp finite?(value), do: is_number(value)
+
+  defp keep_until_divergence(loss, {kept, best}) do
+    if diverged?(loss, best),
+      do: {:halt, {kept, best}},
+      else: {:cont, {[loss | kept], min(best || loss, loss)}}
+  end
+
+  defp diverged?(loss, best) do
+    not finite?(loss) or (best != nil and loss > @range_test_divergence_factor * best)
+  end
+
+  defp truncate_at_divergence(losses) do
+    {kept, _best} = Enum.reduce_while(losses, {[], nil}, &keep_until_divergence/2)
+
+    # A curve that diverges right away leaves nothing to pick from, so it
+    # is used whole, non-finite values capped at the largest finite one.
+    minimum_points = @range_test_skip_begin + @range_test_skip_end + 2
+
+    if length(kept) >= minimum_points, do: Enum.reverse(kept), else: cap_non_finite(losses)
+  end
+
+  defp cap_non_finite(losses) do
+    finite = Enum.filter(losses, &finite?/1)
+    ceiling = if finite == [], do: 0.0, else: Enum.max(finite)
+    Enum.map(losses, fn loss -> if finite?(loss), do: loss, else: ceiling end)
+  end
 
   defp hamming_smooth(values, half_window) do
     window_size = 2 * half_window

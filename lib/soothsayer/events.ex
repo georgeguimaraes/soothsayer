@@ -8,7 +8,9 @@ defmodule Soothsayer.Events do
 
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.AR
   alias Soothsayer.Frequency
+  alias Soothsayer.Layers
   alias Soothsayer.Timestamp
 
   # Network Building
@@ -22,13 +24,15 @@ defmodule Soothsayer.Events do
 
   ## Returns
 
-    An Axon input node when events are configured, `nil` otherwise.
+    An Axon input node `{nil, positions, n_features}` when events are
+    configured (`positions` being the timestamps in a sample, see
+    `Soothsayer.AR.positions/1`), `nil` otherwise.
 
   """
   @spec build_network_input(map()) :: Axon.t() | nil
-  def build_network_input(%{events: events_config}) when map_size(events_config) > 0 do
+  def build_network_input(%{events: events_config} = config) when map_size(events_config) > 0 do
     n = n_features(events_config)
-    Axon.input("events", shape: {nil, n})
+    Axon.input("events", shape: {nil, AR.positions(config), n})
   end
 
   def build_network_input(_config), do: nil
@@ -43,14 +47,15 @@ defmodule Soothsayer.Events do
 
   ## Returns
 
-    An Axon dense layer when events are configured, `Axon.constant(0)` otherwise.
+    A linear layer over every position (`{batch, positions}`) when events
+    are configured, `Axon.constant(0)` otherwise.
 
   """
   @spec build_component(Axon.t() | nil, map()) :: Axon.t()
   def build_component(nil, _config), do: Axon.constant(0)
 
   def build_component(input, %{events: events_config}) when map_size(events_config) > 0 do
-    Axon.dense(input, 1, activation: :linear, name: "events_dense")
+    Layers.position_dense(input, "events_dense")
   end
 
   def build_component(_input, _config), do: Axon.constant(0)

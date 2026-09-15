@@ -55,7 +55,7 @@ predictions = Soothsayer.predict(fitted, Series.from_list(future_dates), regress
 
 Soothsayer raises if a date has no regressor row rather than filling in zeros, since a forecast built on a made-up regressor value would be wrong without saying so.
 
-When auto-regression is also enabled, the regressors dataframe must cover the days between the last observation and your forecast dates too. Those days get predicted on the way, see the [Auto-Regression guide](autoregression.md).
+When auto-regression is also enabled, the regressors dataframe must cover the days between the last observation and your forecast dates too. Those days get predicted on the way, see the [Auto-Regression guide](autoregression.md). It doesn't need to repeat the training period, the model remembers those values, and it doesn't need the days of the last forecast block past your latest date, which are filled with the training mean since they only affect their own day.
 
 ## Inspecting Coefficients
 

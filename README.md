@@ -168,6 +168,8 @@ Soothsayer.new(%{
 })
 ```
 
+The AR network sees the lags minus the trend, seasonality, events and regressors at each lag's timestamp, as NeuralProphet does, so it models what those components leave over instead of absorbing the level and the cycles itself.
+
 **Choosing `lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
 
 **Forecasting ahead:** dates inside the training data use the observed values as lags. Dates past the last observation are forecast in blocks of `forecast_steps` directly from the last real values, then the next block from those predictions, and so on. With the default `forecast_steps: 1` that is one day at a time with errors compounding; set `forecast_steps: 7` to learn a separate weight vector for each of the next 7 days, NeuralProphet's `n_forecasts`. If you have observations newer than the training data, pass them as `history:` to seed the lags without refitting:
@@ -421,14 +423,14 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 
 | Dataset | Metric | NeuralProphet | Soothsayer | Range over seeds | Notes |
 |---------|--------|---------------|------------|------------------|-------|
-| Peyton Manning (daily) | MAE | 0.350 | 0.296 | 0.296 to 0.300 | identical configuration |
-| Peyton Manning (daily) | RMSE | 0.501 | 0.490 | 0.487 to 0.496 | identical configuration |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.44 | 5.42 to 5.47 | identical configuration and metric (average over horizons 1 to 7) |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.76 | 6.74 to 6.81 | same |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.738 | 0.63 to 1.00 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 missing readings linearly interpolated |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 1.000 | 0.88 to 1.25 | same |
-| Air passengers (monthly, multiplicative) | MAE | 30.1 | 26.2 | 23.2 to 29.8 | identical configuration, 130 training rows so the seed matters |
-| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 28.1 | 25.2 to 31.8 | same caveat |
+| Peyton Manning (daily) | MAE | 0.350 | 0.299 | 0.298 to 0.311 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.501 | 0.480 | 0.480 to 0.483 | identical configuration |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.38 | 5.37 to 5.42 | identical configuration and metric (average over horizons 1 to 7) |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.72 | 6.70 to 6.77 | same |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.500 | 0.49 to 0.55 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 missing readings linearly interpolated |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.728 | 0.72 to 0.76 | same |
+| Air passengers (monthly, multiplicative) | MAE | 30.1 | 27.1 | 24.8 to 27.1 | identical configuration, 130 training rows so the seed matters |
+| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 29.0 | 26.7 to 29.0 | same caveat |
 
 The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, MIT licensed by Facebook) and the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, see the NOTICE file there.
 

@@ -247,50 +247,38 @@ defmodule Soothsayer do
     {y_full_normalized, y_mean, y_std} = normalize(Nx.new_axis(y_full, -1))
     y_full_normalized = Nx.flatten(y_full_normalized)
 
-    # Every training row targets one timestamp. Without AR that is every
-    # row in order. With AR, rows come from (origin, step) pairs, see
-    # AR.training_rows/3, and each time-based feature is gathered at the
-    # row's target position so all inputs line up with the targets.
-    {trend_full, trend_metadata} = Trend.build_features(timestamps, config)
-    seasonality = Seasonality.build_features(timestamps, config)
-
-    {y_normalized, ar_inputs, target_indices} =
+    # One training sample per forecast origin. Without AR that is every
+    # timestamp on its own. With AR a sample is the origin's lags followed
+    # by its forecast_steps targets, see AR.training_samples/4, and every
+    # time-based feature is gathered at all of those positions so the
+    # network can evaluate the components at the lag timestamps too.
+    {y_normalized, ar_inputs, position_indices} =
       if ar_enabled?(model) do
-        forecast_steps = AR.forecast_steps(config)
         max_lags = max(config.ar.lags, LaggedRegressors.max_lags(config))
 
-        rows =
-          AR.training_rows(y_full_normalized, config.ar.lags, forecast_steps, max_lags: max_lags)
-
-        ar_inputs =
-          %{"ar" => rows.lagged}
-          |> put_step_mask(rows.step_mask)
-          |> put_lagged_regressors_training_input(
-            model,
-            data,
-            rows.origin_indices,
-            forecast_steps
+        samples =
+          AR.training_samples(y_full_normalized, config.ar.lags, AR.forecast_steps(config),
+            max_lags: max_lags
           )
 
-        {rows.targets, ar_inputs, rows.target_indices}
+        ar_inputs =
+          %{"ar" => samples.lagged}
+          |> put_lagged_regressors_training_input(model, data, samples.origin_indices)
+
+        {samples.targets, ar_inputs, samples.position_indices}
       else
-        {Nx.new_axis(y_full_normalized, -1), %{}, Enum.to_list(0..(length(timestamps) - 1))}
+        {Nx.new_axis(y_full_normalized, -1), %{}, Nx.iota({length(timestamps), 1})}
       end
 
-    index_tensor = Nx.tensor(target_indices)
-    timestamps_by_index = List.to_tuple(timestamps)
-    feature_timestamps = Enum.map(target_indices, &elem(timestamps_by_index, &1))
+    {trend_full, trend_metadata} = Trend.build_features(timestamps, config)
 
     x =
-      %{"trend" => Nx.take(trend_full, index_tensor, axis: 0)}
-      |> Map.merge(
-        Map.new(seasonality, fn {period, features} ->
-          {Atom.to_string(period), Nx.take(features, index_tensor, axis: 0)}
-        end)
-      )
+      %{"trend" => trend_full}
+      |> Map.merge(seasonality_inputs(timestamps, config))
+      |> put_events_input(model, timestamps, events_df)
+      |> put_training_regressors_input(model, timestamps, data)
+      |> Map.new(fn {key, features} -> {key, Nx.take(features, position_indices, axis: 0)} end)
       |> Map.merge(ar_inputs)
-      |> put_events_input(model, feature_timestamps, events_df)
-      |> put_regressors_input(model, feature_timestamps, data)
 
     {x_normalized, x_norm} = normalize_inputs(x)
 
@@ -320,14 +308,14 @@ defmodule Soothsayer do
 
     fitted_model = Model.fit(model, x_normalized, y_normalized, config.epochs)
 
-    # Store training data for prediction lookups
+    # Store training data for prediction lookups. Regressor values are kept
+    # so the lag positions of a forecast can reach into the training period.
     training_data = %{
       timestamps: timestamps,
       y_normalized: Nx.to_flat_list(y_full_normalized),
+      regressors: Map.new(config.regressors, &{&1, Regressors.values_by_timestamp(data, &1)}),
       lagged_regressors:
-        Map.new(LaggedRegressors.names(config), fn name ->
-          {name, LaggedRegressors.values_by_date(data, name)}
-        end)
+        Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)})
     }
 
     %{
@@ -401,10 +389,11 @@ defmodule Soothsayer do
         configured regressor. Required when the model was fitted with
         regressors, and it must cover every predicted date. With
         auto-regression it must also cover the steps between the last
-        observation and the forecast, since those get predicted too. Lagged
-        regressor columns go in the same dataframe; they are only read up to
-        each forecast origin, and training values are remembered, so the
-        dataframe only needs to add what happened after training.
+        observation and the forecast, since those get predicted too, but
+        not the rest of the last forecast block past the latest requested
+        date. Training values are remembered, so the dataframe only needs
+        to add what happened after training. Lagged regressor columns go in
+        the same dataframe and are only read up to each forecast origin.
 
   ## Auto-regression and future timestamps
 
@@ -477,27 +466,27 @@ defmodule Soothsayer do
     validate_regressors_option!(model, regressors_df)
 
     prediction_timestamps = Timestamp.from_series(x)
-    x_input = build_time_inputs(model, prediction_timestamps, events_df, regressors_df)
+    training_data = model.config.training_data
 
-    x_input =
+    regressor_values = %{
+      regressors: Regressors.known_values(training_data, regressors_df, model.config.regressors),
+      lagged_regressors: LaggedRegressors.known_values(training_data, regressors_df, model.config)
+    }
+
+    {x_input, step_numbers} =
       if ar_enabled?(model) do
         observed_values = known_values(model, history)
         last_observed = observed_values |> Map.keys() |> Enum.max(NaiveDateTime)
-
-        lagged_regressor_values =
-          LaggedRegressors.known_values(model.config.training_data, regressors_df, model.config)
+        forecast_steps = AR.forecast_steps(model.config)
 
         known_values =
           forecast_missing_values(
             observed_values,
-            lagged_regressor_values,
+            regressor_values,
             model,
             prediction_timestamps,
-            events_df,
-            regressors_df
+            events_df
           )
-
-        forecast_steps = AR.forecast_steps(model.config)
 
         {origins, step_numbers} =
           prediction_timestamps
@@ -506,17 +495,39 @@ defmodule Soothsayer do
           )
           |> Enum.unzip()
 
-        Map.merge(
-          x_input,
-          lag_inputs(model, known_values, lagged_regressor_values, origins, step_numbers)
-        )
+        inputs =
+          sample_inputs(
+            model,
+            origins,
+            prediction_timestamps,
+            known_values,
+            regressor_values,
+            events_df
+          )
+
+        {inputs, step_numbers}
       else
-        x_input
+        samples = Enum.map(prediction_timestamps, &[&1])
+        required = MapSet.new(prediction_timestamps)
+
+        inputs =
+          build_time_inputs(model, samples, required, events_df, regressor_values.regressors)
+
+        {inputs, List.duplicate(1, length(prediction_timestamps))}
       end
 
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
 
-    {quantile_outputs, predictions} = Map.pop(Model.predict(model, x_normalized), :quantiles)
+    # The network forecasts every step from each sample's origin. Each
+    # requested timestamp keeps the step it was asked for, so every
+    # component comes out as {n, 1} whatever forecast_steps is.
+    step_index = step_numbers |> Enum.map(&(&1 - 1)) |> Nx.tensor() |> Nx.reshape({:auto, 1})
+
+    {quantile_outputs, predictions} =
+      Model.predict(model, x_normalized)
+      |> Map.new(fn {key, output} -> {key, select_step(output, step_index)} end)
+      |> Map.pop(:quantiles)
+
     components = denormalize_components(predictions, model.config.normalization.y)
 
     Map.put(
@@ -526,13 +537,22 @@ defmodule Soothsayer do
     )
   end
 
+  defp select_step(outputs, step_index) when is_tuple(outputs) do
+    outputs |> Tuple.to_list() |> Enum.map(&select_step(&1, step_index))
+  end
+
+  # Disabled components are scalar zeros and stay that way
+  defp select_step(output, step_index) do
+    if Nx.rank(output) == 2, do: Nx.take_along_axis(output, step_index, axis: 1), else: output
+  end
+
   defp denormalize_quantiles(nil, _quantiles, _combined, _model), do: %{}
 
   defp denormalize_quantiles(outputs, quantiles, combined, model) do
     %{mean: mean, std: std} = model.config.normalization.y
 
     quantiles
-    |> Enum.zip(Tuple.to_list(outputs))
+    |> Enum.zip(outputs)
     |> Map.new(fn {quantile, tensor} ->
       forecast = Nx.add(Nx.multiply(tensor, std), mean)
 
@@ -561,44 +581,91 @@ defmodule Soothsayer do
     end
   end
 
-  defp put_regressors_input(x, model, timestamps, regressors_df) do
+  defp seasonality_inputs(timestamps, config) do
+    timestamps
+    |> Seasonality.build_features(config)
+    |> Map.new(fn {period, features} -> {Atom.to_string(period), features} end)
+  end
+
+  defp put_training_regressors_input(x, model, timestamps, data) do
+    case model.config.regressors do
+      [] -> x
+      names -> Map.put(x, "regressors", Regressors.build_features(timestamps, data, names))
+    end
+  end
+
+  # Regressor values must exist at the required timestamps (the lag
+  # positions and whatever was asked for). Other target positions of a
+  # sample get the training mean, which normalizes to zero, since a value
+  # there only feeds that position's own output.
+  defp put_regressors_input(x, model, timestamps, regressor_values, required_timestamps) do
     case model.config.regressors do
       [] ->
         x
 
       names ->
-        Map.put(x, "regressors", Regressors.build_features(timestamps, regressors_df, names))
+        fill = model.config.normalization.x["regressors"].mean |> Nx.to_flat_list()
+
+        features =
+          Regressors.build_features(timestamps, regressor_values, names,
+            required: required_timestamps,
+            fill: fill
+          )
+
+        Map.put(x, "regressors", features)
     end
   end
 
-  defp ar_enabled?(model), do: model.config.ar.enabled and model.config.ar.lags > 0
+  defp ar_enabled?(model), do: AR.lags(model.config) > 0
 
-  defp put_step_mask(inputs, nil), do: inputs
-  defp put_step_mask(inputs, step_mask), do: Map.put(inputs, "forecast_step", step_mask)
-
-  defp put_lagged_regressors_training_input(inputs, model, data, origin_indices, forecast_steps) do
+  defp put_lagged_regressors_training_input(inputs, model, data, origin_indices) do
     case LaggedRegressors.names(model.config) do
       [] ->
         inputs
 
       _names ->
-        rows =
-          LaggedRegressors.build_training_rows(data, model.config, origin_indices, forecast_steps)
-
+        rows = LaggedRegressors.build_training_rows(data, model.config, origin_indices)
         Map.put(inputs, "lagged_regressors", rows)
     end
   end
 
-  # Every input that depends on a forecast origin: the target's own lags,
-  # the lagged regressors' windows and, with more than one forecast step,
-  # the one-hot step mask. Used for both the block rollout and the final
+  # The inputs for one sample per origin: the time-based features at the
+  # sample's lag and target positions, the lags themselves and the lagged
+  # regressor windows. Used for both the block rollout and the final
   # component pass, so a date gets the same value however it is requested.
-  defp lag_inputs(model, known_values, lagged_regressor_values, origins, step_numbers) do
-    frequency = model.config.frequency
+  defp sample_inputs(
+         model,
+         origins,
+         requested_timestamps,
+         known_values,
+         regressor_values,
+         events_df
+       ) do
+    config = model.config
+    lags = AR.lags(config)
 
-    inputs =
-      %{"ar" => AR.build_input(known_values, origins, model.config.ar.lags, frequency)}
-      |> put_step_mask(AR.step_mask(step_numbers, AR.forecast_steps(model.config)))
+    samples =
+      Enum.map(
+        origins,
+        &AR.sample_timestamps(&1, lags, AR.forecast_steps(config), config.frequency)
+      )
+
+    required =
+      samples
+      |> Enum.flat_map(&Enum.take(&1, lags))
+      |> Enum.concat(requested_timestamps)
+      |> MapSet.new(&Timestamp.to_naive_datetime/1)
+
+    model
+    |> build_time_inputs(samples, required, events_df, regressor_values.regressors)
+    |> Map.merge(lag_inputs(model, known_values, regressor_values.lagged_regressors, origins))
+  end
+
+  # Every input that depends on a forecast origin: the target's own lags
+  # and the lagged regressors' windows.
+  defp lag_inputs(model, known_values, lagged_regressor_values, origins) do
+    frequency = model.config.frequency
+    inputs = %{"ar" => AR.build_input(known_values, origins, model.config.ar.lags, frequency)}
 
     case LaggedRegressors.names(model.config) do
       [] ->
@@ -620,24 +687,30 @@ defmodule Soothsayer do
             "Pass regressors: a dataframe with \"ds\" and those columns to predict."
   end
 
-  defp validate_regressors_option!(_model, %DataFrame{}), do: :ok
+  defp validate_regressors_option!(%Model{config: %{regressors: names}}, %DataFrame{} = frame) do
+    Regressors.validate_columns!(frame, names)
+  end
 
-  # Builds every input that depends only on the timestamp: trend,
-  # seasonality, events and regressors. AR is added separately since it
-  # depends on previous values.
-  defp build_time_inputs(model, timestamps, events_df, regressors_df) do
-    t = Trend.date_to_numeric(timestamps, model.config.first_timestamp) |> Nx.new_axis(-1)
-    changepoint_features = Trend.build_changepoint_features(t, model.config.changepoint_positions)
+  # Builds every input that depends only on the timestamp (trend,
+  # seasonality, events and regressors) for a list of samples, each a list
+  # of `positions` timestamps, as {samples, positions, features} tensors.
+  # AR is added separately since it depends on previous values.
+  defp build_time_inputs(model, samples, required_timestamps, events_df, regressor_values) do
+    config = model.config
+    timestamps = List.flatten(samples)
+    positions = AR.positions(config)
+
+    t = Trend.date_to_numeric(timestamps, config.first_timestamp) |> Nx.new_axis(-1)
+    changepoint_features = Trend.build_changepoint_features(t, config.changepoint_positions)
     trend_input = Trend.build_trend_input(t, changepoint_features)
 
-    seasonality = Seasonality.build_features(timestamps, model.config)
-
     %{"trend" => trend_input}
-    |> Map.merge(
-      Map.new(seasonality, fn {period, features} -> {Atom.to_string(period), features} end)
-    )
+    |> Map.merge(seasonality_inputs(timestamps, config))
     |> put_events_input(model, timestamps, events_df)
-    |> put_regressors_input(model, timestamps, regressors_df)
+    |> put_regressors_input(model, timestamps, regressor_values, required_timestamps)
+    |> Map.new(fn {key, features} ->
+      {key, Nx.reshape(features, {length(samples), positions, :auto})}
+    end)
   end
 
   # Observed values in normalized y space, keyed by timestamp. Training data
@@ -668,11 +741,10 @@ defmodule Soothsayer do
   # Nothing is stored on the model.
   defp forecast_missing_values(
          known_values,
-         lagged_regressor_values,
+         regressor_values,
          model,
          prediction_timestamps,
-         events_df,
-         regressors_df
+         events_df
        ) do
     last_observed = known_values |> Map.keys() |> Enum.max(NaiveDateTime)
     last_prediction = Enum.max(prediction_timestamps, NaiveDateTime)
@@ -681,38 +753,21 @@ defmodule Soothsayer do
     |> Frequency.range(last_prediction, model.config.frequency)
     |> Enum.chunk_every(AR.forecast_steps(model.config))
     |> Enum.reduce(known_values, fn block_timestamps, known_values ->
-      forecast_block(
-        known_values,
-        lagged_regressor_values,
-        model,
-        block_timestamps,
-        events_df,
-        regressors_df
-      )
+      forecast_block(known_values, regressor_values, model, block_timestamps, events_df)
     end)
   end
 
   # Predicts one block of consecutive timestamps from the step before the
-  # first one. Returns known_values with the block's predictions added, in
+  # first one, as a single sample whose targets are the whole block (the
+  # last block may be shorter than forecast_steps and keeps only what it
+  # needs). Returns known_values with the block's predictions added, in
   # normalized y space so they can feed later lags.
-  defp forecast_block(
-         known_values,
-         lagged_regressor_values,
-         model,
-         block_timestamps,
-         events_df,
-         regressors_df
-       ) do
+  defp forecast_block(known_values, regressor_values, model, block_timestamps, events_df) do
     origin = Frequency.shift(hd(block_timestamps), -1, model.config.frequency)
-    origins = List.duplicate(origin, length(block_timestamps))
-    step_numbers = Enum.to_list(1..length(block_timestamps))
 
     inputs =
       model
-      |> build_time_inputs(block_timestamps, events_df, regressors_df)
-      |> Map.merge(
-        lag_inputs(model, known_values, lagged_regressor_values, origins, step_numbers)
-      )
+      |> sample_inputs([origin], block_timestamps, known_values, regressor_values, events_df)
       |> normalize_with_params(model.config.normalization.x)
 
     %{combined: combined} = Model.predict(model, inputs)
@@ -737,15 +792,20 @@ defmodule Soothsayer do
     end)
   end
 
+  # {samples, positions, features} inputs are z-scored per feature over
+  # samples and positions alike, so lag and target positions share the
+  # statistics the shared dense layer expects.
   defp normalize(tensor) do
-    mean = Nx.mean(tensor, axes: [0])
-    std = Nx.standard_deviation(tensor, axes: [0])
+    axes = if Nx.rank(tensor) == 3, do: [0, 1], else: [0]
+    mean = Nx.mean(tensor, axes: axes)
+    std = Nx.standard_deviation(tensor, axes: axes)
     std = Nx.select(Nx.equal(std, 0), Nx.tensor(1), std)
     {Nx.divide(Nx.subtract(tensor, mean), std), mean, std}
   end
 
-  # Inputs that are masks rather than measurements and must not be z-scored.
-  @unnormalized_inputs ["forecast_step"]
+  # The lags are already in normalized y space, which is the space the
+  # components subtracted from them predict in, so they must stay there.
+  @unnormalized_inputs ["ar"]
 
   defp normalize_inputs(x) do
     Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->
@@ -756,6 +816,20 @@ defmodule Soothsayer do
   defp normalize_single_input(key, tensor, {normalized, norm_params})
        when key in @unnormalized_inputs do
     {Map.put(normalized, key, tensor), norm_params}
+  end
+
+  # The trend features are scaled by the training span, not z-scored, so t
+  # runs from 0 to 1 over the training data and each changepoint hinge
+  # max(0, t - s) keeps those units, as in NeuralProphet. Z-scoring each
+  # hinge on its own blows up the late ones (few nonzero values, tiny
+  # standard deviation), which lets the slope of the last segment swing
+  # with the last few days of data and then extrapolate that swing.
+  defp normalize_single_input("trend" = key, tensor, {normalized, norm_params}) do
+    features = Nx.axis_size(tensor, 2)
+    span = tensor[[.., .., 0]] |> Nx.reduce_max()
+    norm_param = %{mean: Nx.broadcast(0.0, {features}), std: Nx.broadcast(span, {features})}
+
+    {Map.put(normalized, key, Nx.divide(tensor, span)), Map.put(norm_params, key, norm_param)}
   end
 
   defp normalize_single_input(key, tensor, {normalized, norm_params}) do
@@ -862,6 +936,7 @@ defmodule Soothsayer do
 
   The output kernel has shape `{inputs, forecast_steps}`: row `i` is the
   i-th oldest lag and column `s` holds the weights for step `s + 1` ahead.
+  Hidden layers have a `:bias` as well; the output layer has none.
 
   ## Parameters
 
@@ -869,20 +944,19 @@ defmodule Soothsayer do
 
   ## Returns
 
-    A map of layer names to weight structs containing `:kernel` and `:bias` tensors.
+    A map of layer names to maps with a `:kernel` tensor and, for hidden
+    layers, a `:bias` tensor.
 
   ## Examples
 
       iex> model = Soothsayer.new(%{ar: %{enabled: true, lags: 3}})
       iex> fitted_model = Soothsayer.fit(model, data)
       iex> weights = Soothsayer.get_ar_weights(fitted_model)
-      %{
-        "ar_dense_out" => %{kernel: #Nx.Tensor<f32[3][1]>, bias: #Nx.Tensor<f32[1]>}
-      }
+      %{"ar_dense_out" => %{kernel: #Nx.Tensor<f32[3][1]>}}
 
   """
   @spec get_ar_weights(Soothsayer.Model.t()) :: %{
-          String.t() => %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}
+          String.t() => %{optional(:bias) => Nx.Tensor.t(), kernel: Nx.Tensor.t()}
         }
   def get_ar_weights(%Model{} = model) do
     AR.get_weights(model)
@@ -959,10 +1033,10 @@ defmodule Soothsayer do
 
       iex> model = Soothsayer.new()
       iex> input = %{
-      ...>   "trend" => Nx.template({1, 11}, :f32),
-      ...>   "yearly" => Nx.template({1, 12}, :f32),
-      ...>   "weekly" => Nx.template({1, 6}, :f32),
-      ...>   "daily" => Nx.template({1, 12}, :f32)
+      ...>   "trend" => Nx.template({1, 1, 11}, :f32),
+      ...>   "yearly" => Nx.template({1, 1, 12}, :f32),
+      ...>   "weekly" => Nx.template({1, 1, 6}, :f32),
+      ...>   "daily" => Nx.template({1, 1, 12}, :f32)
       ...> }
       iex> Axon.Display.as_graph(Soothsayer.display_network(model), input)
 

@@ -20,7 +20,7 @@ defmodule Soothsayer.ChangepointsTest do
   end
 
   describe "network with changepoints" do
-    test "build_network has trend input shape {nil, 1} when changepoints is 0" do
+    test "build_network has trend input shape {nil, 1, 1} when changepoints is 0" do
       config = %{
         trend: %{enabled: true, changepoints: 0, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
@@ -33,10 +33,10 @@ defmodule Soothsayer.ChangepointsTest do
       network = Soothsayer.Model.build_network(config)
       inputs = Axon.get_inputs(network)
 
-      assert inputs["trend"] == {nil, 1}
+      assert inputs["trend"] == {nil, 1, 1}
     end
 
-    test "build_network has trend input shape {nil, 1 + changepoints} when changepoints enabled" do
+    test "build_network has trend input shape {nil, 1, 1 + changepoints} when changepoints enabled" do
       config = %{
         trend: %{enabled: true, changepoints: 5, changepoints_range: 0.8, regularization: nil},
         seasonality: %{
@@ -49,7 +49,7 @@ defmodule Soothsayer.ChangepointsTest do
       network = Soothsayer.Model.build_network(config)
       inputs = Axon.get_inputs(network)
 
-      assert inputs["trend"] == {nil, 6}
+      assert inputs["trend"] == {nil, 1, 6}
     end
 
     test "build_network names trend layer 'trend_dense' for regularization" do
@@ -66,9 +66,9 @@ defmodule Soothsayer.ChangepointsTest do
       {init_fn, _predict_fn} = Axon.build(network)
 
       input = %{
-        "trend" => Nx.broadcast(0.0, {1, 6}),
-        "yearly" => Nx.broadcast(0.0, {1, 8}),
-        "weekly" => Nx.broadcast(0.0, {1, 4})
+        "trend" => Nx.broadcast(0.0, {1, 1, 6}),
+        "yearly" => Nx.broadcast(0.0, {1, 1, 8}),
+        "weekly" => Nx.broadcast(0.0, {1, 1, 4})
       }
 
       params = init_fn.(input, Axon.ModelState.empty())

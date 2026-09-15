@@ -16,6 +16,8 @@ defmodule Soothsayer.Trend do
   - `delta_j` = rate adjustments at each changepoint (learned)
   """
 
+  alias Soothsayer.AR
+  alias Soothsayer.Layers
   alias Soothsayer.Timestamp
 
   @seconds_per_day 86_400
@@ -31,13 +33,15 @@ defmodule Soothsayer.Trend do
 
   ## Returns
 
-    An Axon input node with shape `{nil, 1 + changepoints}`.
+    An Axon input node with shape `{nil, positions, 1 + changepoints}`,
+    where `positions` is the number of timestamps in a sample, see
+    `Soothsayer.AR.positions/1`.
 
   """
   @spec build_input(map()) :: Axon.t()
   def build_input(config) do
     changepoints = get_in(config, [:trend, :changepoints]) || 0
-    Axon.input("trend", shape: {nil, 1 + changepoints})
+    Axon.input("trend", shape: {nil, AR.positions(config), 1 + changepoints})
   end
 
   @doc """
@@ -50,12 +54,13 @@ defmodule Soothsayer.Trend do
 
   ## Returns
 
-    An Axon dense layer when enabled, or `Axon.constant(0)` when disabled.
+    A linear layer over every position, `{batch, positions}`, when enabled,
+    or `Axon.constant(0)` when disabled.
 
   """
   @spec build_component(Axon.t(), map()) :: Axon.t()
   def build_component(input, %{trend: %{enabled: true}}) do
-    Axon.dense(input, 1, activation: :linear, name: "trend_dense")
+    Layers.position_dense(input, "trend_dense")
   end
 
   def build_component(_input, _config), do: Axon.constant(0)

@@ -4,67 +4,69 @@ defmodule Soothsayer.TrendTest do
   alias Soothsayer.Trend
 
   describe "build_input/1" do
-    test "returns input with shape {nil, 1} when changepoints is 0" do
+    test "returns input with shape {nil, 1, 1} when changepoints is 0" do
       config = %{trend: %{changepoints: 0}}
 
       input = Trend.build_input(config)
 
-      assert Axon.get_inputs(input)["trend"] == {nil, 1}
+      assert Axon.get_inputs(input)["trend"] == {nil, 1, 1}
     end
 
-    test "returns input with shape {nil, 1 + changepoints}" do
+    test "returns input with shape {nil, positions, 1 + changepoints}" do
       config = %{trend: %{changepoints: 5}}
 
       input = Trend.build_input(config)
 
-      assert Axon.get_inputs(input)["trend"] == {nil, 6}
+      assert Axon.get_inputs(input)["trend"] == {nil, 1, 6}
     end
 
-    test "returns input with shape {nil, 1} when trend config missing changepoints" do
+    test "returns input with shape {nil, 1, 1} when trend config missing changepoints" do
       config = %{trend: %{}}
 
       input = Trend.build_input(config)
 
-      assert Axon.get_inputs(input)["trend"] == {nil, 1}
+      assert Axon.get_inputs(input)["trend"] == {nil, 1, 1}
     end
   end
 
   describe "build_component/2" do
     test "returns dense layer when enabled" do
       config = %{trend: %{enabled: true, changepoints: 0}}
-      input = Axon.input("trend", shape: {nil, 1})
+      input = Axon.input("trend", shape: {nil, 1, 1})
 
       component = Trend.build_component(input, config)
 
       # Build and check that it produces output
       {init_fn, _predict_fn} = Axon.build(component)
-      params = init_fn.(%{"trend" => Nx.tensor([[1.0]])}, Axon.ModelState.empty())
+      params = init_fn.(%{"trend" => Nx.tensor([[[1.0]]])}, Axon.ModelState.empty())
 
       assert Map.has_key?(params.data, "trend_dense")
     end
 
     test "returns constant 0 when disabled" do
       config = %{trend: %{enabled: false, changepoints: 0}}
-      input = Axon.input("trend", shape: {nil, 1})
+      input = Axon.input("trend", shape: {nil, 1, 1})
 
       component = Trend.build_component(input, config)
 
       # Build and check output is zeros
       {init_fn, predict_fn} = Axon.build(component)
-      params = init_fn.(%{"trend" => Nx.tensor([[1.0]])}, Axon.ModelState.empty())
-      output = predict_fn.(params, %{"trend" => Nx.tensor([[1.0]])})
+      params = init_fn.(%{"trend" => Nx.tensor([[[1.0]]])}, Axon.ModelState.empty())
+      output = predict_fn.(params, %{"trend" => Nx.tensor([[[1.0]]])})
 
       assert Nx.to_number(output) == 0.0
     end
 
     test "dense layer is named 'trend_dense' for regularization" do
       config = %{trend: %{enabled: true, changepoints: 3}}
-      input = Axon.input("trend", shape: {nil, 4})
+      input = Axon.input("trend", shape: {nil, 1, 4})
 
       component = Trend.build_component(input, config)
 
       {init_fn, _predict_fn} = Axon.build(component)
-      params = init_fn.(%{"trend" => Nx.tensor([[1.0, 0.0, 0.0, 0.0]])}, Axon.ModelState.empty())
+
+      params =
+        init_fn.(%{"trend" => Nx.tensor([[[1.0, 0.0, 0.0, 0.0]]])}, Axon.ModelState.empty())
 
       assert Map.has_key?(params.data, "trend_dense")
     end
@@ -86,9 +88,9 @@ defmodule Soothsayer.TrendTest do
 
       # Initialize with dummy data
       input = %{
-        "trend" => Nx.tensor([[1.0, 0.0, 0.0]]),
-        "yearly" => Nx.broadcast(0.0, {1, 8}),
-        "weekly" => Nx.broadcast(0.0, {1, 4})
+        "trend" => Nx.tensor([[[1.0, 0.0, 0.0]]]),
+        "yearly" => Nx.broadcast(0.0, {1, 1, 8}),
+        "weekly" => Nx.broadcast(0.0, {1, 1, 4})
       }
 
       {init_fn, _predict_fn} = Axon.build(model.network)
@@ -134,9 +136,9 @@ defmodule Soothsayer.TrendTest do
 
       # Initialize with dummy data
       input = %{
-        "trend" => Nx.tensor([[1.0]]),
-        "yearly" => Nx.broadcast(0.0, {1, 8}),
-        "weekly" => Nx.broadcast(0.0, {1, 4})
+        "trend" => Nx.tensor([[[1.0]]]),
+        "yearly" => Nx.broadcast(0.0, {1, 1, 8}),
+        "weekly" => Nx.broadcast(0.0, {1, 1, 4})
       }
 
       {init_fn, _predict_fn} = Axon.build(model.network)

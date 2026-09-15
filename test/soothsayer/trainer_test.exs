@@ -131,6 +131,20 @@ defmodule Soothsayer.TrainerTest do
       picked = Trainer.suggest_learning_rate(losses, learning_rates)
       assert picked >= 42.0 and picked <= 58.0, "picked #{picked}"
     end
+
+    test "ignores the bounces of a run that has diverged" do
+      # a steady drop between points 20 and 40, then a finite blow-up whose
+      # fall from 3000 to 1000 would be the steepest gradient of the curve
+      losses =
+        List.duplicate(2.0, 20) ++
+          Enum.map(1..20, &(2.0 - &1 * 0.075)) ++
+          List.duplicate(0.5, 20) ++ [5.0, 600.0, 3000.0, 1000.0, 2500.0, 800.0]
+
+      learning_rates = Enum.map(0..(length(losses) - 1), &(&1 * 1.0))
+
+      picked = Trainer.suggest_learning_rate(losses, learning_rates)
+      assert picked >= 22.0 and picked <= 38.0, "picked #{picked}"
+    end
   end
 
   describe "auto_epochs/1" do

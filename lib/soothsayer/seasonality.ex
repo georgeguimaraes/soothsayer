@@ -12,7 +12,9 @@ defmodule Soothsayer.Seasonality do
   then it counts as disabled.
   """
 
+  alias Soothsayer.AR
   alias Soothsayer.Frequency
+  alias Soothsayer.Layers
   alias Soothsayer.Timestamp
 
   @periods [:yearly, :weekly, :daily]
@@ -40,14 +42,18 @@ defmodule Soothsayer.Seasonality do
   ## Returns
 
     A map with an Axon input node per configured period (`:yearly`,
-    `:weekly`, `:daily`). Periods missing from the config get no input.
+    `:weekly`, `:daily`), each `{nil, positions, 2 * fourier_terms}` where
+    `positions` is the number of timestamps in a sample, see
+    `Soothsayer.AR.positions/1`. Periods missing from the config get no input.
 
   """
   @spec build_inputs(map()) :: %{optional(atom()) => Axon.t()}
   def build_inputs(config) do
+    positions = AR.positions(config)
+
     Map.new(configured_periods(config), fn period ->
       terms = get_in(config, [:seasonality, period, :fourier_terms]) || 0
-      {period, Axon.input(Atom.to_string(period), shape: {nil, terms * 2})}
+      {period, Axon.input(Atom.to_string(period), shape: {nil, positions, terms * 2})}
     end)
   end
 
@@ -66,7 +72,9 @@ defmodule Soothsayer.Seasonality do
 
   ## Returns
 
-    A map with an Axon layer per input, keyed like `inputs`.
+    A map with an Axon layer per input, keyed like `inputs`, each a linear
+    layer over every position (`{batch, positions}`) or `Axon.constant(0)`
+    for a disabled period.
 
   """
   @spec build_components(%{optional(atom()) => Axon.t()}, map()) ::
@@ -79,7 +87,7 @@ defmodule Soothsayer.Seasonality do
 
   defp build_period_component(input, config, period) do
     if enabled?(config, period) do
-      Axon.dense(input, 1, activation: :linear, name: "#{period}_dense")
+      Layers.position_dense(input, "#{period}_dense")
     else
       Axon.constant(0)
     end

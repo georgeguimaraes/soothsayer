@@ -10,15 +10,18 @@ This is useful for:
 
 ## How It Works
 
-The AR component models the current value as depending on previous values:
+The AR component models what the other components leave over. Each lag is stationarized first, by subtracting the trend, seasonality, events and regressors evaluated at that lag's own timestamp, and the AR network works on those residuals:
 
 ```
-ar(t) = sum(w_i * y(t-i))
+residual(t-i) = y(t-i) - trend(t-i) - seasonality(t-i) - events(t-i) - regressors(t-i)
+ar(t) = sum(w_i * residual(t-i))
 ```
 
 Where:
 - `y(t-i)` = value at lag i (1 to lags)
 - `w_i` = learned weight for each lag
+
+This is what NeuralProphet does too, and it matters more than it looks. If the AR network saw the raw lags it would happily absorb the level and the daily cycle as well, the trend would go flat at the training mean, and multi-step forecasts would drift back to that mean. With residual lags the trend has to carry the level and the seasonalities their cycles, so the components stay interpretable and a forecast a few steps out follows where the series actually is.
 
 For more details, see [NeuralProphet's Auto-Regression documentation](https://neuralprophet.com/html/autoregression.html).
 
@@ -165,7 +168,7 @@ weights = Soothsayer.get_ar_weights(fitted)
 # => %{
 #   "ar_dense_0" => %{kernel: ..., bias: ...},  # First hidden layer
 #   "ar_dense_1" => %{kernel: ..., bias: ...},  # Second hidden layer
-#   "ar_dense_out" => %{kernel: ..., bias: ...} # Output layer
+#   "ar_dense_out" => %{kernel: ...}            # Output layer, no bias
 # }
 ```
 
@@ -223,7 +226,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-The AR output layer gets one unit per step, so the model learns a separate weight vector for "tomorrow", "two days out" and so on, all from the same lag window. Every training origin produces `forecast_steps` rows, one per step, and each row picks its unit with a one-hot step input. This is NeuralProphet's `n_forecasts`.
+The AR output layer gets one unit per step, so the model learns a separate weight vector for "tomorrow", "two days out" and so on, all from the same lag window. Every training origin is one sample whose `forecast_steps` targets share that window, and the loss averages over all of them. This is NeuralProphet's `n_forecasts`.
 
 Within a block there is no error compounding: day 7 is predicted from the last 14 real values just like day 1, using the weights trained for a 7-day horizon. Past the block, the next block starts from predicted values, which is the manual unrolling NeuralProphet's maintainers recommend for going beyond `n_forecasts`.
 
@@ -250,19 +253,23 @@ AR forecasting assumes gap-free data at the model's frequency (inferred at fit, 
 
 Every requested timestamp has to sit on that grid. An hourly model can forecast 14:00 but not 14:30, and asking for the latter raises an error naming the timestamp and the frequency. Monthly data works on either month starts or month ends: a month-end timestamp always steps to the next or previous month end, so Jan 31, Feb 28 and Mar 31 form one grid.
 
-When regressors are configured, the regressors dataframe must cover every timestamp in every block up to the latest requested one, since those get predicted too.
+When regressors are configured, the regressors dataframe must cover every timestamp in every block up to the latest requested one, since those get predicted too. It doesn't have to cover the rest of the last block past that timestamp: a regressor value only affects its own timestamp, so the steps nobody asked for are filled with the training mean. Values from the training period are remembered by the model, which is how the lags of an early forecast reach back into it.
 
 ## Network Architecture
 
-The AR component adds an input branch to the network:
+Every sample the network sees is one forecast origin laid out as `lags + forecast_steps` positions: the lag timestamps, oldest first, then the target timestamps. The time-based components (trend, seasonality, events, regressors) take `{batch, positions, features}` inputs and produce one value per position through a single shared linear layer. The AR branch takes the raw lags, `{batch, lags}`, subtracts the other components at the lag positions, and outputs `{batch, forecast_steps}`:
 
 ```elixir
-# Input shape
+# Input shapes
 ar_input_shape = {nil, lags}
+trend_input_shape = {nil, lags + forecast_steps, 1 + changepoints}
 
-# For linear AR: direct dense layer to output
-# For deep AR-Net: hidden layers -> dense output
+# AR branch
+# lags - (trend + seasonality + events + regressors at the lag positions)
+# -> hidden layers (deep AR-Net only) -> dense with forecast_steps units
 ```
+
+The component outputs are their values at the target positions, so they still add up to the combined forecast.
 
 ## Next Steps
 

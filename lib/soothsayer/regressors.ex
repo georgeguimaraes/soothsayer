@@ -10,11 +10,16 @@ defmodule Soothsayer.Regressors do
 
   Regressors are configured as a list of column names. The training
   dataframe must contain those columns, and so must the dataframe passed as
-  `regressors:` to `Soothsayer.predict/3`.
+  `regressors:` to `Soothsayer.predict/3`. The training values are kept on
+  the fitted model, so with auto-regression the lag timestamps of a
+  forecast can reach back into the training data without the prediction
+  dataframe repeating them.
   """
 
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.AR
+  alias Soothsayer.Layers
   alias Soothsayer.Timestamp
 
   @layer_name "regressors_dense"
@@ -26,12 +31,14 @@ defmodule Soothsayer.Regressors do
 
   ## Returns
 
-    An Axon input node with one column per regressor, `nil` when none are configured.
+    An Axon input node `{nil, positions, regressors}` when regressors are
+    configured (`positions` being the timestamps in a sample, see
+    `Soothsayer.AR.positions/1`), `nil` when none are.
 
   """
   @spec build_network_input(map()) :: Axon.t() | nil
-  def build_network_input(%{regressors: [_ | _] = names}) do
-    Axon.input("regressors", shape: {nil, length(names)})
+  def build_network_input(%{regressors: [_ | _] = names} = config) do
+    Axon.input("regressors", shape: {nil, AR.positions(config), length(names)})
   end
 
   def build_network_input(_config), do: nil
@@ -41,14 +48,15 @@ defmodule Soothsayer.Regressors do
 
   ## Returns
 
-    An Axon dense layer when regressors are configured, `Axon.constant(0)` otherwise.
+    A linear layer over every position (`{batch, positions}`) when
+    regressors are configured, `Axon.constant(0)` otherwise.
 
   """
   @spec build_component(Axon.t() | nil, map()) :: Axon.t()
   def build_component(nil, _config), do: Axon.constant(0)
 
   def build_component(input, %{regressors: [_ | _]}) do
-    Axon.dense(input, 1, activation: :linear, name: @layer_name)
+    Layers.position_dense(input, @layer_name)
   end
 
   def build_component(_input, _config), do: Axon.constant(0)
@@ -56,16 +64,15 @@ defmodule Soothsayer.Regressors do
   # Feature Engineering
 
   @doc """
-  Builds the regressors input tensor for a list of dates.
+  Builds the regressors input tensor, `{n, regressors}`, for a list of
+  timestamps from a dataframe with a "ds" column plus one column per
+  regressor, stacking the values in `names` order. Plain dates mean
+  midnight, so they match a naive datetime "ds" column at that time.
 
-  Looks each timestamp up in `dataframe` (which needs a "ds" column plus
-  one column per regressor) and stacks the regressor values in config order.
-  Plain dates mean midnight, so they match a naive datetime "ds" column at
-  that time.
-
-  Raises `ArgumentError` when a regressor column is missing or when any date
-  has no row, since a forecast that silently fills in zeros for an unknown
-  regressor value would be wrong without saying so.
+  Raises `ArgumentError` when a regressor column is missing or when any
+  timestamp has no row, since a forecast that silently fills in zeros for
+  an unknown regressor value would be wrong without saying so. See
+  `build_features/4` for the lookup-based variant used at prediction.
 
   ## Examples
 
@@ -83,28 +90,99 @@ defmodule Soothsayer.Regressors do
           Nx.Tensor.t()
   def build_features(timestamps, %DataFrame{} = dataframe, names) do
     validate_columns!(dataframe, names)
+    known_values = Map.new(names, &{&1, values_by_timestamp(dataframe, &1)})
+    build_features(timestamps, known_values, names, [])
+  end
 
-    values_by_timestamp =
-      dataframe["ds"]
-      |> Timestamp.from_series()
-      |> Enum.zip(rows(dataframe, names))
-      |> Map.new()
+  @doc """
+  Builds the regressors input tensor, `{n, regressors}`, for a list of
+  timestamps from known values by regressor name and timestamp, see
+  `known_values/3`.
+
+  ## Options
+
+    * `:required` - a `MapSet` of the timestamps that must have a value.
+      Defaults to all of them.
+    * `:fill` - the values to use for timestamps outside `:required` that
+      have none, one per regressor in `names` order. Without it every
+      missing value raises.
+
+  A sample's target positions run `forecast_steps` past its origin whether
+  or not those timestamps were asked for, and a regressor value at a target
+  position only feeds that position's own output, so filling the ones
+  nobody asked for is harmless. Lag positions and requested timestamps
+  must be present.
+  """
+  @spec build_features(
+          list(Timestamp.input()),
+          %{String.t() => %{Timestamp.t() => float()}},
+          list(String.t()),
+          keyword()
+        ) :: Nx.Tensor.t()
+  def build_features(timestamps, known_values, names, opts) when is_map(known_values) do
+    required = Keyword.get(opts, :required)
+    fill = Keyword.get(opts, :fill)
+    fill_by_name = if fill, do: Enum.zip(names, fill) |> Map.new(), else: %{}
 
     rows =
       Enum.map(timestamps, fn timestamp ->
-        case Map.fetch(values_by_timestamp, Timestamp.to_naive_datetime(timestamp)) do
-          {:ok, values} ->
-            values
+        key = Timestamp.to_naive_datetime(timestamp)
 
-          :error ->
-            raise ArgumentError,
-                  "Regressor values for #{Timestamp.format(timestamp)} are missing. " <>
-                    "The regressors dataframe must cover every timestamp being predicted, " <>
-                    "including the steps between the last observation and the forecast."
-        end
+        fill_here =
+          if required == nil or MapSet.member?(required, key), do: %{}, else: fill_by_name
+
+        Enum.map(names, &fetch_value!(known_values[&1], &1, key, fill_here))
       end)
 
     rows |> Nx.tensor() |> Nx.as_type({:f, 32})
+  end
+
+  defp fetch_value!(values, name, timestamp, fill) do
+    case {Map.fetch(values, timestamp), Map.fetch(fill, name)} do
+      {{:ok, value}, _} ->
+        value
+
+      {:error, {:ok, fill_value}} ->
+        fill_value
+
+      {:error, :error} ->
+        raise ArgumentError,
+              "Regressor #{inspect(name)} has no value for #{Timestamp.format(timestamp)}. " <>
+                "The regressors dataframe must cover every timestamp being predicted, " <>
+                "including the steps between the last observation and the forecast."
+    end
+  end
+
+  @doc """
+  Collects the regressor values by name and timestamp for prediction: the
+  training values stored on the model, overridden and extended by the
+  `regressors:` dataframe when given.
+  """
+  @spec known_values(map(), DataFrame.t() | nil, list(String.t())) ::
+          %{String.t() => %{Timestamp.t() => float()}}
+  def known_values(training_data, regressors_df, names) do
+    training_values = Map.get(training_data, :regressors, %{})
+
+    Map.new(names, fn name ->
+      from_frame =
+        if regressors_df != nil and name in DataFrame.names(regressors_df) do
+          values_by_timestamp(regressors_df, name)
+        else
+          %{}
+        end
+
+      {name, Map.merge(Map.get(training_values, name, %{}), from_frame)}
+    end)
+  end
+
+  @doc """
+  Raw values of one column by timestamp, for storing at fit time.
+  """
+  @spec values_by_timestamp(DataFrame.t(), String.t()) :: %{Timestamp.t() => float()}
+  def values_by_timestamp(%DataFrame{} = dataframe, name) do
+    timestamps = Timestamp.from_series(dataframe["ds"])
+    values = dataframe[name] |> Series.cast({:f, 64}) |> Series.to_list()
+    Enum.zip(timestamps, values) |> Map.new()
   end
 
   @doc """
@@ -120,12 +198,6 @@ defmodule Soothsayer.Regressors do
     end
 
     :ok
-  end
-
-  defp rows(dataframe, names) do
-    names
-    |> Enum.map(fn name -> dataframe[name] |> Series.cast({:f, 64}) |> Series.to_list() end)
-    |> Enum.zip_with(& &1)
   end
 
   # Weight Extraction

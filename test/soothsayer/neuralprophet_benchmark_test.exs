@@ -43,11 +43,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same config: 10 changepoints, yearly 6, weekly 3, additive"
       )
 
-      # Seed 42 gives 0.296 / 0.490. Across six seeds: MAE 0.296 to 0.300,
-      # RMSE 0.487 to 0.496 (with a fixed 0.01 rate and 100 epochs it was
+      # Seed 42 gives 0.299 / 0.480. Across six seeds: MAE 0.298 to 0.311,
+      # RMSE 0.480 to 0.483 (with a fixed 0.01 rate and 100 epochs it was
       # 0.286 to 0.354). Ceilings are 1.25x the worst seed.
-      assert result.metrics.mean_absolute_error < 0.375
-      assert result.metrics.root_mean_squared_error < 0.62
+      assert result.metrics.mean_absolute_error < 0.39
+      assert result.metrics.root_mean_squared_error < 0.61
     end
   end
 
@@ -68,11 +68,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same config: multiplicative seasonality, weekly disabled for monthly rows"
       )
 
-      # Seed 42 gives 26.2 / 28.1. Across six seeds: MAE 23.2 to 29.8,
-      # RMSE 25.2 to 31.8 (additive mode was 31 to 32 / 38 to 42). Only 130
+      # Seed 42 gives 27.1 / 29.0. Across six seeds: MAE 24.8 to 27.1,
+      # RMSE 26.7 to 29.0 (additive mode was 31 to 32 / 38 to 42). Only 130
       # training rows, so init matters a lot here. Ceilings are 1.25x the worst seed.
-      assert result.metrics.mean_absolute_error < 37.3
-      assert result.metrics.root_mean_squared_error < 39.7
+      assert result.metrics.mean_absolute_error < 34.0
+      assert result.metrics.root_mean_squared_error < 36.5
     end
   end
 
@@ -98,10 +98,10 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         notes: "same configuration and metric"
       )
 
-      # Seed 42 gives 5.44 / 6.76. Across six seeds: MAE 5.42 to 5.47,
-      # RMSE 6.74 to 6.81 (with a fixed 0.01 rate and 100 epochs it was
+      # Seed 42 gives 5.38 / 6.72. Across six seeds: MAE 5.37 to 5.42,
+      # RMSE 6.70 to 6.77 (with a fixed 0.01 rate and 100 epochs it was
       # 5.57 to 6.11). Ceilings are 1.25x the worst seed.
-      assert result.metrics.mean_absolute_error < 6.85
+      assert result.metrics.mean_absolute_error < 6.8
       assert result.metrics.root_mean_squared_error < 8.5
     end
   end
@@ -138,12 +138,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
             "12 missing readings linearly interpolated"
       )
 
-      # Seed 42 gives 0.738 / 1.000. Across six seeds: MAE 0.63 to 1.00,
-      # RMSE 0.88 to 1.25, a wider spread than the daily sets since the range
-      # test lands anywhere between 0.005 and 0.025 here. Ceilings are 1.25x
-      # the worst seed.
-      assert result.metrics.mean_absolute_error < 1.25
-      assert result.metrics.root_mean_squared_error < 1.56
+      # Seed 42 gives 0.500 / 0.728. Across six seeds: MAE 0.49 to 0.55,
+      # RMSE 0.72 to 0.76. Before the AR saw stationarized lags it was 0.63
+      # to 1.00 / 0.88 to 1.25. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 0.70
+      assert result.metrics.root_mean_squared_error < 0.95
     end
   end
 

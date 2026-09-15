@@ -20,7 +20,7 @@ defmodule Soothsayer.SeasonalityTest do
       assert Map.has_key?(inputs, :weekly)
     end
 
-    test "yearly input has shape {nil, 2 * fourier_terms}" do
+    test "yearly input has shape {nil, positions, 2 * fourier_terms}" do
       config = %{
         seasonality: %{
           yearly: %{enabled: true, fourier_terms: 6},
@@ -31,10 +31,10 @@ defmodule Soothsayer.SeasonalityTest do
       inputs = Seasonality.build_inputs(config)
 
       # 6 fourier terms = 12 features (sin + cos for each)
-      assert Axon.get_inputs(inputs.yearly)["yearly"] == {nil, 12}
+      assert Axon.get_inputs(inputs.yearly)["yearly"] == {nil, 1, 12}
     end
 
-    test "weekly input has shape {nil, 2 * fourier_terms}" do
+    test "weekly input has shape {nil, positions, 2 * fourier_terms}" do
       config = %{
         seasonality: %{
           yearly: %{enabled: true, fourier_terms: 6},
@@ -45,7 +45,7 @@ defmodule Soothsayer.SeasonalityTest do
       inputs = Seasonality.build_inputs(config)
 
       # 3 fourier terms = 6 features (sin + cos for each)
-      assert Axon.get_inputs(inputs.weekly)["weekly"] == {nil, 6}
+      assert Axon.get_inputs(inputs.weekly)["weekly"] == {nil, 1, 6}
     end
   end
 
@@ -59,8 +59,8 @@ defmodule Soothsayer.SeasonalityTest do
       }
 
       inputs = %{
-        yearly: Axon.input("yearly", shape: {nil, 12}),
-        weekly: Axon.input("weekly", shape: {nil, 6})
+        yearly: Axon.input("yearly", shape: {nil, 1, 12}),
+        weekly: Axon.input("weekly", shape: {nil, 1, 6})
       }
 
       components = Seasonality.build_components(inputs, config)
@@ -78,16 +78,16 @@ defmodule Soothsayer.SeasonalityTest do
       }
 
       inputs = %{
-        yearly: Axon.input("yearly", shape: {nil, 12}),
-        weekly: Axon.input("weekly", shape: {nil, 6})
+        yearly: Axon.input("yearly", shape: {nil, 1, 12}),
+        weekly: Axon.input("weekly", shape: {nil, 1, 6})
       }
 
       components = Seasonality.build_components(inputs, config)
 
       # Build yearly and verify it produces output
       {init_fn, predict_fn} = Axon.build(components.yearly)
-      params = init_fn.(%{"yearly" => Nx.broadcast(0.5, {1, 12})}, Axon.ModelState.empty())
-      output = predict_fn.(params, %{"yearly" => Nx.broadcast(0.5, {1, 12})})
+      params = init_fn.(%{"yearly" => Nx.broadcast(0.5, {1, 1, 12})}, Axon.ModelState.empty())
+      output = predict_fn.(params, %{"yearly" => Nx.broadcast(0.5, {1, 1, 12})})
 
       # Output should be non-zero (dense layer learned weights)
       assert Nx.shape(output) == {1, 1}
@@ -102,16 +102,16 @@ defmodule Soothsayer.SeasonalityTest do
       }
 
       inputs = %{
-        yearly: Axon.input("yearly", shape: {nil, 12}),
-        weekly: Axon.input("weekly", shape: {nil, 6})
+        yearly: Axon.input("yearly", shape: {nil, 1, 12}),
+        weekly: Axon.input("weekly", shape: {nil, 1, 6})
       }
 
       components = Seasonality.build_components(inputs, config)
 
       # Build yearly (disabled) and verify output is 0
       {init_fn, predict_fn} = Axon.build(components.yearly)
-      params = init_fn.(%{"yearly" => Nx.broadcast(0.5, {1, 12})}, Axon.ModelState.empty())
-      output = predict_fn.(params, %{"yearly" => Nx.broadcast(0.5, {1, 12})})
+      params = init_fn.(%{"yearly" => Nx.broadcast(0.5, {1, 1, 12})}, Axon.ModelState.empty())
+      output = predict_fn.(params, %{"yearly" => Nx.broadcast(0.5, {1, 1, 12})})
 
       assert Nx.to_number(output) == 0.0
     end

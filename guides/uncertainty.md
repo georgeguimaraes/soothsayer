@@ -30,7 +30,7 @@ Each is a `{rows, 1}` tensor in the units of `y`. When no quantiles are configur
 
 ## How It Works
 
-Every quantile gets its own linear head over the same inputs the components use: the trend features, the Fourier terms, the lags and step mask, events and regressors. The head learns how far that quantile sits from the median on each date, so intervals can widen with the level of the series, with the horizon of a multi-step forecast, or around an event.
+Every quantile gets its own linear head over the same inputs the components use: the trend features, the Fourier terms, events and regressors at every position of the sample (the lag timestamps and the forecast steps), plus the lags themselves. The head has one output per forecast step and learns how far that quantile sits from the median, so intervals can widen with the level of the series, with the horizon of a multi-step forecast, or around an event. With auto-regression the regressor values at forecast steps you didn't ask for are the training mean, which the heads see too; it only matters for the width of the interval, never for the median.
 
 Heads are trained with the pinball loss for their quantile:
 

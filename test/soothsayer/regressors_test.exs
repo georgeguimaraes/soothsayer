@@ -27,7 +27,7 @@ defmodule Soothsayer.RegressorsTest do
     test "raises when a date has no regressor row" do
       dataframe = DataFrame.new(%{"ds" => [~D[2023-01-01]], "temperature" => [20.0]})
 
-      assert_raise ArgumentError, ~r/Regressor values for 2023-01-02 are missing/, fn ->
+      assert_raise ArgumentError, ~r/Regressor "temperature" has no value for 2023-01-02/, fn ->
         Regressors.build_features([~D[2023-01-01], ~D[2023-01-02]], dataframe, ["temperature"])
       end
     end

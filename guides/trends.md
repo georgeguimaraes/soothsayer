@@ -151,15 +151,17 @@ Higher regularization values encourage sparser changepoints (fewer slope changes
 
 ## Network Architecture
 
-With changepoints enabled, the trend input has shape `{batch_size, 1 + changepoints}`:
+With changepoints enabled, the trend input has shape `{batch_size, positions, 1 + changepoints}`, where `positions` is the number of timestamps in a training sample (one without auto-regression, `lags + forecast_steps` with it, see the [Auto-Regression guide](autoregression.md)):
 
 ```elixir
-# The network receives:
-# - Column 0: normalized time t
-# - Columns 1-n: changepoint features max(0, t - s_j)
+# The network receives, per position:
+# - Column 0: time t, scaled so the training data runs from 0 to 1
+# - Columns 1-n: changepoint features max(0, t - s_j), in the same units
 
-input_shape = {nil, 1 + changepoints}
+input_shape = {nil, positions, 1 + changepoints}
 ```
+
+The time features are scaled by the training span rather than z-scored, as in NeuralProphet. Z-scoring each changepoint feature on its own would blow up the late ones (they are zero for most of the data) and let the slope of the last segment swing with the last few days, which is exactly the slope that gets extrapolated into the forecast.
 
 See the [Interactive Livebook Tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) for network visualization examples.
 

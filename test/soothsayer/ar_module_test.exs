@@ -70,51 +70,60 @@ defmodule Soothsayer.ARModuleTest do
     end
   end
 
-  describe "training_rows/3" do
-    test "builds one row per origin and step, ordered step by step" do
+  describe "training_samples/4" do
+    test "builds one sample per origin with its lags, its targets and their positions" do
       y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
 
-      rows = AR.training_rows(y, 2, 2)
+      samples = AR.training_samples(y, 2, 2)
 
-      # origins end at positions 1, 2, 3 (values 2, 3, 4); step 1 targets 3, 4, 5; step 2 targets 4, 5, 6
-      assert Nx.to_list(rows.lagged) == [
-               [1.0, 2.0],
-               [2.0, 3.0],
-               [3.0, 4.0],
-               [1.0, 2.0],
-               [2.0, 3.0],
-               [3.0, 4.0]
-             ]
-
-      assert Nx.to_flat_list(rows.targets) == [3.0, 4.0, 5.0, 4.0, 5.0, 6.0]
-      assert rows.target_indices == [2, 3, 4, 3, 4, 5]
-
-      assert Nx.to_list(rows.step_mask) == [
-               [1.0, 0.0],
-               [1.0, 0.0],
-               [1.0, 0.0],
-               [0.0, 1.0],
-               [0.0, 1.0],
-               [0.0, 1.0]
-             ]
+      # origins end at positions 1, 2, 3 (values 2, 3, 4), each with the two values after it as targets
+      assert Nx.to_list(samples.lagged) == [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]]
+      assert Nx.to_list(samples.targets) == [[3.0, 4.0], [4.0, 5.0], [5.0, 6.0]]
+      assert Nx.to_list(samples.position_indices) == [[0, 1, 2, 3], [1, 2, 3, 4], [2, 3, 4, 5]]
+      assert samples.origin_indices == [1, 2, 3]
     end
 
-    test "one forecast step has no mask and matches create_lagged_inputs" do
+    test "max_lags moves the first origin without widening the lag window" do
+      y = Nx.iota({10}, type: :f32)
+
+      samples = AR.training_samples(y, 2, 1, max_lags: 4)
+
+      assert samples.origin_indices == [3, 4, 5, 6, 7, 8]
+      assert Nx.shape(samples.lagged) == {6, 2}
+      assert Nx.to_list(samples.lagged) |> hd() == [2.0, 3.0]
+      assert Nx.to_list(samples.position_indices) |> hd() == [2, 3, 4]
+    end
+
+    test "one forecast step matches create_lagged_inputs" do
       y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
 
-      rows = AR.training_rows(y, 3, 1)
+      samples = AR.training_samples(y, 3, 1)
       {lagged, targets} = AR.create_lagged_inputs(y, 3)
 
-      assert rows.step_mask == nil
-      assert rows.target_indices == [3, 4]
-      assert Nx.to_list(rows.lagged) == Nx.to_list(lagged)
-      assert Nx.to_list(rows.targets) == Nx.to_list(targets)
+      assert Nx.to_list(samples.position_indices) == [[0, 1, 2, 3], [1, 2, 3, 4]]
+      assert Nx.to_list(samples.lagged) == Nx.to_list(lagged)
+      assert Nx.to_list(samples.targets) == Nx.to_list(targets)
     end
 
     test "raises when the series is too short for the lags and steps" do
       assert_raise ArgumentError, ~r/need at least 5 rows, got 4/, fn ->
-        AR.training_rows(Nx.tensor([1.0, 2.0, 3.0, 4.0]), 3, 2)
+        AR.training_samples(Nx.tensor([1.0, 2.0, 3.0, 4.0]), 3, 2)
       end
+    end
+  end
+
+  describe "sample_timestamps/4" do
+    test "lists the lags ending at the origin, then the forecast steps after it" do
+      assert AR.sample_timestamps(~D[2023-01-10], 2, 3, {1, :day}) == [
+               ~D[2023-01-09],
+               ~D[2023-01-10],
+               ~D[2023-01-11],
+               ~D[2023-01-12],
+               ~D[2023-01-13]
+             ]
+
+      assert AR.sample_timestamps(~N[2023-01-10 06:00:00], 0, 1, {1, :hour}) ==
+               [~N[2023-01-10 07:00:00]]
     end
   end
 
@@ -163,18 +172,6 @@ defmodule Soothsayer.ARModuleTest do
     end
   end
 
-  describe "step_mask/2" do
-    test "one-hot encodes 1-based steps and is nil for a single step" do
-      assert AR.step_mask([1, 3, 2], 3) |> Nx.to_list() == [
-               [1.0, 0.0, 0.0],
-               [0.0, 0.0, 1.0],
-               [0.0, 1.0, 0.0]
-             ]
-
-      assert AR.step_mask([1, 1], 1) == nil
-    end
-  end
-
   describe "get_weights/1" do
     test "returns weights for linear AR model" do
       :rand.seed(:exsss, {42, 42, 42})
@@ -200,7 +197,7 @@ defmodule Soothsayer.ARModuleTest do
       assert Map.has_key?(weights, "ar_dense_out")
       assert map_size(weights) == 1
       assert Nx.shape(weights["ar_dense_out"].kernel) == {3, 1}
-      assert Nx.shape(weights["ar_dense_out"].bias) == {1}
+      refute Map.has_key?(weights["ar_dense_out"], :bias)
     end
 
     test "returns all layer weights for deep AR-Net" do
