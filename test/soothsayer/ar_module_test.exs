@@ -23,7 +23,7 @@ defmodule Soothsayer.ARModuleTest do
   describe "known_values/1" do
     test "zips training dates with normalized values" do
       training_data = %{
-        dates: [~D[2023-01-01], ~D[2023-01-02]],
+        timestamps: [~D[2023-01-01], ~D[2023-01-02]],
         y_normalized: [0.5, -0.5]
       }
 
@@ -31,7 +31,7 @@ defmodule Soothsayer.ARModuleTest do
     end
   end
 
-  describe "build_input/3" do
+  describe "build_input/4" do
     test "looks up the lags ending at each origin, oldest first" do
       known_values = %{
         ~D[2023-01-01] => 1.0,
@@ -41,7 +41,13 @@ defmodule Soothsayer.ARModuleTest do
         ~D[2023-01-05] => 5.0
       }
 
-      result = AR.build_input(known_values, [~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]], 2)
+      result =
+        AR.build_input(
+          known_values,
+          [~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]],
+          2,
+          {1, :day}
+        )
 
       # origin 01-03 uses [01-02, 01-03], 01-04 uses [01-03, 01-04], 01-05 uses [01-04, 01-05]
       assert Nx.shape(result) == {3, 2}
@@ -52,7 +58,13 @@ defmodule Soothsayer.ARModuleTest do
       known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-04] => 4.0}
 
       # 01-01 lacks 12-31, 01-04 lacks 01-03 (a gap), 01-02 has both
-      result = AR.build_input(known_values, [~D[2023-01-01], ~D[2023-01-04], ~D[2023-01-02]], 2)
+      result =
+        AR.build_input(
+          known_values,
+          [~D[2023-01-01], ~D[2023-01-04], ~D[2023-01-02]],
+          2,
+          {1, :day}
+        )
 
       assert Nx.to_flat_list(result) == [0.0, 0.0, 0.0, 0.0, 1.0, 2.0]
     end
@@ -106,20 +118,48 @@ defmodule Soothsayer.ARModuleTest do
     end
   end
 
-  describe "origin_and_step/3" do
+  describe "origin_and_step/4" do
     test "observed dates are one step from the day before, later dates go in blocks" do
       last_observed_date = ~D[2023-01-31]
 
-      assert AR.origin_and_step(~D[2023-01-10], last_observed_date, 3) == {~D[2023-01-09], 1}
-      assert AR.origin_and_step(~D[2023-01-31], last_observed_date, 3) == {~D[2023-01-30], 1}
-      assert AR.origin_and_step(~D[2023-02-01], last_observed_date, 3) == {~D[2023-01-31], 1}
-      assert AR.origin_and_step(~D[2023-02-03], last_observed_date, 3) == {~D[2023-01-31], 3}
-      assert AR.origin_and_step(~D[2023-02-04], last_observed_date, 3) == {~D[2023-02-03], 1}
-      assert AR.origin_and_step(~D[2023-02-07], last_observed_date, 3) == {~D[2023-02-06], 1}
+      daily = {1, :day}
+
+      assert AR.origin_and_step(~D[2023-01-10], last_observed_date, 3, daily) ==
+               {~D[2023-01-09], 1}
+
+      assert AR.origin_and_step(~D[2023-01-31], last_observed_date, 3, daily) ==
+               {~D[2023-01-30], 1}
+
+      assert AR.origin_and_step(~D[2023-02-01], last_observed_date, 3, daily) ==
+               {~D[2023-01-31], 1}
+
+      assert AR.origin_and_step(~D[2023-02-03], last_observed_date, 3, daily) ==
+               {~D[2023-01-31], 3}
+
+      assert AR.origin_and_step(~D[2023-02-04], last_observed_date, 3, daily) ==
+               {~D[2023-02-03], 1}
+
+      assert AR.origin_and_step(~D[2023-02-07], last_observed_date, 3, daily) ==
+               {~D[2023-02-06], 1}
     end
 
     test "with one step every date comes from the day before it" do
-      assert AR.origin_and_step(~D[2023-02-09], ~D[2023-01-31], 1) == {~D[2023-02-08], 1}
+      assert AR.origin_and_step(~D[2023-02-09], ~D[2023-01-31], 1, {1, :day}) ==
+               {~D[2023-02-08], 1}
+    end
+
+    test "steps follow the frequency and off-grid timestamps raise" do
+      last_observed = ~N[2023-01-31 00:00:00]
+
+      assert AR.origin_and_step(~N[2023-01-31 02:00:00], last_observed, 3, {1, :hour}) ==
+               {~N[2023-01-31 00:00:00], 2}
+
+      assert AR.origin_and_step(~N[2023-01-31 04:00:00], last_observed, 3, {1, :hour}) ==
+               {~N[2023-01-31 03:00:00], 1}
+
+      assert_raise ArgumentError, ~r/not a whole number of 1 hour steps/, fn ->
+        AR.origin_and_step(~N[2023-01-31 01:30:00], last_observed, 3, {1, :hour})
+      end
     end
   end
 

@@ -22,6 +22,8 @@ defmodule Soothsayer.LaggedRegressors do
   alias Explorer.DataFrame
   alias Explorer.Series
   alias Soothsayer.AR
+  alias Soothsayer.Frequency
+  alias Soothsayer.Timestamp
 
   @layer_name "lagged_regressors_dense"
 
@@ -96,11 +98,12 @@ defmodule Soothsayer.LaggedRegressors do
   end
 
   @doc """
-  Collects the raw regressor values by date for prediction: the training
-  values stored on the model, overridden and extended by the `regressors:`
-  dataframe when given.
+  Collects the raw regressor values by timestamp for prediction: the
+  training values stored on the model, overridden and extended by the
+  `regressors:` dataframe when given.
   """
-  @spec known_values(map(), DataFrame.t() | nil, map()) :: %{String.t() => %{Date.t() => float()}}
+  @spec known_values(map(), DataFrame.t() | nil, map()) ::
+          %{String.t() => %{Timestamp.t() => float()}}
   def known_values(training_data, regressors_df, config) do
     training_values = Map.get(training_data, :lagged_regressors, %{})
 
@@ -117,52 +120,57 @@ defmodule Soothsayer.LaggedRegressors do
   end
 
   @doc """
-  Raw regressor values by date from a dataframe, for storing at fit time.
+  Raw regressor values by timestamp from a dataframe, for storing at fit time.
   """
-  @spec values_by_date(DataFrame.t(), String.t()) :: %{Date.t() => float()}
+  @spec values_by_date(DataFrame.t(), String.t()) :: %{Timestamp.t() => float()}
   def values_by_date(%DataFrame{} = dataframe, name) do
-    dates = Series.to_list(dataframe["ds"])
+    timestamps = Timestamp.from_series(dataframe["ds"])
     values = dataframe[name] |> Series.cast({:f, 64}) |> Series.to_list()
-    Enum.zip(dates, values) |> Map.new()
+    Enum.zip(timestamps, values) |> Map.new()
   end
 
   @doc """
-  Builds the prediction input for a list of origin dates: for each regressor,
-  the `lags` values ending at the origin, oldest first. Raises when a needed
-  date has no value, since a lag silently filled with zero would be wrong
-  without saying so.
+  Builds the prediction input for a list of origin timestamps: for each
+  regressor, the `lags` values ending at the origin, oldest first, one step
+  of `frequency` apart. Raises when a needed timestamp has no value, since a
+  lag silently filled with zero would be wrong without saying so.
   """
-  @spec build_input(%{String.t() => %{Date.t() => float()}}, list(Date.t()), map()) ::
-          Nx.Tensor.t()
-  def build_input(known_values, origin_dates, config) do
+  @spec build_input(
+          %{String.t() => %{Timestamp.input() => float()}},
+          list(Timestamp.input()),
+          map(),
+          Frequency.t()
+        ) :: Nx.Tensor.t()
+  def build_input(known_values, origins, config, frequency) do
     config
     |> specs()
     |> Enum.map(fn {name, lags} ->
       values = Map.fetch!(known_values, name)
 
-      origin_dates
-      |> Enum.map(&window(values, name, &1, lags))
+      origins
+      |> Enum.map(&window(values, name, &1, lags, frequency))
       |> Nx.tensor()
       |> Nx.as_type({:f, 32})
     end)
     |> Nx.concatenate(axis: 1)
   end
 
-  defp window(values, name, origin_date, lags) do
+  defp window(values, name, origin, lags, frequency) do
     Enum.map((lags - 1)..0//-1, fn offset ->
-      fetch_value!(values, name, Date.add(origin_date, -offset))
+      fetch_value!(values, name, Frequency.shift(origin, -offset, frequency))
     end)
   end
 
-  defp fetch_value!(values, name, date) do
-    case Map.fetch(values, date) do
+  defp fetch_value!(values, name, timestamp) do
+    case Map.fetch(values, timestamp) do
       {:ok, value} ->
         value
 
       :error ->
         raise ArgumentError,
-              "Lagged regressor #{inspect(name)} has no value for #{Date.to_iso8601(date)}. " <>
-                "Pass regressors: a dataframe covering the dates up to each forecast origin."
+              "Lagged regressor #{inspect(name)} has no value for " <>
+                "#{Timestamp.format(timestamp)}. Pass regressors: a dataframe covering " <>
+                "the timestamps up to each forecast origin."
     end
   end
 end

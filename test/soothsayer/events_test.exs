@@ -366,6 +366,37 @@ defmodule Soothsayer.EventsTest do
     end
   end
 
+  describe "build_features/4 with a frequency" do
+    test "windows are steps of the frequency and event dates mean midnight" do
+      hours = Enum.map(0..47, &NaiveDateTime.add(~N[2023-01-04 00:00:00], &1, :hour))
+      events_df = DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-05]]})
+      config = %{"sale" => %{lower_window: -1, upper_window: 1}}
+
+      tensor = Events.build_features(Series.from_list(hours), events_df, config, {1, :hour})
+
+      assert Nx.shape(tensor) == {48, 3}
+
+      # Column offsets -1, 0, +1 fire at 23:00 on the 4th, 00:00 and 01:00 on the 5th.
+      active_rows =
+        tensor
+        |> Nx.sum(axes: [1])
+        |> Nx.to_flat_list()
+        |> Enum.with_index()
+        |> Enum.filter(fn {value, _index} -> value == 1.0 end)
+        |> Enum.map(fn {_value, index} -> Enum.at(hours, index) end)
+
+      assert active_rows == [
+               ~N[2023-01-04 23:00:00],
+               ~N[2023-01-05 00:00:00],
+               ~N[2023-01-05 01:00:00]
+             ]
+
+      assert Nx.to_flat_list(tensor[23]) == [1.0, 0.0, 0.0]
+      assert Nx.to_flat_list(tensor[24]) == [0.0, 1.0, 0.0]
+      assert Nx.to_flat_list(tensor[25]) == [0.0, 0.0, 1.0]
+    end
+  end
+
   describe "get_effects/1" do
     test "raises when no events configured" do
       model = %Soothsayer.Model{

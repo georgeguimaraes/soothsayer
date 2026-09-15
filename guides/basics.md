@@ -6,7 +6,7 @@ This tutorial covers the fundamentals of time series forecasting with Soothsayer
 
 Soothsayer expects an Explorer DataFrame with two columns:
 
-- `ds` - dates (Date type)
+- `ds` - timestamps, either a `:date` or a `{:naive_datetime, _}` series, strictly increasing
 - `y` - target values (numeric)
 
 ```elixir
@@ -17,6 +17,14 @@ df = DataFrame.new(%{
   "y" => [100.0, 102.5, 101.3]
 })
 ```
+
+Sub-daily data works the same way with naive datetimes. When reading a CSV, tell Explorer the dtype so the column isn't parsed as strings:
+
+```elixir
+df = DataFrame.from_csv!("readings.csv", dtypes: [{"ds", {:naive_datetime, :microsecond}}])
+```
+
+The step between rows (the frequency) is inferred at fit from the most common gap in `ds`, so daily, hourly, 5-minute and monthly data all work without configuration. It can also be set explicitly with `frequency: {5, :minute}` (units `:minute`, `:hour`, `:day`, `:month`). Auto-regression lags, forecast blocks and event windows all move by that step.
 
 ## Creating a Model
 
@@ -48,6 +56,9 @@ If you call `Soothsayer.new()` without arguments, you get sensible defaults:
 | `seasonality.yearly.fourier_terms` | `6` | Flexibility of yearly pattern |
 | `seasonality.weekly.enabled` | `true` | Enable weekly seasonality |
 | `seasonality.weekly.fourier_terms` | `3` | Flexibility of weekly pattern |
+| `seasonality.daily.enabled` | `:auto` | Daily seasonality, on for sub-daily data with at least two days of it |
+| `seasonality.daily.fourier_terms` | `6` | Flexibility of daily pattern |
+| `frequency` | `:auto` | Step between rows, inferred from `ds`, or `{amount, unit}` such as `{1, :hour}` |
 | `ar.forecast_steps` | `1` | Steps ahead the AR head forecasts directly, NeuralProphet's `n_forecasts` |
 | `regressors` | `[]` | Column names of future regressors, see [Regressors](regressors.md) |
 | `lagged_regressors` | `%{}` | Column name to `%{lags: n}` for lagged regressors, needs AR |
@@ -120,6 +131,7 @@ components = Soothsayer.predict_components(fitted_model, future_dates)
 #   trend: #Nx.Tensor<...>,
 #   yearly_seasonality: #Nx.Tensor<...>,
 #   weekly_seasonality: #Nx.Tensor<...>,
+#   daily_seasonality: #Nx.Tensor<...>,
 #   ar: #Nx.Tensor<...>
 # }
 ```

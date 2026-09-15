@@ -15,6 +15,7 @@ defmodule Soothsayer.Regressors do
 
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.Timestamp
 
   @layer_name "regressors_dense"
 
@@ -57,8 +58,10 @@ defmodule Soothsayer.Regressors do
   @doc """
   Builds the regressors input tensor for a list of dates.
 
-  Looks each date up in `dataframe` (which needs a "ds" column plus one
-  column per regressor) and stacks the regressor values in config order.
+  Looks each timestamp up in `dataframe` (which needs a "ds" column plus
+  one column per regressor) and stacks the regressor values in config order.
+  Plain dates mean midnight, so they match a naive datetime "ds" column at
+  that time.
 
   Raises `ArgumentError` when a regressor column is missing or when any date
   has no row, since a forecast that silently fills in zeros for an unknown
@@ -76,27 +79,28 @@ defmodule Soothsayer.Regressors do
       >
 
   """
-  @spec build_features(list(Date.t()), DataFrame.t(), list(String.t())) :: Nx.Tensor.t()
-  def build_features(dates, %DataFrame{} = dataframe, names) do
+  @spec build_features(list(Timestamp.input()), DataFrame.t(), list(String.t())) ::
+          Nx.Tensor.t()
+  def build_features(timestamps, %DataFrame{} = dataframe, names) do
     validate_columns!(dataframe, names)
 
-    values_by_date =
+    values_by_timestamp =
       dataframe["ds"]
-      |> Series.to_list()
+      |> Timestamp.from_series()
       |> Enum.zip(rows(dataframe, names))
       |> Map.new()
 
     rows =
-      Enum.map(dates, fn date ->
-        case Map.fetch(values_by_date, date) do
+      Enum.map(timestamps, fn timestamp ->
+        case Map.fetch(values_by_timestamp, Timestamp.to_naive_datetime(timestamp)) do
           {:ok, values} ->
             values
 
           :error ->
             raise ArgumentError,
-                  "Regressor values for #{Date.to_iso8601(date)} are missing. " <>
-                    "The regressors dataframe must cover every date being predicted, " <>
-                    "including the days between the last observation and the forecast."
+                  "Regressor values for #{Timestamp.format(timestamp)} are missing. " <>
+                    "The regressors dataframe must cover every timestamp being predicted, " <>
+                    "including the steps between the last observation and the forecast."
         end
       end)
 

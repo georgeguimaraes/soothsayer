@@ -1,12 +1,13 @@
 # Seasonality
 
-Seasonality captures repeating patterns at fixed intervals. Soothsayer supports yearly and weekly seasonality using Fourier terms.
+Seasonality captures repeating patterns at fixed intervals. Soothsayer supports yearly, weekly and daily seasonality using Fourier terms.
 
 This is useful for:
 - Holiday shopping peaks (yearly)
 - Summer/winter demand patterns (yearly)
 - Weekend dips in activity (weekly)
 - Monday peaks in emails (weekly)
+- Overnight lows in hourly temperature or traffic (daily)
 
 ## How It Works
 
@@ -17,7 +18,7 @@ seasonality(t) = sum(a_n * cos(2*pi*n*t/P) + b_n * sin(2*pi*n*t/P))
 ```
 
 Where:
-- `P` = period (365.25 days for yearly, 7 days for weekly)
+- `P` = period (a year for yearly, a week for weekly, a day for daily)
 - `n` = Fourier term index (1 to N)
 - `a_n`, `b_n` = learned coefficients
 
@@ -38,6 +39,10 @@ model = Soothsayer.new(%{
     weekly: %{
       enabled: true,      # Enable weekly seasonality
       fourier_terms: 3    # Number of Fourier terms
+    },
+    daily: %{
+      enabled: :auto,     # On for sub-daily data, off otherwise
+      fourier_terms: 6
     }
   }
 })
@@ -52,6 +57,10 @@ model = Soothsayer.new(%{
 | `yearly.fourier_terms` | `6` | Flexibility of yearly pattern |
 | `weekly.enabled` | `true` | Enable weekly patterns |
 | `weekly.fourier_terms` | `3` | Flexibility of weekly pattern |
+| `daily.enabled` | `:auto` | Enable daily (time of day) patterns |
+| `daily.fourier_terms` | `6` | Flexibility of daily pattern |
+
+`enabled` takes `true`, `false` or `:auto`. With `:auto` the decision is made at fit from the data, using the same rules as NeuralProphet: yearly needs at least two years of data, weekly at least two weeks with rows closer than a week apart, daily at least two days with rows closer than a day apart. Daily defaults to `:auto` so daily data is unaffected, and yearly and weekly default to `true` but accept `:auto` too.
 
 ## Yearly Seasonality
 
@@ -105,6 +114,24 @@ Good for:
 | 2 | Low | Simple weekday/weekend split |
 | 3 | Medium | Most cases (default) |
 | 5+ | High | Complex day-specific patterns |
+
+## Daily Seasonality
+
+Captures patterns that repeat every day, for data with more than one row per day (hourly readings, 15-minute meter data, 5-minute sensor logs):
+
+```elixir
+model = Soothsayer.new(%{
+  seasonality: %{
+    yearly: %{enabled: false},
+    weekly: %{enabled: true},
+    daily: %{enabled: true, fourier_terms: 6}
+  }
+})
+```
+
+The Fourier terms run over the fraction of the day that has passed, so midnight is 0, noon is 0.5. On daily data every row sits at midnight and the daily component has nothing to learn, which is why it defaults to `:auto` and stays off there.
+
+Yearly and weekly seasonality also see the time of day on sub-daily data: a reading at noon on a Wednesday is treated as 3.5 days into the week, not 3. At midnight the values are the same as for a plain date, so switching a daily dataset from dates to datetimes changes nothing.
 
 ## Additive vs Multiplicative
 
@@ -184,6 +211,7 @@ components = Soothsayer.predict_components(fitted, df["ds"])
 
 # components.yearly_seasonality contains the yearly pattern
 # components.weekly_seasonality contains the weekly pattern
+# components.daily_seasonality is all zeros here, the data is daily
 ```
 
 ## Disabling Seasonality
@@ -215,6 +243,7 @@ model = Soothsayer.new(%{
 
 - **Yearly seasonality**: Needs at least 2 years of data to learn reliably
 - **Weekly seasonality**: Needs at least a few weeks of data
+- **Daily seasonality**: Needs sub-daily data spanning at least a couple of days
 
 With less data, the model may learn noise rather than true patterns. Consider disabling seasonality if you don't have enough data.
 
@@ -228,6 +257,9 @@ yearly_features = 2 * 6  # => 12 features for fourier_terms: 6
 
 # Weekly: 2 * fourier_terms features
 weekly_features = 2 * 3  # => 6 features for fourier_terms: 3
+
+# Daily: 2 * fourier_terms features
+daily_features = 2 * 6  # => 12 features for fourier_terms: 6
 ```
 
 ## Next Steps

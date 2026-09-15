@@ -193,7 +193,7 @@ defmodule Soothsayer.TrendTest do
       {tensor, metadata} = Trend.build_features(dates, config)
 
       assert is_struct(tensor, Nx.Tensor)
-      assert Map.has_key?(metadata, :first_date)
+      assert Map.has_key?(metadata, :first_timestamp)
       assert Map.has_key?(metadata, :changepoint_positions)
     end
 
@@ -218,13 +218,13 @@ defmodule Soothsayer.TrendTest do
       assert first_col == [0.0, 1.0, 2.0]
     end
 
-    test "metadata includes first_date" do
+    test "metadata includes first_timestamp" do
       dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
       config = %{trend: %{changepoints: 0, changepoints_range: 0.8}}
 
       {_tensor, metadata} = Trend.build_features(dates, config)
 
-      assert metadata.first_date == ~D[2023-01-01]
+      assert metadata.first_timestamp == ~D[2023-01-01]
     end
 
     test "metadata includes changepoint_positions as numeric values" do

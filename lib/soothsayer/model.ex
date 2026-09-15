@@ -71,8 +71,9 @@ defmodule Soothsayer.Model do
     outputs = %{
       combined: combined,
       trend: components.trend,
-      yearly_seasonality: components.yearly,
-      weekly_seasonality: components.weekly,
+      yearly_seasonality: components.seasonality.yearly,
+      weekly_seasonality: components.seasonality.weekly,
+      daily_seasonality: components.seasonality.daily,
       ar: components.ar,
       events: components.events,
       regressors: components.regressors,
@@ -114,13 +115,17 @@ defmodule Soothsayer.Model do
     trend_input = Trend.build_input(config)
     trend = Trend.build_component(trend_input, config)
 
-    # Seasonality
+    # Seasonality, one component per period. Periods missing from the config
+    # (only in unit tests, Soothsayer.new fills them all in) become zero.
     seasonality_inputs = Seasonality.build_inputs(config)
 
     seasonality =
       seasonality_inputs
       |> Seasonality.build_components(config)
       |> apply_seasonality_mode(trend, config)
+      |> then(fn components ->
+        Map.new(Seasonality.periods(), &{&1, Map.get(components, &1, Axon.constant(0))})
+      end)
 
     # AR
     ar_input = AR.build_network_input(config)
@@ -142,29 +147,18 @@ defmodule Soothsayer.Model do
       LaggedRegressors.build_component(lagged_regressors_input, config)
 
     combined =
-      Axon.add([
-        trend,
-        seasonality.yearly,
-        seasonality.weekly,
-        ar_component,
-        events_component,
-        regressors_component,
-        lagged_regressors_component
-      ])
+      Axon.add(
+        [trend] ++
+          Enum.map(Seasonality.periods(), &seasonality[&1]) ++
+          [ar_component, events_component, regressors_component, lagged_regressors_component]
+      )
 
     # Quantile heads see every input the components see
     inputs =
       Enum.reject(
-        [
-          trend_input,
-          seasonality_inputs.yearly,
-          seasonality_inputs.weekly,
-          ar_input,
-          step_mask_input,
-          events_input,
-          regressors_input,
-          lagged_regressors_input
-        ],
+        [trend_input] ++
+          Enum.map(Seasonality.periods(), &seasonality_inputs[&1]) ++
+          [ar_input, step_mask_input, events_input, regressors_input, lagged_regressors_input],
         &is_nil/1
       )
 
@@ -173,8 +167,7 @@ defmodule Soothsayer.Model do
     {combined,
      %{
        trend: trend,
-       yearly: seasonality.yearly,
-       weekly: seasonality.weekly,
+       seasonality: seasonality,
        ar: ar_component,
        events: events_component,
        regressors: regressors_component,
@@ -194,11 +187,7 @@ defmodule Soothsayer.Model do
          %{seasonality: %{mode: :multiplicative}} = config
        ) do
     scale = Axon.add(trend, Axon.constant(series_level(config)))
-
-    %{
-      yearly: Axon.multiply(seasonality.yearly, scale),
-      weekly: Axon.multiply(seasonality.weekly, scale)
-    }
+    Map.new(seasonality, fn {period, component} -> {period, Axon.multiply(component, scale)} end)
   end
 
   defp apply_seasonality_mode(seasonality, _trend, _config), do: seasonality
@@ -256,13 +245,14 @@ defmodule Soothsayer.Model do
   ## Examples
 
       iex> fitted_model = Soothsayer.Model.fit(model, training_x, training_y, 100)
-      iex> x = %{"trend" => future_trend_tensor, "yearly" => future_yearly_tensor, "weekly" => future_weekly_tensor}
+      iex> x = %{"trend" => future_trend_tensor, "yearly" => future_yearly_tensor, "weekly" => future_weekly_tensor, "daily" => future_daily_tensor}
       iex> predictions = Soothsayer.Model.predict(fitted_model, x)
       %{
         combined: #Nx.Tensor<...>,
         trend: #Nx.Tensor<...>,
         yearly_seasonality: #Nx.Tensor<...>,
-        weekly_seasonality: #Nx.Tensor<...>
+        weekly_seasonality: #Nx.Tensor<...>,
+        daily_seasonality: #Nx.Tensor<...>
       }
 
   """
@@ -272,6 +262,7 @@ defmodule Soothsayer.Model do
           trend: Nx.Tensor.t(),
           yearly_seasonality: Nx.Tensor.t(),
           weekly_seasonality: Nx.Tensor.t(),
+          daily_seasonality: Nx.Tensor.t(),
           ar: Nx.Tensor.t(),
           events: Nx.Tensor.t(),
           regressors: Nx.Tensor.t(),

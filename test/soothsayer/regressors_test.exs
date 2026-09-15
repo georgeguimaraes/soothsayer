@@ -112,6 +112,7 @@ defmodule Soothsayer.RegressorsTest do
           :trend,
           :yearly_seasonality,
           :weekly_seasonality,
+          :daily_seasonality,
           :ar,
           :events,
           :regressors,

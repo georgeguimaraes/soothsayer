@@ -1,8 +1,9 @@
 defmodule Soothsayer.SeasonalityTest do
   use ExUnit.Case, async: true
 
-  alias Explorer.DataFrame
   alias Soothsayer.Seasonality
+
+  doctest Seasonality
 
   describe "build_inputs/1" do
     test "returns map with yearly and weekly inputs" do
@@ -117,102 +118,6 @@ defmodule Soothsayer.SeasonalityTest do
   end
 
   # Existing preprocessor tests - renamed function
-  describe "add_fourier_features/3" do
-    test "adds yearly fourier columns when enabled" do
-      df =
-        DataFrame.new(%{
-          "y" => [1, 2, 3, 4, 5],
-          "ds" => [
-            ~D[2023-01-01],
-            ~D[2023-04-01],
-            ~D[2023-07-01],
-            ~D[2023-10-01],
-            ~D[2023-12-31]
-          ]
-        })
-
-      config = %{
-        yearly: %{enabled: true, fourier_terms: 3},
-        weekly: %{enabled: false, fourier_terms: 2}
-      }
-
-      result = Seasonality.add_fourier_features(df, "ds", config)
-
-      # Should have sin and cos for each fourier term (3 * 2 = 6 columns)
-      assert "yearly_sin_1" in result.names
-      assert "yearly_cos_1" in result.names
-      assert "yearly_sin_2" in result.names
-      assert "yearly_cos_2" in result.names
-      assert "yearly_sin_3" in result.names
-      assert "yearly_cos_3" in result.names
-    end
-
-    test "adds weekly fourier columns when enabled" do
-      df =
-        DataFrame.new(%{
-          "y" => [1, 2, 3, 4, 5, 6, 7],
-          "ds" => [
-            ~D[2023-01-02],
-            ~D[2023-01-03],
-            ~D[2023-01-04],
-            ~D[2023-01-05],
-            ~D[2023-01-06],
-            ~D[2023-01-07],
-            ~D[2023-01-08]
-          ]
-        })
-
-      config = %{
-        yearly: %{enabled: false, fourier_terms: 3},
-        weekly: %{enabled: true, fourier_terms: 2}
-      }
-
-      result = Seasonality.add_fourier_features(df, "ds", config)
-
-      # Should have sin and cos for each fourier term (2 * 2 = 4 columns)
-      assert "weekly_sin_1" in result.names
-      assert "weekly_cos_1" in result.names
-      assert "weekly_sin_2" in result.names
-      assert "weekly_cos_2" in result.names
-    end
-
-    test "adds both yearly and weekly when both enabled" do
-      df =
-        DataFrame.new(%{
-          "y" => [1, 2, 3],
-          "ds" => [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
-        })
-
-      config = %{
-        yearly: %{enabled: true, fourier_terms: 2},
-        weekly: %{enabled: true, fourier_terms: 2}
-      }
-
-      result = Seasonality.add_fourier_features(df, "ds", config)
-
-      # Should have both yearly and weekly columns
-      assert "yearly_sin_1" in result.names
-      assert "weekly_sin_1" in result.names
-    end
-
-    test "returns df unchanged when neither enabled" do
-      df =
-        DataFrame.new(%{
-          "y" => [1, 2, 3],
-          "ds" => [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
-        })
-
-      config = %{
-        yearly: %{enabled: false, fourier_terms: 2},
-        weekly: %{enabled: false, fourier_terms: 2}
-      }
-
-      result = Seasonality.add_fourier_features(df, "ds", config)
-
-      assert result.names == df.names
-    end
-  end
-
   describe "build_features/2" do
     test "returns map with yearly and weekly tensors" do
       dates = [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
@@ -296,6 +201,67 @@ defmodule Soothsayer.SeasonalityTest do
 
       assert Nx.type(result.yearly) == {:f, 32}
       assert Nx.type(result.weekly) == {:f, 32}
+    end
+  end
+
+  describe "sub-daily timestamps" do
+    test "yearly and weekly fractions at midnight equal the plain date's" do
+      dates = [~D[2023-03-15], ~D[2024-02-29], ~D[2023-12-31]]
+      midnights = Enum.map(dates, &NaiveDateTime.new!(&1, ~T[00:00:00]))
+
+      for period <- [:yearly, :weekly] do
+        assert Seasonality.compute_period_fractions(dates, period) ==
+                 Seasonality.compute_period_fractions(midnights, period)
+      end
+    end
+
+    test "the time of day moves the fractions within the day" do
+      noon = [~N[2023-03-15 12:00:00]]
+
+      assert Seasonality.compute_period_fractions(noon, :daily) == [0.5]
+      assert Seasonality.compute_period_fractions(noon, :weekly) == [(3 + 0.5) / 7]
+      assert Seasonality.compute_period_fractions(noon, :yearly) == [(74 + 0.5) / 365]
+    end
+
+    test "daily features vary with the hour and are zeros when disabled" do
+      timestamps = Enum.map(0..5, &NaiveDateTime.add(~N[2023-01-01 00:00:00], &1 * 4, :hour))
+      config = %{seasonality: %{daily: %{enabled: true, fourier_terms: 2}}}
+
+      result = Seasonality.build_features(timestamps, config)
+
+      assert Map.keys(result) == [:daily]
+      assert Nx.shape(result.daily) == {6, 4}
+      assert Nx.to_flat_list(result.daily) |> Enum.uniq() |> length() > 1
+
+      disabled =
+        Seasonality.build_features(
+          timestamps,
+          put_in(config, [:seasonality, :daily, :enabled], false)
+        )
+
+      assert Nx.to_flat_list(disabled.daily) |> Enum.all?(&(&1 == 0.0))
+    end
+  end
+
+  describe "resolve_auto/3" do
+    test "three years of daily data turn daily off and yearly on" do
+      timestamps = [~D[2020-01-01], ~D[2023-01-01]]
+      config = %{yearly: %{enabled: :auto}, weekly: %{enabled: :auto}, daily: %{enabled: :auto}}
+
+      resolved = Seasonality.resolve_auto(config, timestamps, {1, :day})
+
+      assert resolved == %{
+               yearly: %{enabled: true},
+               weekly: %{enabled: true},
+               daily: %{enabled: false}
+             }
+    end
+
+    test "explicit true and false are left alone" do
+      config = %{yearly: %{enabled: true}, weekly: %{enabled: false}, daily: %{enabled: false}}
+
+      assert Seasonality.resolve_auto(config, [~D[2023-01-01], ~D[2023-01-02]], {1, :day}) ==
+               config
     end
   end
 end

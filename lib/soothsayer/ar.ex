@@ -6,6 +6,9 @@ defmodule Soothsayer.AR do
   Supports both linear AR and deep AR-Net architectures with configurable hidden layers.
   """
 
+  alias Soothsayer.Frequency
+  alias Soothsayer.Timestamp
+
   # Network Building
 
   @doc """
@@ -276,75 +279,80 @@ defmodule Soothsayer.AR do
   end
 
   @doc """
-  Decides which origin and step a prediction date is forecast from.
+  Decides which origin and step a prediction timestamp is forecast from.
 
-  Dates up to the last observed date are one step ahead of the day before
-  them. Later dates are forecast in blocks of `forecast_steps`: the first
-  block from the last observed date, the next block from the last date of the
-  first block, and so on. That is how NeuralProphet's maintainers recommend
-  going past `n_forecasts`.
+  Timestamps up to the last observed one are one step ahead of the step
+  before them. Later timestamps are forecast in blocks of `forecast_steps`:
+  the first block from the last observation, the next block from the end of
+  the first block, and so on. That is how NeuralProphet's maintainers
+  recommend going past `n_forecasts`. Steps are steps of `frequency`, and a
+  timestamp off that grid raises `ArgumentError`.
 
   ## Examples
 
-      iex> Soothsayer.AR.origin_and_step(~D[2023-01-10], ~D[2023-01-31], 3)
+      iex> Soothsayer.AR.origin_and_step(~D[2023-01-10], ~D[2023-01-31], 3, {1, :day})
       {~D[2023-01-09], 1}
-      iex> Soothsayer.AR.origin_and_step(~D[2023-02-03], ~D[2023-01-31], 3)
+      iex> Soothsayer.AR.origin_and_step(~D[2023-02-03], ~D[2023-01-31], 3, {1, :day})
       {~D[2023-01-31], 3}
-      iex> Soothsayer.AR.origin_and_step(~D[2023-02-04], ~D[2023-01-31], 3)
+      iex> Soothsayer.AR.origin_and_step(~D[2023-02-04], ~D[2023-01-31], 3, {1, :day})
       {~D[2023-02-03], 1}
+      iex> Soothsayer.AR.origin_and_step(~N[2023-01-01 02:00:00], ~N[2023-01-01 00:00:00], 3, {1, :hour})
+      {~N[2023-01-01 00:00:00], 2}
 
   """
-  @spec origin_and_step(Date.t(), Date.t(), pos_integer()) :: {Date.t(), pos_integer()}
-  def origin_and_step(date, last_observed_date, forecast_steps) do
-    distance = Date.diff(date, last_observed_date)
+  @spec origin_and_step(Timestamp.input(), Timestamp.input(), pos_integer(), Frequency.t()) ::
+          {Timestamp.input(), pos_integer()}
+  def origin_and_step(timestamp, last_observed_timestamp, forecast_steps, frequency) do
+    distance = Frequency.steps_between(last_observed_timestamp, timestamp, frequency)
 
     if distance <= 0 do
-      {Date.add(date, -1), 1}
+      {Frequency.shift(timestamp, -1, frequency), 1}
     else
       block = div(distance - 1, forecast_steps)
-      origin_date = Date.add(last_observed_date, block * forecast_steps)
-      {origin_date, distance - block * forecast_steps}
+      origin = Frequency.shift(last_observed_timestamp, block * forecast_steps, frequency)
+      {origin, distance - block * forecast_steps}
     end
   end
 
   @doc """
-  Builds a map of known values keyed by date from the data stored at fit time.
+  Builds a map of known values keyed by timestamp from the data stored at fit time.
 
   Values are in normalized y space, the same space the network predicts in.
 
   ## Parameters
 
-    * `training_data` - Map with `:dates` (list of dates) and `:y_normalized` (list of values)
+    * `training_data` - Map with `:timestamps` and `:y_normalized` (list of values)
 
   ## Returns
 
-    A map from `Date.t()` to the normalized value observed on that date.
+    A map from timestamp to the normalized value observed then.
 
   """
-  @spec known_values(%{dates: list(Date.t()), y_normalized: list(float())}) ::
-          %{Date.t() => float()}
-  def known_values(%{dates: dates, y_normalized: y_normalized}) do
-    Enum.zip(dates, y_normalized) |> Map.new()
+  @spec known_values(%{timestamps: list(Timestamp.input()), y_normalized: list(float())}) ::
+          %{Timestamp.input() => float()}
+  def known_values(%{timestamps: timestamps, y_normalized: y_normalized}) do
+    Enum.zip(timestamps, y_normalized) |> Map.new()
   end
 
   @doc """
-  Builds the AR input tensor for a list of origin dates.
+  Builds the AR input tensor for a list of origin timestamps.
 
-  For each origin, looks up the `lags` values ending on that day (the origin
-  itself and the days before it), oldest first, matching the column order
-  of `training_rows/3`. Origins where any of those days is unknown get a row
-  of zeros.
+  For each origin, looks up the `lags` values ending at it (the origin
+  itself and the steps before it), oldest first, matching the column order
+  of `training_rows/3`. Origins where any of those steps is unknown get a
+  row of zeros.
 
   ## Parameters
 
-    * `known_values` - Map from `Date.t()` to normalized value, see `known_values/1`
-    * `origin_dates` - List of origin dates, one per row
+    * `known_values` - Map from timestamp to normalized value, see `known_values/1`
+    * `origins` - List of origin timestamps, one per row
     * `lags` - Number of lagged values to include
+    * `frequency` - The step between lags, see `Soothsayer.Frequency`
 
   ## Examples
 
       iex> known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-03] => 3.0}
-      iex> Soothsayer.AR.build_input(known_values, [~D[2023-01-02], ~D[2023-01-03]], 2)
+      iex> Soothsayer.AR.build_input(known_values, [~D[2023-01-02], ~D[2023-01-03]], 2, {1, :day})
       #Nx.Tensor<
         f32[2][2]
         [
@@ -354,13 +362,18 @@ defmodule Soothsayer.AR do
       >
 
   """
-  @spec build_input(%{Date.t() => float()}, list(Date.t()), non_neg_integer()) :: Nx.Tensor.t()
-  def build_input(known_values, origin_dates, lags) do
+  @spec build_input(
+          %{Timestamp.input() => float()},
+          list(Timestamp.input()),
+          non_neg_integer(),
+          Frequency.t()
+        ) :: Nx.Tensor.t()
+  def build_input(known_values, origins, lags, frequency) do
     rows =
-      Enum.map(origin_dates, fn origin_date ->
+      Enum.map(origins, fn origin ->
         lagged_values =
           Enum.map((lags - 1)..0//-1, fn offset ->
-            Map.get(known_values, Date.add(origin_date, -offset))
+            Map.get(known_values, Frequency.shift(origin, -offset, frequency))
           end)
 
         if Enum.any?(lagged_values, &is_nil/1) do

@@ -8,6 +8,8 @@ defmodule Soothsayer.Events do
 
   alias Explorer.DataFrame
   alias Explorer.Series
+  alias Soothsayer.Frequency
+  alias Soothsayer.Timestamp
 
   # Network Building
 
@@ -168,16 +170,20 @@ defmodule Soothsayer.Events do
   end
 
   @doc """
-  Builds event features tensor from dates and events DataFrame.
+  Builds event features tensor from timestamps and an events DataFrame.
 
-  For each date, creates binary features indicating whether each event
-  (with its window offsets) occurs on that date.
+  For each timestamp, creates binary features indicating whether each event
+  (with its window offsets) occurs then. Window offsets are steps of
+  `frequency`, so on daily data a window of `-1..1` covers the day before
+  and after, and on hourly data the hour before and after. Event dates
+  given as plain dates mean midnight.
 
   ## Parameters
 
-    * `dates` - An Explorer Series of dates.
+    * `dates` - An Explorer Series of dates or naive datetimes.
     * `events_df` - A DataFrame with "event" and "ds" columns.
     * `events_config` - Map of event configurations.
+    * `frequency` - The data frequency, `{1, :day}` by default.
 
   ## Returns
 
@@ -199,13 +205,15 @@ defmodule Soothsayer.Events do
       >
 
   """
-  @spec build_features(Series.t(), DataFrame.t(), map()) :: Nx.Tensor.t() | nil
-  def build_features(_dates, _events_df, events_config) when events_config == %{} do
+  @spec build_features(Series.t(), DataFrame.t(), map(), Frequency.t()) :: Nx.Tensor.t() | nil
+  def build_features(dates, events_df, events_config, frequency \\ {1, :day})
+
+  def build_features(_dates, _events_df, events_config, _frequency) when events_config == %{} do
     nil
   end
 
-  def build_features(dates, events_df, events_config) do
-    dates_list = Series.to_list(dates)
+  def build_features(dates, events_df, events_config, frequency) do
+    dates_list = Timestamp.from_series(dates)
 
     # Build a map of event_name -> list of dates for quick lookup
     event_dates_map = build_event_dates_map(events_df)
@@ -219,7 +227,7 @@ defmodule Soothsayer.Events do
 
         lower..upper
         |> Enum.map(fn offset ->
-          build_feature_column(dates_list, event_dates, offset)
+          build_feature_column(dates_list, event_dates, offset, frequency)
         end)
       end)
 
@@ -236,19 +244,19 @@ defmodule Soothsayer.Events do
       %{}
     else
       event_names = events_df["event"] |> Series.to_list()
-      event_dates = events_df["ds"] |> Series.to_list()
+      event_dates = Timestamp.from_series(events_df["ds"])
 
       Enum.zip(event_names, event_dates)
       |> Enum.group_by(fn {name, _date} -> name end, fn {_name, date} -> date end)
     end
   end
 
-  defp build_feature_column(dates_list, event_dates, offset) do
+  defp build_feature_column(dates_list, event_dates, offset, frequency) do
     # For each date in dates_list, check if (date - offset) matches any event date
     # Equivalently: check if any (event_date + offset) matches date
     shifted_event_dates =
       event_dates
-      |> Enum.map(fn event_date -> Date.add(event_date, offset) end)
+      |> Enum.map(fn event_date -> Frequency.shift(event_date, offset, frequency) end)
       |> MapSet.new()
 
     dates_list

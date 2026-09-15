@@ -54,8 +54,10 @@ fitted = Soothsayer.fit(model, df, events: events_df)
 
 | Parameter | Description |
 |-----------|-------------|
-| `lower_window` | Days before event (use negative numbers) |
-| `upper_window` | Days after event (use positive numbers) |
+| `lower_window` | Steps before the event (use negative numbers) |
+| `upper_window` | Steps after the event (use positive numbers) |
+
+A step is one row of the data at its frequency: a day for daily data, an hour for hourly data. Event dates given as plain dates mean midnight, so on hourly data an event on `~D[2023-11-24]` with a window of `-1..1` covers 23:00 the day before, midnight and 01:00.
 
 ## Event Windows
 

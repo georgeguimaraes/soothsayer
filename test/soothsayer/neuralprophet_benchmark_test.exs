@@ -23,7 +23,6 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   alias Explorer.DataFrame
 
   @fixtures Path.expand("../fixtures/neuralprophet", __DIR__)
-  @validation_fraction 0.1
   @seed 42
 
   setup_all do

@@ -51,13 +51,13 @@ You can also get individual components to understand what's driving the forecast
 
 ```elixir
 components = Soothsayer.predict_components(fitted_model, future_dates_series)
-# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., ar: ..., events: ...}
+# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., daily_seasonality: ..., ar: ..., events: ...}
 ```
 
 To model special events like holidays or promotions:
 
 ```elixir
-# Define events with optional windows (days before/after)
+# Define events with optional windows (steps before/after, days here)
 model = Soothsayer.new(%{
   events: %{"black_friday" => %{lower_window: -1, upper_window: 1}}
 })
@@ -122,13 +122,14 @@ This is useful when you're not sure how many changepoints you need. Set more tha
 
 ### Seasonality
 
-Captures repeating patterns at fixed intervals. Soothsayer supports yearly and weekly seasonality using Fourier terms.
+Captures repeating patterns at fixed intervals. Soothsayer supports yearly, weekly and daily seasonality using Fourier terms.
 
 ```elixir
 Soothsayer.new(%{
   seasonality: %{
     yearly: %{enabled: true, fourier_terms: 6},
-    weekly: %{enabled: true, fourier_terms: 3}
+    weekly: %{enabled: true, fourier_terms: 3},
+    daily: %{enabled: :auto, fourier_terms: 6}
   }
 })
 ```
@@ -136,6 +137,8 @@ Soothsayer.new(%{
 **Yearly seasonality** captures patterns that repeat every year (holiday shopping, summer peaks, etc). More `fourier_terms` means more flexibility to fit complex seasonal shapes, but also more risk of overfitting.
 
 **Weekly seasonality** captures patterns that repeat every week (weekend dips, Monday spikes, etc). Usually needs fewer fourier terms than yearly.
+
+**Daily seasonality** captures patterns within the day (overnight lows, the afternoon peak) and only makes sense for sub-daily data. `enabled: :auto` turns it on when the rows are closer than a day apart and span at least two days, which is NeuralProphet's rule; yearly and weekly accept `:auto` too.
 
 | fourier_terms | Flexibility | Use when |
 |---------------|-------------|----------|
@@ -239,8 +242,8 @@ predictions = Soothsayer.predict(fitted_model, future_dates, events: future_even
 
 Windows allow events to affect surrounding days, not just the event date itself:
 
-- **`lower_window`**: Days before the event (use negative numbers). `-2` means the effect starts 2 days before.
-- **`upper_window`**: Days after the event. `1` means the effect extends 1 day after.
+- **`lower_window`**: Steps before the event (use negative numbers). `-2` means the effect starts 2 days before on daily data, 2 hours before on hourly data.
+- **`upper_window`**: Steps after the event. `1` means the effect extends 1 step after.
 
 Example: `%{lower_window: -1, upper_window: 1}` creates effects for the day before, the event day, and the day after (3 separate learned coefficients).
 
@@ -259,6 +262,7 @@ This shows how much each event (at each window position) adds to the forecast.
 
 ```elixir
 Soothsayer.new(%{
+  frequency: :auto,      # step between rows, or {amount, unit} like {1, :hour} (default: inferred)
   epochs: :auto,         # passes over the data, or a number (default: from the data size)
   learning_rate: :auto,  # or a number (default: found by a range test)
   schedule: :one_cycle,  # or :constant (default: one-cycle)
@@ -267,6 +271,8 @@ Soothsayer.new(%{
   seed: nil              # integer for reproducible fits (default: random)
 })
 ```
+
+`ds` can be a `:date` or a `{:naive_datetime, _}` column, so hourly or 5-minute data works the same as daily. The frequency is inferred from the most common gap between rows and drives auto-regression lags, forecast blocks and event windows.
 
 The defaults follow NeuralProphet. Training runs in shuffled minibatches, so one epoch is one pass over the data, and `batch_size` and `epochs` are picked from the number of rows when left at their defaults: small datasets get more passes, large ones fewer.
 

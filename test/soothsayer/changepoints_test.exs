@@ -336,7 +336,7 @@ defmodule Soothsayer.ChangepointsTest do
       assert Nx.shape(predictions) == {5, 1}
     end
 
-    test "stores first_date for prediction" do
+    test "stores first_timestamp for prediction" do
       :rand.seed(:exsss, {42, 42, 42})
 
       n_points = 50
@@ -355,7 +355,7 @@ defmodule Soothsayer.ChangepointsTest do
 
       fitted_model = Soothsayer.fit(model, df)
 
-      assert fitted_model.config.first_date == start_date
+      assert fitted_model.config.first_timestamp == ~N[2023-01-01 00:00:00]
     end
   end
 end

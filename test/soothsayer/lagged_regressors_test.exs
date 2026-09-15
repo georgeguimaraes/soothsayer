@@ -23,7 +23,7 @@ defmodule Soothsayer.LaggedRegressorsTest do
     end
   end
 
-  describe "build_input/3" do
+  describe "build_input/4" do
     test "reads each regressor's window ending at the origin and raises on a missing date" do
       config = %{lagged_regressors: %{"temperature" => %{lags: 2}, "price" => %{lags: 1}}}
 
@@ -33,13 +33,18 @@ defmodule Soothsayer.LaggedRegressorsTest do
       }
 
       result =
-        LaggedRegressors.build_input(known_values, [~D[2023-01-02], ~D[2023-01-03]], config)
+        LaggedRegressors.build_input(
+          known_values,
+          [~D[2023-01-02], ~D[2023-01-03]],
+          config,
+          {1, :day}
+        )
 
       # columns: price (1 lag) then temperature (2 lags), sorted by name
       assert Nx.to_list(result) == [[5.0, 10.0, 11.0], [6.0, 11.0, 12.0]]
 
       assert_raise ArgumentError, ~r/"price" has no value for 2023-01-01/, fn ->
-        LaggedRegressors.build_input(known_values, [~D[2023-01-01]], config)
+        LaggedRegressors.build_input(known_values, [~D[2023-01-01]], config, {1, :day})
       end
     end
   end
@@ -124,6 +129,7 @@ defmodule Soothsayer.LaggedRegressorsTest do
           :trend,
           :yearly_seasonality,
           :weekly_seasonality,
+          :daily_seasonality,
           :ar,
           :events,
           :regressors,

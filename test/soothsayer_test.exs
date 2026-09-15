@@ -470,6 +470,7 @@ defmodule SoothsayerTest do
           :trend,
           :yearly_seasonality,
           :weekly_seasonality,
+          :daily_seasonality,
           :ar,
           :events,
           :regressors,
@@ -557,6 +558,7 @@ defmodule SoothsayerTest do
           :trend,
           :yearly_seasonality,
           :weekly_seasonality,
+          :daily_seasonality,
           :ar,
           :events,
           :regressors,
@@ -575,6 +577,113 @@ defmodule SoothsayerTest do
       assert_raise ArgumentError, ~r/seasonality.mode must be one of/, fn ->
         Soothsayer.new(%{seasonality: %{mode: :logarithmic}})
       end
+    end
+  end
+
+  describe "sub-daily data" do
+    defp hourly_frame(days) do
+      timestamps =
+        Enum.map(0..(days * 24 - 1), &NaiveDateTime.add(~N[2023-01-01 00:00:00], &1, :hour))
+
+      y =
+        Enum.map(timestamps, fn timestamp ->
+          hour = timestamp.hour
+          100 + 20 * :math.sin(2 * :math.pi() * hour / 24) + :rand.normal(0, 1)
+        end)
+
+      DataFrame.new(%{"ds" => timestamps, "y" => y})
+    end
+
+    test "infers the frequency, enables daily seasonality and forecasts by the hour" do
+      :rand.seed(:exsss, {7, 7, 7})
+      df = hourly_frame(10)
+
+      model =
+        Soothsayer.new(%{
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          ar: %{enabled: true, lags: 24, forecast_steps: 6},
+          trend: %{changepoints: 0},
+          epochs: 5,
+          seed: 1
+        })
+
+      fitted = Soothsayer.fit(model, df)
+
+      assert fitted.config.frequency == {1, :hour}
+      assert fitted.config.seasonality.daily.enabled == true
+      assert fitted.config.first_timestamp == ~N[2023-01-01 00:00:00]
+
+      # The next day, requested as its 24 hourly timestamps
+      next_day = Enum.map(1..24, &NaiveDateTime.add(~N[2023-01-10 23:00:00], &1, :hour))
+      components = Soothsayer.predict_components(fitted, Series.from_list(next_day))
+
+      assert Nx.shape(components.combined) == {24, 1}
+      assert components.daily_seasonality |> Nx.abs() |> Nx.sum() |> Nx.to_number() > 0
+
+      # A plain date means midnight and sits on the hourly grid
+      assert Nx.shape(Soothsayer.predict(fitted, Series.from_list([~D[2023-01-11]]))) == {1, 1}
+
+      assert_raise ArgumentError, ~r/not a whole number of 1 hour steps/, fn ->
+        Soothsayer.predict(fitted, Series.from_list([~N[2023-01-11 00:30:00]]))
+      end
+    end
+
+    test "date events line up with midnight on hourly data" do
+      :rand.seed(:exsss, {8, 8, 8})
+      df = hourly_frame(6)
+      events_df = DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-03]]})
+
+      model =
+        Soothsayer.new(%{
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          events: %{"sale" => %{lower_window: 0, upper_window: 0}},
+          trend: %{changepoints: 0},
+          epochs: 2
+        })
+
+      fitted = Soothsayer.fit(model, df, events: events_df)
+
+      hours = Enum.map(0..3, &NaiveDateTime.add(~N[2023-01-02 23:00:00], &1, :hour))
+
+      components =
+        Soothsayer.predict_components(fitted, Series.from_list(hours), events: events_df)
+
+      [before, midnight, after_one, after_two] = Nx.to_flat_list(components.events)
+
+      # The event feature is z-scored, so hours without the event share one
+      # baseline value and only midnight on the event day moves off it.
+      assert before == after_one and after_one == after_two
+      assert midnight != before
+    end
+
+    test "rejects unsorted timestamps and non-date ds columns" do
+      model = Soothsayer.new(%{epochs: 1})
+
+      unsorted =
+        DataFrame.new(%{
+          "ds" => [~D[2023-01-02], ~D[2023-01-01], ~D[2023-01-03]],
+          "y" => [1.0, 2.0, 3.0]
+        })
+
+      assert_raise ArgumentError,
+                   ~r/strictly increasing, found 2023-01-01 after 2023-01-02/,
+                   fn ->
+                     Soothsayer.fit(model, unsorted)
+                   end
+
+      strings = DataFrame.new(%{"ds" => ["2023-01-01", "2023-01-02"], "y" => [1.0, 2.0]})
+
+      assert_raise ArgumentError, ~r/must be a date or naive datetime series/, fn ->
+        Soothsayer.fit(model, strings)
+      end
+    end
+
+    test "rejects bad seasonality enabled values" do
+      assert_raise ArgumentError,
+                   ~r/seasonality.daily.enabled must be true, false or :auto/,
+                   fn ->
+                     Soothsayer.new(%{seasonality: %{daily: %{enabled: :always}}})
+                   end
     end
   end
 

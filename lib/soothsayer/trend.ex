@@ -16,6 +16,10 @@ defmodule Soothsayer.Trend do
   - `delta_j` = rate adjustments at each changepoint (learned)
   """
 
+  alias Soothsayer.Timestamp
+
+  @seconds_per_day 86_400
+
   # Network Building
 
   @doc """
@@ -121,11 +125,11 @@ defmodule Soothsayer.Trend do
   end
 
   @doc """
-  Computes changepoint positions as dates from the data.
+  Computes changepoint positions as timestamps from the data.
 
   ## Parameters
 
-    * `dates` - List of dates in the dataset.
+    * `dates` - List of timestamps in the dataset.
     * `changepoints` - Number of changepoints to create.
     * `changepoints_range` - Fraction of data to place changepoints in (0-1).
 
@@ -140,8 +144,8 @@ defmodule Soothsayer.Trend do
       [~D[2023-01-17], ~D[2023-02-02], ~D[2023-02-18], ~D[2023-03-06], ~D[2023-03-22]]
 
   """
-  @spec compute_changepoint_positions(list(Date.t()), non_neg_integer(), float()) ::
-          list(Date.t())
+  @spec compute_changepoint_positions(list(Timestamp.input()), non_neg_integer(), float()) ::
+          list(Timestamp.input())
   def compute_changepoint_positions(_dates, 0, _changepoints_range), do: []
 
   def compute_changepoint_positions(dates, changepoints, changepoints_range) do
@@ -213,44 +217,49 @@ defmodule Soothsayer.Trend do
   end
 
   @doc """
-  Converts dates to numeric values (days since first date).
+  Converts timestamps to numeric values (days since the first timestamp,
+  fractional for sub-daily data).
 
   ## Parameters
 
-    * `dates` - List of dates.
-    * `first_date` - Reference date (typically first date in dataset).
+    * `timestamps` - List of dates or naive datetimes.
+    * `first_timestamp` - Reference point (typically the first timestamp in the dataset).
 
   ## Returns
 
-    A tensor of numeric values representing days since first_date.
+    A tensor of numeric values representing days since first_timestamp.
 
   ## Examples
 
       iex> Soothsayer.Trend.date_to_numeric([~D[2023-01-01], ~D[2023-01-02]], ~D[2023-01-01])
       #Nx.Tensor<f32[2] [0.0, 1.0]>
 
+      iex> Soothsayer.Trend.date_to_numeric([~N[2023-01-01 06:00:00]], ~D[2023-01-01])
+      #Nx.Tensor<f32[1] [0.25]>
+
   """
-  @spec date_to_numeric(list(Date.t()), Date.t()) :: Nx.Tensor.t()
-  def date_to_numeric(dates, first_date) do
-    dates
-    |> Enum.map(fn date -> Date.diff(date, first_date) * 1.0 end)
+  @spec date_to_numeric(list(Timestamp.input()), Timestamp.input()) :: Nx.Tensor.t()
+  def date_to_numeric(timestamps, first_timestamp) do
+    timestamps
+    |> Enum.map(&Timestamp.days_since(&1, first_timestamp))
     |> Nx.tensor()
     |> Nx.as_type({:f, 32})
   end
 
   @doc """
-  Builds trend features tensor and metadata from dates.
+  Builds trend features tensor and metadata from timestamps.
 
   ## Parameters
 
-    * `dates` - List of dates.
+    * `timestamps` - List of dates or naive datetimes.
     * `config` - Model configuration map with `:trend` key.
 
   ## Returns
 
     A tuple `{tensor, metadata}` where:
-    - `tensor` has shape `{n_dates, 1 + changepoints}`
-    - `metadata` contains `:first_date` and `:changepoint_positions`
+    - `tensor` has shape `{n_timestamps, 1 + changepoints}`
+    - `metadata` contains `:first_timestamp` and `:changepoint_positions`
+      (in days since the first timestamp)
 
   ## Examples
 
@@ -259,58 +268,68 @@ defmodule Soothsayer.Trend do
       iex> {tensor, metadata} = Soothsayer.Trend.build_features(dates, config)
       iex> Nx.shape(tensor)
       {3, 1}
-      iex> metadata.first_date
+      iex> metadata.first_timestamp
       ~D[2023-01-01]
 
   """
-  @spec build_features(list(Date.t()), map()) :: {Nx.Tensor.t(), map()}
-  def build_features(dates, config) do
-    first_date = List.first(dates)
+  @spec build_features(list(Timestamp.input()), map()) :: {Nx.Tensor.t(), map()}
+  def build_features(timestamps, config) do
+    first_timestamp = List.first(timestamps)
     changepoints = get_in(config, [:trend, :changepoints]) || 0
     changepoints_range = get_in(config, [:trend, :changepoints_range]) || 0.8
 
     changepoint_positions =
-      compute_numeric_changepoint_positions(dates, first_date, changepoints, changepoints_range)
+      compute_numeric_changepoint_positions(
+        timestamps,
+        first_timestamp,
+        changepoints,
+        changepoints_range
+      )
 
-    t = date_to_numeric(dates, first_date) |> Nx.new_axis(-1)
+    t = date_to_numeric(timestamps, first_timestamp) |> Nx.new_axis(-1)
     changepoint_features = build_changepoint_features(t, changepoint_positions)
     tensor = build_trend_input(t, changepoint_features)
 
     metadata = %{
-      first_date: first_date,
+      first_timestamp: first_timestamp,
       changepoint_positions: changepoint_positions
     }
 
     {tensor, metadata}
   end
 
-  defp compute_numeric_changepoint_positions(dates, first_date, changepoints, changepoints_range) do
-    changepoint_dates = compute_changepoint_positions(dates, changepoints, changepoints_range)
-    Enum.map(changepoint_dates, fn date -> Date.diff(date, first_date) * 1.0 end)
+  defp compute_numeric_changepoint_positions(
+         timestamps,
+         first_timestamp,
+         changepoints,
+         changepoints_range
+       ) do
+    timestamps
+    |> compute_changepoint_positions(changepoints, changepoints_range)
+    |> Enum.map(&Timestamp.days_since(&1, first_timestamp))
   end
 
   @doc """
-  Converts numeric values back to dates.
-
-  ## Parameters
-
-    * `numeric` - List of numeric values (days since first_date).
-    * `first_date` - Reference date.
-
-  ## Returns
-
-    A list of dates.
+  Converts numeric values (days since `first_timestamp`) back to timestamps,
+  dates when the reference is a date and naive datetimes otherwise.
 
   ## Examples
 
       iex> Soothsayer.Trend.numeric_to_date([0.0, 1.0], ~D[2023-01-01])
       [~D[2023-01-01], ~D[2023-01-02]]
 
+      iex> Soothsayer.Trend.numeric_to_date([0.5], ~N[2023-01-01 00:00:00])
+      [~N[2023-01-01 12:00:00]]
+
   """
-  @spec numeric_to_date(list(number()), Date.t()) :: list(Date.t())
-  def numeric_to_date(numeric, first_date) do
+  @spec numeric_to_date(list(number()), Timestamp.input()) :: list(Timestamp.input())
+  def numeric_to_date(numeric, %Date{} = first_date) do
+    Enum.map(numeric, fn days -> Date.add(first_date, trunc(days)) end)
+  end
+
+  def numeric_to_date(numeric, %NaiveDateTime{} = first_timestamp) do
     Enum.map(numeric, fn days ->
-      Date.add(first_date, trunc(days))
+      NaiveDateTime.add(first_timestamp, round(days * @seconds_per_day), :second)
     end)
   end
 end
