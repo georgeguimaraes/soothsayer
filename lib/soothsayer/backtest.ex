@@ -48,7 +48,9 @@ defmodule Soothsayer.Backtest do
     `origin`, `ds`, `step`, `y` and `yhat`. Validation dates whose `y` is
     missing (nil or NaN) can't be scored and are left out of both; they
     still flow into the history each forecast is made from, where they are
-    imputed like training data (see `Soothsayer.MissingData`).
+    imputed like training data (see `Soothsayer.MissingData`). Forecasts
+    that come out NaN, because their lags reach into a gap that couldn't be
+    imputed, are left out the same way.
 
   """
   @spec run(Soothsayer.Model.t(), DataFrame.t(), keyword()) :: result()
@@ -137,7 +139,9 @@ defmodule Soothsayer.Backtest do
         target_dates
         |> Enum.zip(predicted)
         |> Enum.with_index(1)
-        |> Enum.reject(fn {{date, _yhat}, _step} -> missing?(actual_by_date[date]) end)
+        |> Enum.reject(fn {{date, yhat}, _step} ->
+          missing?(actual_by_date[date]) or missing?(yhat)
+        end)
         |> Enum.map(fn {{date, yhat}, step} ->
           %{origin: origin_date, ds: date, step: step, y: actual_by_date[date], yhat: yhat}
         end)

@@ -80,9 +80,10 @@ defmodule Soothsayer.MissingData do
   end
 
   @doc """
-  Puts the history passed to `Soothsayer.predict/3` on the frequency grid
-  and imputes its `y` values like training data. Values still missing come
-  back as `nil`.
+  Puts the history passed to `Soothsayer.predict/3` on the frequency grid,
+  drops the rows at the end whose `y` is missing (those are forecast like
+  the future instead) and imputes the rest like training data. Values
+  still missing come back as `nil`.
   """
   @spec fill_history(list(Timestamp.t()), list(number() | :nan | nil), Frequency.t(), map()) ::
           {list(Timestamp.t()), list(float() | nil)}
@@ -96,6 +97,7 @@ defmodule Soothsayer.MissingData do
       end)
 
     {timestamps, columns} = regrid(timestamps, %{"y" => values}, frequency)
+    {timestamps, columns} = drop_trailing_missing_targets(timestamps, columns)
     columns = impute_columns(columns, ["y"], missing_config)
     {timestamps, columns["y"]}
   end

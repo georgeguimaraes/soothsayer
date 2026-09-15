@@ -356,7 +356,9 @@ defmodule Soothsayer.AR do
   For each origin, looks up the `lags` values ending at it (the origin
   itself and the steps before it), oldest first, matching the column order
   of `training_samples/4`. Origins where any of those steps is unknown get a
-  row of zeros.
+  row of NaN, so their forecast comes out as NaN instead of a number built
+  on made-up lags. That is what the first `lags` timestamps of the training
+  data get, and any origin next to a gap that couldn't be imputed.
 
   ## Parameters
 
@@ -393,7 +395,7 @@ defmodule Soothsayer.AR do
           end)
 
         if Enum.any?(lagged_values, &is_nil/1) do
-          List.duplicate(0.0, lags)
+          List.duplicate(:nan, lags)
         else
           lagged_values
         end

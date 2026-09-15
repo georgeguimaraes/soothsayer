@@ -489,6 +489,60 @@ defmodule Soothsayer.ARTest do
       assert abs(with_history - without_history) > 3
     end
 
+    test "in-sample forecasts whose lags reach before the data are NaN" do
+      {dates, y} = ar1_series(~D[2022-01-01], 400, 100.0)
+      fitted_model = Soothsayer.fit(ar_only_model(), DataFrame.new(%{"ds" => dates, "y" => y}))
+      lags = fitted_model.config.ar.lags
+
+      predictions = Soothsayer.predict(fitted_model, Series.from_list(dates))
+      yhat = Series.to_list(predictions["yhat"])
+      ar = Series.to_list(predictions["ar"])
+
+      assert Enum.take(yhat, lags) == List.duplicate(:nan, lags)
+      assert Enum.take(ar, lags) == List.duplicate(:nan, lags)
+      assert yhat |> Enum.drop(lags) |> Enum.all?(&is_float/1)
+      assert predictions["trend"] |> Series.to_list() |> Enum.all?(&is_float/1)
+    end
+
+    test "a history ending in missing values is forecast from its last known value" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 100.0)
+      fitted_model = Soothsayer.fit(ar_only_model(), DataFrame.new(%{"ds" => dates, "y" => y}))
+
+      last_training_date = List.last(dates)
+      history_dates = Enum.map(1..30, fn i -> Date.add(last_training_date, i) end)
+      history_values = List.duplicate(100.0, 26) ++ [106.0, nil, nil, :nan]
+      with_trailing_gap = DataFrame.new(%{"ds" => history_dates, "y" => history_values})
+      truncated = DataFrame.head(with_trailing_gap, 27)
+
+      target = Series.from_list([Date.add(last_training_date, 31)])
+
+      from_gap = Soothsayer.predict(fitted_model, target, history: with_trailing_gap)["yhat"][0]
+      from_truncated = Soothsayer.predict(fitted_model, target, history: truncated)["yhat"][0]
+
+      assert is_float(from_gap)
+      assert from_gap == from_truncated
+    end
+
+    test "forecasting past lags that couldn't be imputed gives NaN" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 100.0)
+
+      model =
+        Soothsayer.new(%{ar: %{enabled: true, lags: 3}, missing: %{impute: false}, epochs: 3})
+
+      fitted_model = Soothsayer.fit(model, DataFrame.new(%{"ds" => dates, "y" => y}))
+
+      last_training_date = List.last(dates)
+      history_dates = Enum.map(1..30, fn i -> Date.add(last_training_date, i) end)
+      history_values = List.duplicate(100.0, 27) ++ [nil, 100.0, 100.0]
+      history = DataFrame.new(%{"ds" => history_dates, "y" => history_values})
+
+      targets = Series.from_list(Enum.map(31..33, &Date.add(last_training_date, &1)))
+      predictions = Soothsayer.predict(fitted_model, targets, history: history)
+
+      assert Series.to_list(predictions["yhat"]) == [:nan, :nan, :nan]
+      assert predictions["trend"] |> Series.to_list() |> Enum.all?(&is_float/1)
+    end
+
     test "history with missing values is imputed before seeding the lags" do
       {dates, y} = ar1_series(~D[2022-01-01], 730, 100.0)
       fitted_model = Soothsayer.fit(ar_only_model(), DataFrame.new(%{"ds" => dates, "y" => y}))

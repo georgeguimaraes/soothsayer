@@ -64,7 +64,7 @@ defmodule Soothsayer.ARModuleTest do
       assert Nx.to_flat_list(result) == [2.0, 3.0, 3.0, 4.0, 4.0, 5.0]
     end
 
-    test "returns zeros when any lagged day is unknown" do
+    test "returns NaN when any lagged day is unknown" do
       known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-04] => 4.0}
 
       # 01-01 lacks 12-31, 01-04 lacks 01-03 (a gap), 01-02 has both
@@ -76,7 +76,7 @@ defmodule Soothsayer.ARModuleTest do
           {1, :day}
         )
 
-      assert Nx.to_flat_list(result) == [0.0, 0.0, 0.0, 0.0, 1.0, 2.0]
+      assert Nx.to_flat_list(result) == [:nan, :nan, :nan, :nan, 1.0, 2.0]
     end
   end
 

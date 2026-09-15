@@ -70,11 +70,19 @@ The regressors dataframe passed to `predict` is not imputed: a missing value the
 
 ## Predicting with history
 
-The `history:` dataframe given to `predict` (observations newer than the training data, see [Auto-Regression](autoregression.md)) gets the same treatment as training data with lags: it is put on the frequency grid and its `y` is imputed with the model's limits. What stays missing is simply unknown, and a forecast origin whose lags reach into it falls back to zero lags, as described in the auto-regression guide.
+The `history:` dataframe given to `predict` (observations newer than the training data, see [Auto-Regression](autoregression.md)) gets the same treatment as training data with lags: it is put on the frequency grid, rows at the end with a missing `y` are dropped, and the rest is imputed with the model's limits. The dropped tail is forecast like any other future step, from the last known value. What stays missing in the middle is unknown, and a timestamp whose lags reach into it gets NaN for `yhat` and `ar`. That includes the future: forecasting past the last known value needs its lags known, or every step after it is NaN.
+
+The same holds for the training data itself: predicting the first `lags` timestamps of the training range, or the steps right after a gap that stayed open, gives NaN. Drop those rows before plotting.
 
 ## Backtest
 
-`Soothsayer.backtest/3` fits on the first part of the data with everything above and forecasts the rest origin by origin. A validation date whose `y` is missing can't be scored, so it is left out of the metrics and of the predictions frame, but it still flows into the history the later forecasts are made from, where it is imputed.
+`Soothsayer.backtest/3` fits on the first part of the data with everything above and forecasts the rest origin by origin. A validation date whose `y` is missing can't be scored, so it is left out of the metrics and of the predictions frame, but it still flows into the history the later forecasts are made from, where it is imputed. A forecast that comes out NaN, because its lags reach into a gap that stayed open, is left out the same way.
+
+## Two decisions that differ from NeuralProphet
+
+**Which samples `drop_samples` skips.** A sample is skipped when any column has a missing value anywhere in its widest window: the longest lag count among the target and the lagged regressors back from the origin, and `forecast_steps` ahead. NeuralProphet checks each input against its own window, so with a lagged regressor that has more lags than the AR component it can keep a sample whose target is missing only in that extra stretch. Soothsayer drops it. The difference is a handful of samples next to gaps longer than the imputation limits, and only in that configuration.
+
+**Regressors at predict are not imputed.** NeuralProphet runs the same imputation over the regressors dataframe passed to `predict`. Soothsayer raises on a missing cell there, naming the regressor and the timestamp, the same as for a missing row. That frame is usually future values you assembled yourself, so a hole in it is more likely a bug upstream than a sensor outage, and a forecast quietly built on a filled-in regressor would be wrong without saying so. Fill it first with `Explorer.Series.fill_missing/2` if that is what you want.
 
 ## Log lines
 

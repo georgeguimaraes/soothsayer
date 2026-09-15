@@ -339,10 +339,12 @@ pred_with_ar = Soothsayer.predict(fitted_with_ar, df_ar["ds"])["yhat"]
 ```
 
 ```elixir
+# The first 7 rows have no lags to forecast from and are NaN, drop them for the plot
 df_ar_compare =
   df_ar
   |> DataFrame.put("no_ar", pred_no_ar)
   |> DataFrame.put("with_ar", pred_with_ar)
+  |> DataFrame.filter(not is_nan(with_ar))
 
 Vl.new(width: 800, height: 400, title: "Trend Only (orange) vs Trend + AR (purple)")
 |> Vl.data_from_values(df_ar_compare)
@@ -609,6 +611,7 @@ energy_predictions = Soothsayer.predict(fitted_energy, real_df["ds"])
 real_df_pred =
   real_df
   |> DataFrame.put("yhat", energy_predictions["yhat"])
+  |> DataFrame.filter(not is_nan(yhat))
 
 Vl.new(width: 800, height: 400, title: "Energy Prices: Actual vs Predicted")
 |> Vl.data_from_values(real_df_pred, only: ["ds", "y", "yhat"])

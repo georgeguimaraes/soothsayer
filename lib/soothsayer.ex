@@ -441,6 +441,11 @@ defmodule Soothsayer do
     The component columns add up to `"yhat"`. Use `predict_components/3`
     for the same values as tensors.
 
+    With auto-regression, a timestamp whose lags are unknown (the first
+    `ar.lags` timestamps of the training data, or the steps after a gap
+    that couldn't be imputed) gets NaN for `"yhat"`, `"ar"` and the
+    quantiles rather than a forecast built on made-up lags.
+
   ## Examples
 
       iex> fitted_model = Soothsayer.fit(model, training_data)
@@ -859,8 +864,10 @@ defmodule Soothsayer do
   end
 
   # History gets the same treatment as training data with lags: put on the
-  # frequency grid and imputed. Values still missing stay unknown, and the
-  # origins whose lags need them fall back to zero lags.
+  # frequency grid, trailing gap dropped, the rest imputed. Values still
+  # missing stay unknown, and a forecast whose lags need them is NaN. The
+  # last observed timestamp is the last one with a known value, so a
+  # trailing gap is forecast like the future rather than looked up.
   defp known_values(model, %DataFrame{} = history) do
     validate_history!(history)
     %{mean: mean, std: std} = model.config.normalization.y
@@ -887,7 +894,7 @@ defmodule Soothsayer do
     {training_values, last_training_timestamp} = known_values(model, nil)
 
     {Map.merge(training_values, history_known),
-     Enum.max([last_training_timestamp | history_timestamps], NaiveDateTime)}
+     Enum.max([last_training_timestamp | Map.keys(history_known)], NaiveDateTime)}
   end
 
   # Forecasts the steps between the last observed timestamp and the latest
@@ -928,8 +935,11 @@ defmodule Soothsayer do
 
     %{combined: combined} = Model.predict(model, inputs)
 
+    # A block whose lags reach into a gap that couldn't be imputed comes out
+    # NaN. Those stay unknown, so everything forecast from them is NaN too.
     block_timestamps
     |> Enum.zip(Nx.to_flat_list(combined))
+    |> Enum.reject(fn {_timestamp, value} -> value == :nan end)
     |> Enum.reduce(known_values, fn {timestamp, value}, acc -> Map.put(acc, timestamp, value) end)
   end
 

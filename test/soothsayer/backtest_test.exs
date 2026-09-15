@@ -96,6 +96,40 @@ defmodule Soothsayer.BacktestTest do
       assert result.metrics.mean_absolute_error == result.metrics.mean_absolute_error
     end
 
+    test "forecasts whose lags reach into a gap that couldn't be imputed are not scored" do
+      :rand.seed(:exsss, {7, 7, 7})
+      dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()
+
+      {y, _} =
+        Enum.map_reduce(dates, 0.0, fn _, previous ->
+          value = 0.7 * previous + :rand.normal(0, 1)
+          {50 + value, value}
+        end)
+
+      # the 11th validation row (of 36) is missing and nothing may be imputed
+      y = List.replace_at(y, length(dates) - 36 + 10, :nan)
+      data = DataFrame.new(%{"ds" => dates, "y" => y})
+
+      model =
+        Soothsayer.new(%{
+          trend: %{enabled: false, changepoints: 0},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          ar: %{enabled: true, lags: 3},
+          missing: %{impute: false, drop_samples: true},
+          epochs: 3,
+          seed: 1
+        })
+
+      result = Soothsayer.backtest(model, data, validation_fraction: 0.1)
+      yhat = Series.to_list(result.predictions["yhat"])
+
+      refute :nan in yhat
+      refute :nan in Series.to_list(result.predictions["y"])
+      # the missing actual, plus the two forecasts whose lag window holds the gap
+      assert DataFrame.n_rows(result.predictions) == 33
+      assert is_float(result.metrics.mean_absolute_error)
+    end
+
     test "without auto-regression the horizon defaults to 1 and forecasts don't depend on the origin" do
       dates = Date.range(~D[2022-01-01], ~D[2022-06-30]) |> Enum.to_list()
 
