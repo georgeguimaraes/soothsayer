@@ -153,14 +153,15 @@ Captures dependencies on recent values. Enable this when today's value depends o
 Soothsayer.new(%{
   ar: %{
     enabled: true,
-    lags: 7           # use the last 7 values to predict the next one
+    lags: 7,           # use the last 7 values
+    forecast_steps: 1  # steps ahead forecast directly from them
   }
 })
 ```
 
 **Choosing `lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
 
-**Forecasting ahead:** dates inside the training data use the observed values as lags. Dates past the last observation are forecast one day at a time, with each prediction feeding the next day's lags, so errors compound over long horizons. If you have observations newer than the training data, pass them as `history:` to seed the lags without refitting:
+**Forecasting ahead:** dates inside the training data use the observed values as lags. Dates past the last observation are forecast in blocks of `forecast_steps` directly from the last real values, then the next block from those predictions, and so on. With the default `forecast_steps: 1` that is one day at a time with errors compounding; set `forecast_steps: 7` to learn a separate weight vector for each of the next 7 days, NeuralProphet's `n_forecasts`. If you have observations newer than the training data, pass them as `history:` to seed the lags without refitting:
 
 ```elixir
 Soothsayer.predict(fitted_model, future_dates, history: recent_df)  # recent_df has "ds" and "y"
@@ -363,8 +364,8 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 |---------|--------|---------------|------------|------------------|-------|
 | Peyton Manning (daily) | MAE | 0.350 | 0.286 | 0.29 to 0.35 | identical configuration |
 | Peyton Manning (daily) | RMSE | 0.501 | 0.473 | 0.47 to 0.54 | identical configuration |
-| Energy price (daily, AR 14 lags + temperature) | MAE | 5.40 | 4.96 | 4.80 to 5.28 | one step ahead vs NeuralProphet's 7-step average; temperature adds nothing one step ahead (4.66 to 5.19 without it) |
-| Energy price (daily, AR 14 lags + temperature) | RMSE | 6.71 | 6.31 | 6.06 to 6.71 | same caveat |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature) | MAE | 5.40 | 5.56 | 5.48 to 5.96 | identical configuration and metric (average over horizons 1 to 7); NeuralProphet also lagged temperature |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature) | RMSE | 6.71 | 6.93 | 6.88 to 7.54 | same |
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.1 | 22.0 to 30.7 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 25.0 | 24.1 to 33.2 | same caveat |
 

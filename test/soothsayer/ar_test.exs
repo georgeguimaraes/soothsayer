@@ -513,4 +513,92 @@ defmodule Soothsayer.ARTest do
       end
     end
   end
+
+  describe "direct multi-step forecasting" do
+    defp multi_step_model(overrides) do
+      Soothsayer.new(
+        Map.merge(
+          %{
+            trend: %{enabled: false, changepoints: 0},
+            seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+            ar: %{enabled: true, lags: 3, forecast_steps: 3},
+            epochs: 50,
+            seed: 11
+          },
+          overrides
+        )
+      )
+    end
+
+    test "learns one weight vector per step: the AR(1) coefficient decays with the horizon" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 100.0)
+
+      fitted_model =
+        Soothsayer.fit(multi_step_model(%{}), DataFrame.new(%{"ds" => dates, "y" => y}))
+
+      %{"ar_dense_out" => %{kernel: kernel}} = Soothsayer.get_ar_weights(fitted_model)
+      assert Nx.shape(kernel) == {3, 3}
+
+      # Row 2 is the most recent lag. For y(t+s) = 0.9^s * y(t) + noise, the
+      # step-s weight on the most recent lag should be about 0.9^s.
+      [step_1, step_2, step_3] = kernel[2] |> Nx.to_flat_list()
+      assert_in_delta step_1, 0.9, 0.1
+      assert_in_delta step_2, 0.81, 0.1
+      assert_in_delta step_3, 0.73, 0.12
+    end
+
+    test "future dates are forecast in blocks and the same date gets the same value however it is asked for" do
+      {dates, y} = ar1_series(~D[2022-01-01], 730, 106.0)
+
+      fitted_model =
+        Soothsayer.fit(multi_step_model(%{}), DataFrame.new(%{"ds" => dates, "y" => y}))
+
+      last_date = List.last(dates)
+      future = fn from, to -> Series.from_list(Enum.map(from..to, &Date.add(last_date, &1))) end
+
+      all_six = Soothsayer.predict(fitted_model, future.(1, 6)) |> Nx.to_flat_list()
+      first_three = Soothsayer.predict(fitted_model, future.(1, 3)) |> Nx.to_flat_list()
+      just_fifth = Soothsayer.predict(fitted_model, future.(5, 5)) |> Nx.to_flat_list()
+
+      assert Enum.take(all_six, 3) == first_three
+      assert [Enum.at(all_six, 4)] == just_fifth
+
+      # The first block sees the real last value (106) directly at every step
+      [step_1, step_2, step_3 | _] = all_six
+      assert_in_delta step_1, 105.4, 1.0
+      assert_in_delta step_2, 104.9, 1.2
+      assert_in_delta step_3, 104.4, 1.4
+    end
+
+    test "works with L1 regularization" do
+      {dates, y} = ar1_series(~D[2022-01-01], 200, 100.0)
+
+      fitted_model =
+        Soothsayer.fit(
+          multi_step_model(%{
+            ar: %{enabled: true, lags: 3, forecast_steps: 3, regularization: 0.01},
+            epochs: 3
+          }),
+          DataFrame.new(%{"ds" => dates, "y" => y})
+        )
+
+      %{"ar_dense_out" => %{kernel: kernel}} = Soothsayer.get_ar_weights(fitted_model)
+      assert Nx.shape(kernel) == {3, 3}
+
+      predictions =
+        Soothsayer.predict(fitted_model, Series.from_list([Date.add(List.last(dates), 2)]))
+
+      assert Nx.shape(predictions) == {1, 1}
+    end
+
+    test "forecast_steps needs lags and must be a positive integer" do
+      assert_raise ArgumentError, ~r/forecast_steps > 1 needs auto-regression/, fn ->
+        Soothsayer.new(%{ar: %{forecast_steps: 3}})
+      end
+
+      assert_raise ArgumentError, ~r/positive integer/, fn ->
+        Soothsayer.new(%{ar: %{enabled: true, lags: 2, forecast_steps: 0}})
+      end
+    end
+  end
 end

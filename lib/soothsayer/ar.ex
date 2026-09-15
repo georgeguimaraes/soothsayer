@@ -46,20 +46,42 @@ defmodule Soothsayer.AR do
   @spec build_component(Axon.t() | nil, map()) :: Axon.t()
   def build_component(nil, _config), do: Axon.constant(0)
 
-  def build_component(input, %{ar: %{enabled: true} = ar_config}) do
+  def build_component(input, %{ar: %{enabled: true} = ar_config} = config) do
     layers = Map.get(ar_config, :layers, [])
-    build_ar_network(input, layers)
+    steps = forecast_steps(config)
+
+    input
+    |> build_hidden_layers(layers)
+    |> Axon.dense(steps, activation: :linear, name: "ar_dense_out")
+    |> select_forecast_step(steps)
   end
 
   def build_component(_input, _config), do: Axon.constant(0)
 
-  defp build_ar_network(input, []) do
-    Axon.dense(input, 1, activation: :linear, name: "ar_dense_out")
+  @doc """
+  Returns the configured number of direct forecast steps, defaulting to 1.
+
+  With `forecast_steps: k` the AR output layer has `k` units, one per step
+  ahead, and each training row or prediction picks its step with a one-hot
+  `"forecast_step"` input. This is NeuralProphet's `n_forecasts`.
+  """
+  @spec forecast_steps(map()) :: pos_integer()
+  def forecast_steps(%{ar: %{forecast_steps: steps}}) when is_integer(steps) and steps > 0 do
+    steps
   end
 
-  defp build_ar_network(input, layers) do
-    hidden = build_hidden_layers(input, layers)
-    Axon.dense(hidden, 1, activation: :linear, name: "ar_dense_out")
+  def forecast_steps(_config), do: 1
+
+  # With a single step the dense layer already outputs {batch, 1}. With more,
+  # the {batch, steps} output is masked down to the row's own step.
+  defp select_forecast_step(output, 1), do: output
+
+  defp select_forecast_step(output, steps) do
+    step_mask = Axon.input("forecast_step", shape: {nil, steps})
+
+    output
+    |> Axon.multiply(step_mask)
+    |> Axon.nx(&Nx.sum(&1, axes: [1], keep_axes: true), name: "ar_step_select")
   end
 
   defp build_hidden_layers(input, layers) do
@@ -74,21 +96,9 @@ defmodule Soothsayer.AR do
   # Feature Engineering
 
   @doc """
-  Creates lagged input features and corresponding targets for AR training.
+  Creates lagged input features and corresponding targets for one-step AR training.
 
-  Given a time series y and number of lags, creates sliding windows where each
-  window contains lags consecutive values, and the target is the next value.
-
-  ## Parameters
-
-    * `y` - A 1D tensor of time series values.
-    * `lags` - Number of lagged values to use as features.
-
-  ## Returns
-
-    A tuple `{lagged, targets}` where:
-    * `lagged` - Tensor of shape `{n_samples, lags}` with lagged features
-    * `targets` - Tensor of shape `{n_samples, 1}` with target values
+  Equivalent to `training_rows(y, lags, 1)`, kept for its simpler shape.
 
   ## Examples
 
@@ -101,25 +111,134 @@ defmodule Soothsayer.AR do
   @spec create_lagged_inputs(Nx.Tensor.t(), non_neg_integer()) ::
           {Nx.Tensor.t(), Nx.Tensor.t()}
   def create_lagged_inputs(y, lags) do
-    n = Nx.size(y)
-    n_samples = n - lags
+    %{lagged: lagged, targets: targets} = training_rows(y, lags, 1)
+    {lagged, targets}
+  end
 
-    # Build lagged features using Nx.slice for each lag position
-    # lag 0: y[0:n_samples], lag 1: y[1:n_samples+1], etc.
+  @doc """
+  Builds the AR training rows for direct multi-step forecasting.
+
+  Every origin (a position with `lags` values before it and `forecast_steps`
+  values after it) produces one row per step ahead. A row holds the `lags`
+  values ending at the origin, oldest first, the target `step` positions
+  after the origin, and a one-hot mask of its step. Rows are ordered step by
+  step, all origins for step 1 first, then all origins for step 2, and so on.
+
+  ## Returns
+
+    A map with:
+    * `:lagged` - `{rows, lags}` lag values
+    * `:targets` - `{rows, 1}` target values
+    * `:step_mask` - `{rows, forecast_steps}` one-hot masks, or `nil` when `forecast_steps` is 1
+    * `:target_indices` - list of the target position of each row in `y`, for
+      lining up the date-based features
+
+  ## Examples
+
+      iex> y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+      iex> rows = Soothsayer.AR.training_rows(y, 2, 2)
+      iex> Nx.to_list(rows.lagged)
+      [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0], [1.0, 2.0], [2.0, 3.0], [3.0, 4.0]]
+      iex> Nx.to_flat_list(rows.targets)
+      [3.0, 4.0, 5.0, 4.0, 5.0, 6.0]
+      iex> rows.target_indices
+      [2, 3, 4, 3, 4, 5]
+
+  """
+  @spec training_rows(Nx.Tensor.t(), pos_integer(), pos_integer()) :: %{
+          lagged: Nx.Tensor.t(),
+          targets: Nx.Tensor.t(),
+          step_mask: Nx.Tensor.t() | nil,
+          target_indices: list(non_neg_integer())
+        }
+  def training_rows(y, lags, forecast_steps) do
+    n_origins = Nx.size(y) - lags - forecast_steps + 1
+
+    if n_origins < 1 do
+      raise ArgumentError,
+            "Not enough data for #{lags} lags and #{forecast_steps} forecast steps: " <>
+              "need at least #{lags + forecast_steps} rows, got #{Nx.size(y)}"
+    end
+
     lagged =
       0..(lags - 1)
-      |> Enum.map(fn lag -> Nx.slice(y, [lag], [n_samples]) end)
+      |> Enum.map(fn lag -> Nx.slice(y, [lag], [n_origins]) end)
       |> Nx.stack(axis: 1)
       |> Nx.as_type({:f, 32})
 
-    # Targets are the values after each window: y[lags:n]
+    target_indices =
+      for step <- 1..forecast_steps, origin <- 0..(n_origins - 1), do: origin + lags - 1 + step
+
     targets =
       y
-      |> Nx.slice([lags], [n_samples])
+      |> Nx.take(Nx.tensor(target_indices))
       |> Nx.reshape({:auto, 1})
       |> Nx.as_type({:f, 32})
 
-    {lagged, targets}
+    step_numbers = for step <- 1..forecast_steps, _origin <- 1..n_origins, do: step
+
+    %{
+      lagged: Nx.concatenate(List.duplicate(lagged, forecast_steps), axis: 0),
+      targets: targets,
+      step_mask: step_mask(step_numbers, forecast_steps),
+      target_indices: target_indices
+    }
+  end
+
+  @doc """
+  One-hot encodes step numbers (1-based) into a `{rows, forecast_steps}` mask.
+
+  Returns `nil` when `forecast_steps` is 1, since the network has no
+  `"forecast_step"` input in that case.
+
+  ## Examples
+
+      iex> Soothsayer.AR.step_mask([1, 3], 3) |> Nx.to_list()
+      [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+
+  """
+  @spec step_mask(list(pos_integer()), pos_integer()) :: Nx.Tensor.t() | nil
+  def step_mask(_step_numbers, 1), do: nil
+
+  def step_mask(step_numbers, forecast_steps) do
+    step_numbers
+    |> Enum.map(&(&1 - 1))
+    |> Nx.tensor()
+    |> Nx.new_axis(-1)
+    |> Nx.equal(Nx.iota({forecast_steps}))
+    |> Nx.as_type({:f, 32})
+  end
+
+  @doc """
+  Decides which origin and step a prediction date is forecast from.
+
+  Dates up to the last observed date are one step ahead of the day before
+  them. Later dates are forecast in blocks of `forecast_steps`: the first
+  block from the last observed date, the next block from the last date of the
+  first block, and so on. That is how NeuralProphet's maintainers recommend
+  going past `n_forecasts`.
+
+  ## Examples
+
+      iex> Soothsayer.AR.origin_and_step(~D[2023-01-10], ~D[2023-01-31], 3)
+      {~D[2023-01-09], 1}
+      iex> Soothsayer.AR.origin_and_step(~D[2023-02-03], ~D[2023-01-31], 3)
+      {~D[2023-01-31], 3}
+      iex> Soothsayer.AR.origin_and_step(~D[2023-02-04], ~D[2023-01-31], 3)
+      {~D[2023-02-03], 1}
+
+  """
+  @spec origin_and_step(Date.t(), Date.t(), pos_integer()) :: {Date.t(), pos_integer()}
+  def origin_and_step(date, last_observed_date, forecast_steps) do
+    distance = Date.diff(date, last_observed_date)
+
+    if distance <= 0 do
+      {Date.add(date, -1), 1}
+    else
+      block = div(distance - 1, forecast_steps)
+      origin_date = Date.add(last_observed_date, block * forecast_steps)
+      {origin_date, distance - block * forecast_steps}
+    end
   end
 
   @doc """
@@ -143,27 +262,23 @@ defmodule Soothsayer.AR do
   end
 
   @doc """
-  Builds the AR input tensor for a list of prediction dates.
+  Builds the AR input tensor for a list of origin dates.
 
-  For each prediction date, looks up the values on the `lags` previous calendar
-  days in `known_values`, oldest first, matching the column order produced by
-  `create_lagged_inputs/2`. Dates where any of those days is unknown get a row
+  For each origin, looks up the `lags` values ending on that day (the origin
+  itself and the days before it), oldest first, matching the column order
+  of `training_rows/3`. Origins where any of those days is unknown get a row
   of zeros.
 
   ## Parameters
 
     * `known_values` - Map from `Date.t()` to normalized value, see `known_values/1`
-    * `prediction_dates` - List of dates to build AR inputs for
+    * `origin_dates` - List of origin dates, one per row
     * `lags` - Number of lagged values to include
-
-  ## Returns
-
-    A tensor of shape `{n_predictions, lags}` with AR features.
 
   ## Examples
 
       iex> known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-03] => 3.0}
-      iex> Soothsayer.AR.build_input(known_values, [~D[2023-01-03], ~D[2023-01-04]], 2)
+      iex> Soothsayer.AR.build_input(known_values, [~D[2023-01-02], ~D[2023-01-03]], 2)
       #Nx.Tensor<
         f32[2][2]
         [
@@ -174,11 +289,13 @@ defmodule Soothsayer.AR do
 
   """
   @spec build_input(%{Date.t() => float()}, list(Date.t()), non_neg_integer()) :: Nx.Tensor.t()
-  def build_input(known_values, prediction_dates, lags) do
+  def build_input(known_values, origin_dates, lags) do
     rows =
-      Enum.map(prediction_dates, fn date ->
+      Enum.map(origin_dates, fn origin_date ->
         lagged_values =
-          Enum.map(lags..1//-1, fn lag -> Map.get(known_values, Date.add(date, -lag)) end)
+          Enum.map((lags - 1)..0//-1, fn offset ->
+            Map.get(known_values, Date.add(origin_date, -offset))
+          end)
 
         if Enum.any?(lagged_values, &is_nil/1) do
           List.duplicate(0.0, lags)
@@ -197,6 +314,9 @@ defmodule Soothsayer.AR do
 
   For linear AR models, returns the output layer weights.
   For deep AR-Net models, returns all layer weights including hidden layers.
+
+  The output kernel has shape `{inputs, forecast_steps}`: row `i` is the
+  i-th oldest lag and column `s` holds the weights for step `s + 1` ahead.
 
   ## Parameters
 

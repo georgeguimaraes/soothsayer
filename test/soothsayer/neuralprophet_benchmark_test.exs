@@ -87,12 +87,14 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   end
 
   describe "Energy price daily" do
-    test "auto-regression with 14 lags and temperature as a future regressor, one step ahead" do
+    @energy_forecast_steps 7
+
+    test "auto-regression with 14 lags, 7 direct forecast steps and temperature as a regressor" do
       {train, validation} = load_and_split("energy_price_daily.csv")
 
       model =
         Soothsayer.new(%{
-          ar: %{enabled: true, lags: 14},
+          ar: %{enabled: true, lags: 14, forecast_steps: @energy_forecast_steps},
           trend: %{changepoints: 0},
           regressors: ["temperature"],
           seed: @seed
@@ -100,32 +102,58 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
       fitted_model = Soothsayer.fit(model, train)
 
-      # Validation actuals seed the lags, so every prediction is one step
-      # ahead from observed values, the same footing as NeuralProphet's
-      # validation metrics. Temperature is known for the validation dates.
-      predictions =
-        Soothsayer.predict(fitted_model, validation["ds"],
-          history: validation,
-          regressors: validation
-        )
-
-      metrics = validation_metrics(predictions, validation["y"])
+      metrics = multi_step_validation_metrics(fitted_model, validation, @energy_forecast_steps)
 
       report(
         "EnergyPriceDaily",
         metrics,
         %{mean_absolute_error: 5.40186, root_mean_squared_error: 6.70655},
-        notes:
-          "one step ahead vs NeuralProphet's 7-step average; NeuralProphet also lagged temperature"
+        notes: "same config and metric; NeuralProphet also lagged temperature"
       )
 
-      # Seed 42 gives 4.96 / 6.31. Across six seeds: MAE 4.80 to 5.28,
-      # RMSE 6.06 to 6.71. Without temperature it was 4.66 to 5.19 / 5.97
-      # to 6.59: one step ahead, 14 lags of price already carry the weather.
-      # Ceilings are 1.25x the worst seed.
-      assert metrics.mean_absolute_error < 6.6
-      assert metrics.root_mean_squared_error < 8.4
+      # Seed 42 gives 5.56 / 6.93. Across six seeds: MAE 5.48 to 5.96,
+      # RMSE 6.88 to 7.54. Ceilings are 1.25x the worst seed.
+      assert metrics.mean_absolute_error < 7.45
+      assert metrics.root_mean_squared_error < 9.45
     end
+  end
+
+  # NeuralProphet's validation MAE/RMSE average over every horizon 1..n_forecasts
+  # for every validation target. Reproduced here by forecasting a block from
+  # each origin in turn: the last training date, then each validation date,
+  # with history truncated at the origin so the lags are real observations.
+  defp multi_step_validation_metrics(fitted_model, validation, forecast_steps) do
+    validation_rows = DataFrame.n_rows(validation)
+
+    actual_by_date =
+      Enum.zip(Series.to_list(validation["ds"]), Series.to_list(validation["y"])) |> Map.new()
+
+    validation_dates = Series.to_list(validation["ds"])
+
+    pairs =
+      Enum.flat_map(0..(validation_rows - 1), fn origin_rows ->
+        target_dates = Enum.slice(validation_dates, origin_rows, forecast_steps)
+
+        history =
+          if origin_rows == 0, do: [], else: [history: DataFrame.head(validation, origin_rows)]
+
+        predictions =
+          fitted_model
+          |> Soothsayer.predict(
+            Series.from_list(target_dates),
+            [regressors: validation] ++ history
+          )
+          |> Nx.to_flat_list()
+
+        Enum.zip(predictions, Enum.map(target_dates, &actual_by_date[&1]))
+      end)
+
+    errors = pairs |> Enum.map(fn {predicted, actual} -> predicted - actual end) |> Nx.tensor()
+
+    %{
+      mean_absolute_error: errors |> Nx.abs() |> Nx.mean() |> Nx.to_number(),
+      root_mean_squared_error: errors |> Nx.pow(2) |> Nx.mean() |> Nx.sqrt() |> Nx.to_number()
+    }
   end
 
   # Loads a fixture and splits it like NeuralProphet's `split_df(valid_p: 0.1)`

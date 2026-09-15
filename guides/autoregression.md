@@ -30,7 +30,8 @@ model = Soothsayer.new(%{
     enabled: true,       # Enable AR component (default: false)
     lags: 7,           # Number of lagged values to use
     layers: [],          # Hidden layers for deep AR-Net (default: [])
-    regularization: nil  # L1 penalty on weights (default: nil)
+    regularization: nil, # L1 penalty on weights (default: nil)
+    forecast_steps: 1    # Steps ahead forecast directly (default: 1)
   }
 })
 ```
@@ -43,6 +44,7 @@ model = Soothsayer.new(%{
 | `lags` | `0` | Number of lagged values to use |
 | `layers` | `[]` | Hidden layer sizes for deep AR-Net |
 | `regularization` | `nil` | L1 penalty to encourage sparsity |
+| `forecast_steps` | `1` | How many steps ahead the AR head forecasts directly, see below |
 
 ## Linear AR
 
@@ -202,14 +204,32 @@ Regularization pushes unimportant lag weights toward zero, effectively selecting
 
 ## Forecasting Into the Future
 
-Each AR prediction needs the `lags` values before it. For dates inside the training data those are the real observations. For dates after the last observation, Soothsayer walks forward one day at a time: it predicts the first unknown day from the last `lags` observed values, records that prediction as the day's value, then predicts the next day from it, and so on up to the latest date you asked for.
+Each AR prediction needs the `lags` values ending at its origin. For dates inside the training data the origin is the day before and the lags are real observations. For dates after the last observation, Soothsayer forecasts in blocks of `forecast_steps`: the first block directly from the last observation, the next block from the end of the first block using its predictions as lags, and so on up to the latest date you asked for.
 
 ```elixir
 future_dates = Date.range(~D[2023-05-16], ~D[2023-06-14]) |> Enum.to_list()
 predictions = Soothsayer.predict(fitted_with_ar, Series.from_list(future_dates))
 ```
 
-This is recursive forecasting, so errors compound: the first few steps are sharp, and the AR contribution fades toward the level the model learned as the horizon grows. Trend, seasonality and events keep working at any horizon since they only depend on the date.
+With the default `forecast_steps: 1` every block is one day, so this is plain recursive forecasting: each day is predicted from the previous day's prediction and errors compound over the horizon. Trend, seasonality, events and regressors keep working at any horizon since they only depend on the date.
+
+### Direct multi-step forecasting
+
+Set `forecast_steps` to forecast several days directly from real observations instead of chaining predictions:
+
+```elixir
+model = Soothsayer.new(%{
+  ar: %{enabled: true, lags: 14, forecast_steps: 7}
+})
+```
+
+The AR output layer gets one unit per step, so the model learns a separate weight vector for "tomorrow", "two days out" and so on, all from the same lag window. Every training origin produces `forecast_steps` rows, one per step, and each row picks its unit with a one-hot step input. This is NeuralProphet's `n_forecasts`.
+
+Within a block there is no error compounding: day 7 is predicted from the last 14 real values just like day 1, using the weights trained for a 7-day horizon. Past the block, the next block starts from predicted values, which is the manual unrolling NeuralProphet's maintainers recommend for going beyond `n_forecasts`.
+
+Two practical notes. Direct forecasting for distant steps is harder, so accuracy on step 7 is lower than on step 1 whichever way you get there, and NeuralProphet suggests `forecast_steps` around half to one times `lags`. And each training origin needs `forecast_steps` days after it, so the last `forecast_steps - 1` days of your data only appear as targets, never as origins.
+
+`Soothsayer.get_ar_weights/1` returns the output kernel as `{inputs, forecast_steps}`: row `i` is the i-th oldest lag, column `s` the weights for step `s + 1`.
 
 ### Forecasting from newer data
 
@@ -226,9 +246,9 @@ Soothsayer.predict(fitted_with_ar, Series.from_list([~D[2023-06-15]]), history: 
 
 ### Assumptions
 
-AR forecasting assumes daily, gap-free data. Lags are looked up by calendar day, so a missing day inside the training data makes the days right after it fall back to zero lags, and the rollout always steps one day at a time.
+AR forecasting assumes daily, gap-free data. Lags are looked up by calendar day, so a missing day inside the training data makes the days right after it fall back to zero lags, and blocks always step one day at a time.
 
-NeuralProphet avoids recursion by training a direct multi-step head (`n_forecasts`) and refusing to forecast further than that without the caller feeding predictions back in. A direct multi-step option is planned for Soothsayer; the recursive walk above will stay as the way to go past it.
+When regressors are configured, the regressors dataframe must cover every date in every block up to the latest requested date, since those days are predicted too.
 
 ## Network Architecture
 

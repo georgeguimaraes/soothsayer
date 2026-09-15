@@ -46,7 +46,7 @@ defmodule Soothsayer do
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3}
       },
-      ar: %{enabled: false, lags: 0, layers: [], regularization: nil},
+      ar: %{enabled: false, lags: 0, layers: [], regularization: nil, forecast_steps: 1},
       regressors: [],
       epochs: 100,
       learning_rate: 0.01,
@@ -61,23 +61,51 @@ defmodule Soothsayer do
 
   @seasonality_modes [:additive, :multiplicative]
 
-  defp validate_config!(%{seasonality: %{mode: mode}}) when mode not in @seasonality_modes do
+  defp validate_config!(config) do
+    validate_seasonality_mode!(config)
+    validate_regressors!(config)
+    validate_forecast_steps!(config)
+  end
+
+  defp validate_seasonality_mode!(%{seasonality: %{mode: mode}})
+       when mode in @seasonality_modes do
+    :ok
+  end
+
+  defp validate_seasonality_mode!(%{seasonality: %{mode: mode}}) do
     raise ArgumentError,
           "seasonality.mode must be one of #{inspect(@seasonality_modes)}, got #{inspect(mode)}"
   end
 
-  defp validate_config!(%{regressors: regressors}) when not is_list(regressors) do
-    raise ArgumentError,
-          "regressors must be a list of column names, got #{inspect(regressors)}"
-  end
-
-  defp validate_config!(%{regressors: regressors}) do
+  defp validate_regressors!(%{regressors: regressors}) when is_list(regressors) do
     for name <- regressors, not is_binary(name) do
       raise ArgumentError, "regressors must be column name strings, got #{inspect(name)}"
     end
 
     :ok
   end
+
+  defp validate_regressors!(%{regressors: regressors}) do
+    raise ArgumentError,
+          "regressors must be a list of column names, got #{inspect(regressors)}"
+  end
+
+  defp validate_forecast_steps!(%{ar: %{forecast_steps: steps}})
+       when not (is_integer(steps) and steps > 0) do
+    raise ArgumentError, "ar.forecast_steps must be a positive integer, got #{inspect(steps)}"
+  end
+
+  defp validate_forecast_steps!(%{ar: %{forecast_steps: steps} = ar}) when steps > 1 do
+    unless ar.enabled and ar.lags > 0 do
+      raise ArgumentError,
+            "ar.forecast_steps > 1 needs auto-regression enabled with lags > 0. " <>
+              "Without lags every date is forecast directly, so there are no steps to pick from."
+    end
+
+    :ok
+  end
+
+  defp validate_forecast_steps!(_config), do: :ok
 
   @doc """
   Fits the Soothsayer model to the provided data.
@@ -121,55 +149,40 @@ defmodule Soothsayer do
     {y_full_normalized, y_mean, y_std} = normalize(Nx.new_axis(y_full, -1))
     y_full_normalized = Nx.flatten(y_full_normalized)
 
-    # Handle AR: create lagged inputs and truncate data
-    {y_normalized, ar_input, lags} =
-      if model.config.ar.enabled and model.config.ar.lags > 0 do
-        lags = model.config.ar.lags
-        {ar_lagged, ar_targets} = AR.create_lagged_inputs(y_full_normalized, lags)
-        {ar_targets, ar_lagged, lags}
-      else
-        {Nx.new_axis(y_full_normalized, -1), nil, 0}
-      end
-
-    # Build features using component modules
+    # Every training row targets one date. Without AR that is every date in
+    # order. With AR, rows come from (origin, step) pairs, see
+    # AR.training_rows/3, and each date-based feature is gathered at the
+    # row's target position so all inputs line up with the targets.
     dates = Series.to_list(processed_data["ds"])
     {trend_full, trend_metadata} = Trend.build_features(dates, model.config)
     seasonality = Seasonality.build_features(dates, model.config)
 
-    # Truncate inputs if AR is enabled (remove first lags rows)
-    {trend, yearly, weekly} =
-      if lags > 0 do
-        trend_cols = Nx.axis_size(trend_full, 1)
+    {y_normalized, ar_inputs, target_indices} =
+      if ar_enabled?(model) do
+        rows =
+          AR.training_rows(
+            y_full_normalized,
+            model.config.ar.lags,
+            AR.forecast_steps(model.config)
+          )
 
-        {
-          Nx.slice(trend_full, [lags, 0], [Nx.axis_size(trend_full, 0) - lags, trend_cols]),
-          Nx.slice(seasonality.yearly, [lags, 0], [
-            Nx.axis_size(seasonality.yearly, 0) - lags,
-            Nx.axis_size(seasonality.yearly, 1)
-          ]),
-          Nx.slice(seasonality.weekly, [lags, 0], [
-            Nx.axis_size(seasonality.weekly, 0) - lags,
-            Nx.axis_size(seasonality.weekly, 1)
-          ])
-        }
+        ar_inputs = %{"ar" => rows.lagged} |> put_step_mask(rows.step_mask)
+        {rows.targets, ar_inputs, rows.target_indices}
       else
-        {trend_full, seasonality.yearly, seasonality.weekly}
+        {Nx.new_axis(y_full_normalized, -1), %{}, Enum.to_list(0..(length(dates) - 1))}
       end
 
-    x = %{
-      "trend" => trend,
-      "yearly" => yearly,
-      "weekly" => weekly
-    }
-
-    # Add AR input if enabled
-    x = if ar_input != nil, do: Map.put(x, "ar", ar_input), else: x
-
-    # Events and regressors line up with the (possibly AR-truncated) targets
-    feature_dates = Enum.drop(dates, lags)
+    index_tensor = Nx.tensor(target_indices)
+    dates_by_index = List.to_tuple(dates)
+    feature_dates = Enum.map(target_indices, &elem(dates_by_index, &1))
 
     x =
-      x
+      %{
+        "trend" => Nx.take(trend_full, index_tensor, axis: 0),
+        "yearly" => Nx.take(seasonality.yearly, index_tensor, axis: 0),
+        "weekly" => Nx.take(seasonality.weekly, index_tensor, axis: 0)
+      }
+      |> Map.merge(ar_inputs)
       |> put_events_input(model, feature_dates, events_df)
       |> put_regressors_input(model, feature_dates, data)
 
@@ -261,13 +274,16 @@ defmodule Soothsayer do
 
   ## Auto-regression and future dates
 
-    When AR is enabled, each prediction needs the `lags` values before it.
-    Dates inside the training data (or `:history`) use the observed values.
-    Dates past the last observation are forecast one day at a time from the
-    last observation forward, feeding each prediction back in as the next
-    day's lag, up to the latest requested date. Errors compound over that
-    horizon, so far-out AR forecasts revert toward the level the model
-    learned. This assumes daily, gap-free data.
+    When AR is enabled, each prediction needs the `lags` values ending at
+    its origin. Dates inside the training data (or `:history`) are forecast
+    one step ahead of the day before them, from observed values. Dates past
+    the last observation are forecast in blocks of `ar.forecast_steps`: the
+    first block directly from the last observation (step 1, 2, ... ahead),
+    the next block from the end of the first, using its predictions as lags,
+    and so on up to the latest requested date. Within a block there is no
+    error compounding; across blocks there is, so far-out AR forecasts
+    revert toward the level the model learned. This assumes daily, gap-free
+    data.
 
   ## Returns
 
@@ -320,13 +336,19 @@ defmodule Soothsayer do
 
     x_input =
       if ar_enabled?(model) do
-        known_values =
-          model
-          |> known_values(history)
-          |> forecast_missing_values(model, prediction_dates, events_df, regressors_df)
+        observed_values = known_values(model, history)
+        last_observed_date = observed_values |> Map.keys() |> Enum.max(Date)
 
-        ar_input = AR.build_input(known_values, prediction_dates, model.config.ar.lags)
-        Map.put(x_input, "ar", ar_input)
+        known_values =
+          forecast_missing_values(
+            observed_values,
+            model,
+            prediction_dates,
+            events_df,
+            regressors_df
+          )
+
+        Map.merge(x_input, ar_inputs(model, known_values, prediction_dates, last_observed_date))
       else
         x_input
       end
@@ -357,6 +379,25 @@ defmodule Soothsayer do
   end
 
   defp ar_enabled?(model), do: model.config.ar.enabled and model.config.ar.lags > 0
+
+  defp put_step_mask(inputs, nil), do: inputs
+  defp put_step_mask(inputs, step_mask), do: Map.put(inputs, "forecast_step", step_mask)
+
+  # AR inputs for a list of prediction dates: the lags at each date's origin
+  # and, with more than one forecast step, the one-hot step mask. Origins
+  # are assigned by AR.origin_and_step/3, the same rule the rollout uses, so
+  # the rows here reproduce exactly the values the rollout stored.
+  defp ar_inputs(model, known_values, prediction_dates, last_observed_date) do
+    forecast_steps = AR.forecast_steps(model.config)
+
+    {origin_dates, step_numbers} =
+      prediction_dates
+      |> Enum.map(&AR.origin_and_step(&1, last_observed_date, forecast_steps))
+      |> Enum.unzip()
+
+    %{"ar" => AR.build_input(known_values, origin_dates, model.config.ar.lags)}
+    |> put_step_mask(AR.step_mask(step_numbers, forecast_steps))
+  end
 
   defp validate_regressors_option!(%Model{config: %{regressors: []}}, _regressors_df), do: :ok
 
@@ -408,47 +449,53 @@ defmodule Soothsayer do
     Map.merge(known_values(model, nil), Map.new(Enum.zip(history_dates, history_values)))
   end
 
-  # Walks day by day from the last known date to the latest prediction date,
-  # predicting each day from the days before it and recording the prediction
-  # as that day's known value. Returns the extended map. Nothing is stored on
-  # the model.
+  # Forecasts the days between the last observed date and the latest
+  # prediction date in blocks of forecast_steps, each block predicted
+  # directly from the block's origin, and records the predictions as known
+  # values so later blocks can use them as lags. Returns the extended map.
+  # Nothing is stored on the model.
   defp forecast_missing_values(known_values, model, prediction_dates, events_df, regressors_df) do
-    last_known_date = known_values |> Map.keys() |> Enum.max(Date)
+    last_observed_date = known_values |> Map.keys() |> Enum.max(Date)
     last_prediction_date = Enum.max(prediction_dates, Date)
 
-    if Date.compare(last_prediction_date, last_known_date) == :gt do
-      rollout_dates = Date.range(Date.add(last_known_date, 1), last_prediction_date)
-      roll_forward(known_values, model, Enum.to_list(rollout_dates), events_df, regressors_df)
+    if Date.compare(last_prediction_date, last_observed_date) == :gt do
+      Date.range(Date.add(last_observed_date, 1), last_prediction_date)
+      |> Enum.chunk_every(AR.forecast_steps(model.config))
+      |> Enum.reduce(known_values, fn block_dates, known_values ->
+        forecast_block(known_values, model, block_dates, events_df, regressors_df)
+      end)
     else
       known_values
     end
   end
 
-  defp roll_forward(known_values, model, rollout_dates, events_df, regressors_df) do
-    time_inputs = build_time_inputs(model, rollout_dates, events_df, regressors_df)
+  # Predicts one block of consecutive dates from the day before the first
+  # one. Returns known_values with the block's predictions added, in
+  # normalized y space so they can feed later lags.
+  defp forecast_block(known_values, model, block_dates, events_df, regressors_df) do
+    origin_date = Date.add(hd(block_dates), -1)
+    forecast_steps = AR.forecast_steps(model.config)
+    step_numbers = Enum.to_list(1..length(block_dates))
 
-    rollout_dates
-    |> Enum.with_index()
-    |> Enum.reduce(known_values, fn {date, row}, known_values ->
-      prediction = forecast_one_day(model, known_values, date, slice_row(time_inputs, row))
-      Map.put(known_values, date, prediction)
-    end)
-  end
-
-  defp slice_row(inputs, row) do
-    Map.new(inputs, fn {key, tensor} -> {key, Nx.slice_along_axis(tensor, row, 1, axis: 0)} end)
-  end
-
-  # Returns the day's combined prediction in normalized y space, ready to be
-  # used as a lag for the following day.
-  defp forecast_one_day(model, known_values, date, time_inputs) do
     inputs =
-      time_inputs
-      |> Map.put("ar", AR.build_input(known_values, [date], model.config.ar.lags))
+      model
+      |> build_time_inputs(block_dates, events_df, regressors_df)
+      |> Map.put(
+        "ar",
+        AR.build_input(
+          known_values,
+          List.duplicate(origin_date, length(block_dates)),
+          model.config.ar.lags
+        )
+      )
+      |> put_step_mask(AR.step_mask(step_numbers, forecast_steps))
       |> normalize_with_params(model.config.normalization.x)
 
     %{combined: combined} = Model.predict(model, inputs)
-    combined |> Nx.reshape({}) |> Nx.to_number()
+
+    block_dates
+    |> Enum.zip(Nx.to_flat_list(combined))
+    |> Enum.reduce(known_values, fn {date, value}, acc -> Map.put(acc, date, value) end)
   end
 
   # The network predicts in normalized y space, where every component is a
@@ -473,10 +520,18 @@ defmodule Soothsayer do
     {Nx.divide(Nx.subtract(tensor, mean), std), mean, std}
   end
 
+  # Inputs that are masks rather than measurements and must not be z-scored.
+  @unnormalized_inputs ["forecast_step"]
+
   defp normalize_inputs(x) do
     Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->
       normalize_single_input(key, tensor, acc)
     end)
+  end
+
+  defp normalize_single_input(key, tensor, {normalized, norm_params})
+       when key in @unnormalized_inputs do
+    {Map.put(normalized, key, tensor), norm_params}
   end
 
   defp normalize_single_input(key, tensor, {normalized, norm_params}) do
@@ -487,12 +542,14 @@ defmodule Soothsayer do
   end
 
   defp normalize_with_params(x, norm_params) do
-    Enum.map(x, fn {key, tensor} ->
-      mean = norm_params[key].mean
-      std = norm_params[key].std
-      {key, Nx.divide(Nx.subtract(tensor, mean), std)}
+    Map.new(x, fn
+      {key, tensor} when key in @unnormalized_inputs ->
+        {key, tensor}
+
+      {key, tensor} ->
+        %{mean: mean, std: std} = norm_params[key]
+        {key, Nx.divide(Nx.subtract(tensor, mean), std)}
     end)
-    |> Enum.into(%{})
   end
 
   defp validate_training_data!(%DataFrame{} = data) do
@@ -539,6 +596,9 @@ defmodule Soothsayer do
 
   For linear AR models, returns the output layer weights.
   For deep AR-Net models, returns all layer weights including hidden layers.
+
+  The output kernel has shape `{inputs, forecast_steps}`: row `i` is the
+  i-th oldest lag and column `s` holds the weights for step `s + 1` ahead.
 
   ## Parameters
 

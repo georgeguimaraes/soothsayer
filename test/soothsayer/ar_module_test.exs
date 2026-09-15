@@ -32,7 +32,7 @@ defmodule Soothsayer.ARModuleTest do
   end
 
   describe "build_input/3" do
-    test "looks up the previous calendar days, oldest first" do
+    test "looks up the lags ending at each origin, oldest first" do
       known_values = %{
         ~D[2023-01-01] => 1.0,
         ~D[2023-01-02] => 2.0,
@@ -41,9 +41,9 @@ defmodule Soothsayer.ARModuleTest do
         ~D[2023-01-05] => 5.0
       }
 
-      result = AR.build_input(known_values, [~D[2023-01-04], ~D[2023-01-05], ~D[2023-01-06]], 2)
+      result = AR.build_input(known_values, [~D[2023-01-03], ~D[2023-01-04], ~D[2023-01-05]], 2)
 
-      # 01-04 uses [01-02, 01-03], 01-05 uses [01-03, 01-04], 01-06 uses [01-04, 01-05]
+      # origin 01-03 uses [01-02, 01-03], 01-04 uses [01-03, 01-04], 01-05 uses [01-04, 01-05]
       assert Nx.shape(result) == {3, 2}
       assert Nx.to_flat_list(result) == [2.0, 3.0, 3.0, 4.0, 4.0, 5.0]
     end
@@ -51,10 +51,87 @@ defmodule Soothsayer.ARModuleTest do
     test "returns zeros when any lagged day is unknown" do
       known_values = %{~D[2023-01-01] => 1.0, ~D[2023-01-02] => 2.0, ~D[2023-01-04] => 4.0}
 
-      # 01-02 lacks 12-31, 01-05 lacks 01-03 (a gap), 01-03 has both
-      result = AR.build_input(known_values, [~D[2023-01-02], ~D[2023-01-05], ~D[2023-01-03]], 2)
+      # 01-01 lacks 12-31, 01-04 lacks 01-03 (a gap), 01-02 has both
+      result = AR.build_input(known_values, [~D[2023-01-01], ~D[2023-01-04], ~D[2023-01-02]], 2)
 
       assert Nx.to_flat_list(result) == [0.0, 0.0, 0.0, 0.0, 1.0, 2.0]
+    end
+  end
+
+  describe "training_rows/3" do
+    test "builds one row per origin and step, ordered step by step" do
+      y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+
+      rows = AR.training_rows(y, 2, 2)
+
+      # origins end at positions 1, 2, 3 (values 2, 3, 4); step 1 targets 3, 4, 5; step 2 targets 4, 5, 6
+      assert Nx.to_list(rows.lagged) == [
+               [1.0, 2.0],
+               [2.0, 3.0],
+               [3.0, 4.0],
+               [1.0, 2.0],
+               [2.0, 3.0],
+               [3.0, 4.0]
+             ]
+
+      assert Nx.to_flat_list(rows.targets) == [3.0, 4.0, 5.0, 4.0, 5.0, 6.0]
+      assert rows.target_indices == [2, 3, 4, 3, 4, 5]
+
+      assert Nx.to_list(rows.step_mask) == [
+               [1.0, 0.0],
+               [1.0, 0.0],
+               [1.0, 0.0],
+               [0.0, 1.0],
+               [0.0, 1.0],
+               [0.0, 1.0]
+             ]
+    end
+
+    test "one forecast step has no mask and matches create_lagged_inputs" do
+      y = Nx.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+
+      rows = AR.training_rows(y, 3, 1)
+      {lagged, targets} = AR.create_lagged_inputs(y, 3)
+
+      assert rows.step_mask == nil
+      assert rows.target_indices == [3, 4]
+      assert Nx.to_list(rows.lagged) == Nx.to_list(lagged)
+      assert Nx.to_list(rows.targets) == Nx.to_list(targets)
+    end
+
+    test "raises when the series is too short for the lags and steps" do
+      assert_raise ArgumentError, ~r/need at least 5 rows, got 4/, fn ->
+        AR.training_rows(Nx.tensor([1.0, 2.0, 3.0, 4.0]), 3, 2)
+      end
+    end
+  end
+
+  describe "origin_and_step/3" do
+    test "observed dates are one step from the day before, later dates go in blocks" do
+      last_observed_date = ~D[2023-01-31]
+
+      assert AR.origin_and_step(~D[2023-01-10], last_observed_date, 3) == {~D[2023-01-09], 1}
+      assert AR.origin_and_step(~D[2023-01-31], last_observed_date, 3) == {~D[2023-01-30], 1}
+      assert AR.origin_and_step(~D[2023-02-01], last_observed_date, 3) == {~D[2023-01-31], 1}
+      assert AR.origin_and_step(~D[2023-02-03], last_observed_date, 3) == {~D[2023-01-31], 3}
+      assert AR.origin_and_step(~D[2023-02-04], last_observed_date, 3) == {~D[2023-02-03], 1}
+      assert AR.origin_and_step(~D[2023-02-07], last_observed_date, 3) == {~D[2023-02-06], 1}
+    end
+
+    test "with one step every date comes from the day before it" do
+      assert AR.origin_and_step(~D[2023-02-09], ~D[2023-01-31], 1) == {~D[2023-02-08], 1}
+    end
+  end
+
+  describe "step_mask/2" do
+    test "one-hot encodes 1-based steps and is nil for a single step" do
+      assert AR.step_mask([1, 3, 2], 3) |> Nx.to_list() == [
+               [1.0, 0.0, 0.0],
+               [0.0, 0.0, 1.0],
+               [0.0, 1.0, 0.0]
+             ]
+
+      assert AR.step_mask([1, 1], 1) == nil
     end
   end
 

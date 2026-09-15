@@ -37,6 +37,7 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Weekly seasonality | Yes | Yes |
 | Auto-regression (AR) | Yes | Yes |
 | Deep AR-Net | Yes | Yes |
+| Direct multi-step forecasting (`n_forecasts`) | Yes | Yes |
 | Events | Yes | Yes |
 | Lagged regressors | Planned | Yes |
 | Future regressors | Yes | Yes |
