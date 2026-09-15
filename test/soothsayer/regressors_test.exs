@@ -108,7 +108,15 @@ defmodule Soothsayer.RegressorsTest do
       assert coefficient > 0
 
       summed =
-        [:trend, :yearly_seasonality, :weekly_seasonality, :ar, :events, :regressors]
+        [
+          :trend,
+          :yearly_seasonality,
+          :weekly_seasonality,
+          :ar,
+          :events,
+          :regressors,
+          :lagged_regressors
+        ]
         |> Enum.map(&components[&1])
         |> Enum.reduce(&Nx.add/2)
 

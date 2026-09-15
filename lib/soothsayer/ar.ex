@@ -143,11 +143,18 @@ defmodule Soothsayer.AR do
   @doc """
   Builds the AR training rows for direct multi-step forecasting.
 
-  Every origin (a position with `lags` values before it and `forecast_steps`
-  values after it) produces one row per step ahead. A row holds the `lags`
-  values ending at the origin, oldest first, the target `step` positions
-  after the origin, and a one-hot mask of its step. Rows are ordered step by
-  step, all origins for step 1 first, then all origins for step 2, and so on.
+  Every origin (a position with `max_lags` values up to and including it and
+  `forecast_steps` values after it) produces one row per step ahead. A row
+  holds the `lags` values ending at the origin, oldest first, the target
+  `step` positions after the origin, and a one-hot mask of its step. Rows
+  are ordered step by step, all origins for step 1 first, then all origins
+  for step 2, and so on.
+
+  ## Options
+
+    * `:max_lags` - the longest lag window any input needs, which decides
+      the first usable origin. Defaults to `lags`. Lagged regressors with
+      more lags than the AR component raise it.
 
   ## Returns
 
@@ -157,6 +164,7 @@ defmodule Soothsayer.AR do
     * `:step_mask` - `{rows, forecast_steps}` one-hot masks, or `nil` when `forecast_steps` is 1
     * `:target_indices` - list of the target position of each row in `y`, for
       lining up the date-based features
+    * `:origin_indices` - list of the origin positions, one per origin (not per row)
 
   ## Examples
 
@@ -170,29 +178,19 @@ defmodule Soothsayer.AR do
       [2, 3, 4, 3, 4, 5]
 
   """
-  @spec training_rows(Nx.Tensor.t(), pos_integer(), pos_integer()) :: %{
+  @spec training_rows(Nx.Tensor.t(), pos_integer(), pos_integer(), keyword()) :: %{
           lagged: Nx.Tensor.t(),
           targets: Nx.Tensor.t(),
           step_mask: Nx.Tensor.t() | nil,
-          target_indices: list(non_neg_integer())
+          target_indices: list(non_neg_integer()),
+          origin_indices: list(non_neg_integer())
         }
-  def training_rows(y, lags, forecast_steps) do
-    n_origins = Nx.size(y) - lags - forecast_steps + 1
-
-    if n_origins < 1 do
-      raise ArgumentError,
-            "Not enough data for #{lags} lags and #{forecast_steps} forecast steps: " <>
-              "need at least #{lags + forecast_steps} rows, got #{Nx.size(y)}"
-    end
-
-    lagged =
-      0..(lags - 1)
-      |> Enum.map(fn lag -> Nx.slice(y, [lag], [n_origins]) end)
-      |> Nx.stack(axis: 1)
-      |> Nx.as_type({:f, 32})
+  def training_rows(y, lags, forecast_steps, opts \\ []) do
+    max_lags = Keyword.get(opts, :max_lags, lags)
+    origin_indices = origin_indices(Nx.size(y), max_lags, forecast_steps)
 
     target_indices =
-      for step <- 1..forecast_steps, origin <- 0..(n_origins - 1), do: origin + lags - 1 + step
+      for step <- 1..forecast_steps, origin <- origin_indices, do: origin + step
 
     targets =
       y
@@ -200,14 +198,57 @@ defmodule Soothsayer.AR do
       |> Nx.reshape({:auto, 1})
       |> Nx.as_type({:f, 32})
 
-    step_numbers = for step <- 1..forecast_steps, _origin <- 1..n_origins, do: step
+    step_numbers = for step <- 1..forecast_steps, _origin <- origin_indices, do: step
 
     %{
-      lagged: Nx.concatenate(List.duplicate(lagged, forecast_steps), axis: 0),
+      lagged: lagged_rows(y, origin_indices, lags, forecast_steps),
       targets: targets,
       step_mask: step_mask(step_numbers, forecast_steps),
-      target_indices: target_indices
+      target_indices: target_indices,
+      origin_indices: origin_indices
     }
+  end
+
+  @doc """
+  The usable origin positions in a series of `n` values: every position with
+  `max_lags` values up to and including it and `forecast_steps` after it.
+
+  ## Examples
+
+      iex> Soothsayer.AR.origin_indices(10, 4, 2)
+      [3, 4, 5, 6, 7]
+
+  """
+  @spec origin_indices(pos_integer(), pos_integer(), pos_integer()) :: list(non_neg_integer())
+  def origin_indices(n, max_lags, forecast_steps) do
+    if n < max_lags + forecast_steps do
+      raise ArgumentError,
+            "Not enough data for #{max_lags} lags and #{forecast_steps} forecast steps: " <>
+              "need at least #{max_lags + forecast_steps} rows, got #{n}"
+    end
+
+    Enum.to_list((max_lags - 1)..(n - forecast_steps - 1))
+  end
+
+  @doc """
+  Lag windows of `values` ending at each origin, oldest first, `{origins, lags}`,
+  repeated `forecast_steps` times along the row axis to match `training_rows/4`.
+
+  ## Examples
+
+      iex> Soothsayer.AR.lagged_rows(Nx.tensor([10.0, 20.0, 30.0, 40.0]), [2, 3], 2, 1) |> Nx.to_list()
+      [[20.0, 30.0], [30.0, 40.0]]
+
+  """
+  @spec lagged_rows(Nx.Tensor.t(), list(non_neg_integer()), pos_integer(), pos_integer()) ::
+          Nx.Tensor.t()
+  def lagged_rows(values, origin_indices, lags, forecast_steps) do
+    window_indices =
+      for origin <- origin_indices, do: for(offset <- (lags - 1)..0//-1, do: origin - offset)
+
+    windows = values |> Nx.take(Nx.tensor(window_indices)) |> Nx.as_type({:f, 32})
+
+    Nx.concatenate(List.duplicate(windows, forecast_steps), axis: 0)
   end
 
   @doc """

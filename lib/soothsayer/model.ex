@@ -5,6 +5,7 @@ defmodule Soothsayer.Model do
 
   alias Soothsayer.AR
   alias Soothsayer.Events
+  alias Soothsayer.LaggedRegressors
   alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
@@ -74,7 +75,8 @@ defmodule Soothsayer.Model do
       weekly_seasonality: components.weekly,
       ar: components.ar,
       events: components.events,
-      regressors: components.regressors
+      regressors: components.regressors,
+      lagged_regressors: components.lagged_regressors
     }
 
     # Only present when quantiles are configured, as a tuple in the same
@@ -133,6 +135,12 @@ defmodule Soothsayer.Model do
     regressors_input = Regressors.build_network_input(config)
     regressors_component = Regressors.build_component(regressors_input, config)
 
+    # Lagged regressors
+    lagged_regressors_input = LaggedRegressors.build_network_input(config)
+
+    lagged_regressors_component =
+      LaggedRegressors.build_component(lagged_regressors_input, config)
+
     combined =
       Axon.add([
         trend,
@@ -140,7 +148,8 @@ defmodule Soothsayer.Model do
         seasonality.weekly,
         ar_component,
         events_component,
-        regressors_component
+        regressors_component,
+        lagged_regressors_component
       ])
 
     # Quantile heads see every input the components see
@@ -153,7 +162,8 @@ defmodule Soothsayer.Model do
           ar_input,
           step_mask_input,
           events_input,
-          regressors_input
+          regressors_input,
+          lagged_regressors_input
         ],
         &is_nil/1
       )
@@ -168,6 +178,7 @@ defmodule Soothsayer.Model do
        ar: ar_component,
        events: events_component,
        regressors: regressors_component,
+       lagged_regressors: lagged_regressors_component,
        quantiles: quantiles
      }}
   end
@@ -263,7 +274,8 @@ defmodule Soothsayer.Model do
           weekly_seasonality: Nx.Tensor.t(),
           ar: Nx.Tensor.t(),
           events: Nx.Tensor.t(),
-          regressors: Nx.Tensor.t()
+          regressors: Nx.Tensor.t(),
+          lagged_regressors: Nx.Tensor.t()
         }
   def predict(model, x) do
     {_init_fn, predict_fn} = Axon.build(model.network)

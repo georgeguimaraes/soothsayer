@@ -7,6 +7,7 @@ defmodule Soothsayer do
   alias Explorer.Series
   alias Soothsayer.AR
   alias Soothsayer.Events
+  alias Soothsayer.LaggedRegressors
   alias Soothsayer.Model
   alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
@@ -49,6 +50,7 @@ defmodule Soothsayer do
       },
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil, forecast_steps: 1},
       regressors: [],
+      lagged_regressors: %{},
       quantiles: [],
       epochs: 100,
       learning_rate: 0.01,
@@ -69,7 +71,32 @@ defmodule Soothsayer do
   defp validate_config!(config) do
     validate_seasonality_mode!(config)
     validate_regressors!(config)
+    validate_lagged_regressors!(config)
     validate_forecast_steps!(config)
+  end
+
+  defp validate_lagged_regressors!(%{lagged_regressors: lagged}) when lagged == %{}, do: :ok
+
+  defp validate_lagged_regressors!(%{lagged_regressors: lagged, ar: ar}) when is_map(lagged) do
+    for {name, spec} <- lagged do
+      unless is_binary(name) and match?(%{lags: lags} when is_integer(lags) and lags > 0, spec) do
+        raise ArgumentError,
+              "lagged_regressors must map column names to %{lags: positive_integer}, " <>
+                "got #{inspect(name)} => #{inspect(spec)}"
+      end
+    end
+
+    unless ar.enabled and ar.lags > 0 do
+      raise ArgumentError,
+            "lagged_regressors need auto-regression enabled with lags > 0, " <>
+              "since their lag windows are built from the same forecast origins."
+    end
+
+    :ok
+  end
+
+  defp validate_lagged_regressors!(%{lagged_regressors: lagged}) do
+    raise ArgumentError, "lagged_regressors must be a map, got #{inspect(lagged)}"
   end
 
   defp validate_seasonality_mode!(%{seasonality: %{mode: mode}})
@@ -146,6 +173,7 @@ defmodule Soothsayer do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
     Regressors.validate_columns!(data, model.config.regressors)
+    Regressors.validate_columns!(data, LaggedRegressors.names(model.config))
     processed_data = Seasonality.add_fourier_features(data, "ds", model.config.seasonality)
     # Reorder columns to put y first
     processed_data = DataFrame.select(processed_data, ["y" | processed_data.names -- ["y"]])
@@ -164,14 +192,24 @@ defmodule Soothsayer do
 
     {y_normalized, ar_inputs, target_indices} =
       if ar_enabled?(model) do
+        forecast_steps = AR.forecast_steps(model.config)
+        max_lags = max(model.config.ar.lags, LaggedRegressors.max_lags(model.config))
+
         rows =
-          AR.training_rows(
-            y_full_normalized,
-            model.config.ar.lags,
-            AR.forecast_steps(model.config)
+          AR.training_rows(y_full_normalized, model.config.ar.lags, forecast_steps,
+            max_lags: max_lags
           )
 
-        ar_inputs = %{"ar" => rows.lagged} |> put_step_mask(rows.step_mask)
+        ar_inputs =
+          %{"ar" => rows.lagged}
+          |> put_step_mask(rows.step_mask)
+          |> put_lagged_regressors_training_input(
+            model,
+            data,
+            rows.origin_indices,
+            forecast_steps
+          )
+
         {rows.targets, ar_inputs, rows.target_indices}
       else
         {Nx.new_axis(y_full_normalized, -1), %{}, Enum.to_list(0..(length(dates) - 1))}
@@ -205,7 +243,11 @@ defmodule Soothsayer do
     # Store training data for prediction lookups
     training_data = %{
       dates: dates,
-      y_normalized: Nx.to_flat_list(y_full_normalized)
+      y_normalized: Nx.to_flat_list(y_full_normalized),
+      lagged_regressors:
+        Map.new(LaggedRegressors.names(model.config), fn name ->
+          {name, LaggedRegressors.values_by_date(data, name)}
+        end)
     }
 
     %{
@@ -275,7 +317,10 @@ defmodule Soothsayer do
         configured regressor. Required when the model was fitted with
         regressors, and it must cover every predicted date. With
         auto-regression it must also cover the days between the last
-        observation and the forecast, since those get predicted too.
+        observation and the forecast, since those get predicted too. Lagged
+        regressor columns go in the same dataframe; they are only read up to
+        each forecast origin, and training values are remembered, so the
+        dataframe only needs to add what happened after training.
 
   ## Auto-regression and future dates
 
@@ -293,8 +338,8 @@ defmodule Soothsayer do
   ## Returns
 
     A map with the combined prediction and each component: `:trend`,
-    `:yearly_seasonality`, `:weekly_seasonality`, `:ar`, `:events` and
-    `:regressors`, plus `:quantiles`, a map from each configured quantile
+    `:yearly_seasonality`, `:weekly_seasonality`, `:ar`, `:events`,
+    `:regressors` and `:lagged_regressors`, plus `:quantiles`, a map from each configured quantile
     to its forecast (empty when none are configured). Quantile forecasts
     are clipped so an upper quantile is never below `:combined` and a lower
     one never above it.
@@ -333,6 +378,7 @@ defmodule Soothsayer do
           ar: Nx.Tensor.t(),
           events: Nx.Tensor.t(),
           regressors: Nx.Tensor.t(),
+          lagged_regressors: Nx.Tensor.t(),
           quantiles: %{float() => Nx.Tensor.t()}
         }
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
@@ -349,16 +395,30 @@ defmodule Soothsayer do
         observed_values = known_values(model, history)
         last_observed_date = observed_values |> Map.keys() |> Enum.max(Date)
 
+        lagged_regressor_values =
+          LaggedRegressors.known_values(model.config.training_data, regressors_df, model.config)
+
         known_values =
           forecast_missing_values(
             observed_values,
+            lagged_regressor_values,
             model,
             prediction_dates,
             events_df,
             regressors_df
           )
 
-        Map.merge(x_input, ar_inputs(model, known_values, prediction_dates, last_observed_date))
+        forecast_steps = AR.forecast_steps(model.config)
+
+        {origin_dates, step_numbers} =
+          prediction_dates
+          |> Enum.map(&AR.origin_and_step(&1, last_observed_date, forecast_steps))
+          |> Enum.unzip()
+
+        Map.merge(
+          x_input,
+          lag_inputs(model, known_values, lagged_regressor_values, origin_dates, step_numbers)
+        )
       else
         x_input
       end
@@ -415,20 +475,36 @@ defmodule Soothsayer do
   defp put_step_mask(inputs, nil), do: inputs
   defp put_step_mask(inputs, step_mask), do: Map.put(inputs, "forecast_step", step_mask)
 
-  # AR inputs for a list of prediction dates: the lags at each date's origin
-  # and, with more than one forecast step, the one-hot step mask. Origins
-  # are assigned by AR.origin_and_step/3, the same rule the rollout uses, so
-  # the rows here reproduce exactly the values the rollout stored.
-  defp ar_inputs(model, known_values, prediction_dates, last_observed_date) do
-    forecast_steps = AR.forecast_steps(model.config)
+  defp put_lagged_regressors_training_input(inputs, model, data, origin_indices, forecast_steps) do
+    case LaggedRegressors.names(model.config) do
+      [] ->
+        inputs
 
-    {origin_dates, step_numbers} =
-      prediction_dates
-      |> Enum.map(&AR.origin_and_step(&1, last_observed_date, forecast_steps))
-      |> Enum.unzip()
+      _names ->
+        rows =
+          LaggedRegressors.build_training_rows(data, model.config, origin_indices, forecast_steps)
 
-    %{"ar" => AR.build_input(known_values, origin_dates, model.config.ar.lags)}
-    |> put_step_mask(AR.step_mask(step_numbers, forecast_steps))
+        Map.put(inputs, "lagged_regressors", rows)
+    end
+  end
+
+  # Every input that depends on a forecast origin: the target's own lags,
+  # the lagged regressors' windows and, with more than one forecast step,
+  # the one-hot step mask. Used for both the block rollout and the final
+  # component pass, so a date gets the same value however it is requested.
+  defp lag_inputs(model, known_values, lagged_regressor_values, origin_dates, step_numbers) do
+    inputs =
+      %{"ar" => AR.build_input(known_values, origin_dates, model.config.ar.lags)}
+      |> put_step_mask(AR.step_mask(step_numbers, AR.forecast_steps(model.config)))
+
+    case LaggedRegressors.names(model.config) do
+      [] ->
+        inputs
+
+      _names ->
+        rows = LaggedRegressors.build_input(lagged_regressor_values, origin_dates, model.config)
+        Map.put(inputs, "lagged_regressors", rows)
+    end
   end
 
   defp validate_regressors_option!(%Model{config: %{regressors: []}}, _regressors_df), do: :ok
@@ -486,7 +562,14 @@ defmodule Soothsayer do
   # directly from the block's origin, and records the predictions as known
   # values so later blocks can use them as lags. Returns the extended map.
   # Nothing is stored on the model.
-  defp forecast_missing_values(known_values, model, prediction_dates, events_df, regressors_df) do
+  defp forecast_missing_values(
+         known_values,
+         lagged_regressor_values,
+         model,
+         prediction_dates,
+         events_df,
+         regressors_df
+       ) do
     last_observed_date = known_values |> Map.keys() |> Enum.max(Date)
     last_prediction_date = Enum.max(prediction_dates, Date)
 
@@ -494,7 +577,14 @@ defmodule Soothsayer do
       Date.range(Date.add(last_observed_date, 1), last_prediction_date)
       |> Enum.chunk_every(AR.forecast_steps(model.config))
       |> Enum.reduce(known_values, fn block_dates, known_values ->
-        forecast_block(known_values, model, block_dates, events_df, regressors_df)
+        forecast_block(
+          known_values,
+          lagged_regressor_values,
+          model,
+          block_dates,
+          events_df,
+          regressors_df
+        )
       end)
     else
       known_values
@@ -504,23 +594,23 @@ defmodule Soothsayer do
   # Predicts one block of consecutive dates from the day before the first
   # one. Returns known_values with the block's predictions added, in
   # normalized y space so they can feed later lags.
-  defp forecast_block(known_values, model, block_dates, events_df, regressors_df) do
-    origin_date = Date.add(hd(block_dates), -1)
-    forecast_steps = AR.forecast_steps(model.config)
+  defp forecast_block(
+         known_values,
+         lagged_regressor_values,
+         model,
+         block_dates,
+         events_df,
+         regressors_df
+       ) do
+    origin_dates = List.duplicate(Date.add(hd(block_dates), -1), length(block_dates))
     step_numbers = Enum.to_list(1..length(block_dates))
 
     inputs =
       model
       |> build_time_inputs(block_dates, events_df, regressors_df)
-      |> Map.put(
-        "ar",
-        AR.build_input(
-          known_values,
-          List.duplicate(origin_date, length(block_dates)),
-          model.config.ar.lags
-        )
+      |> Map.merge(
+        lag_inputs(model, known_values, lagged_regressor_values, origin_dates, step_numbers)
       )
-      |> put_step_mask(AR.step_mask(step_numbers, forecast_steps))
       |> normalize_with_params(model.config.normalization.x)
 
     %{combined: combined} = Model.predict(model, inputs)

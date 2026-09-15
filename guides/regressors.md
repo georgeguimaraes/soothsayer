@@ -85,9 +85,35 @@ Soothsayer.predict(fitted, validation["ds"],
 )
 ```
 
+## Lagged Regressors
+
+Sometimes it's the regressor's past that matters: yesterday's temperature for today's energy price, last week's ad spend for this week's sales. Lagged regressors feed the last `lags` values of a column into the forecast, the way auto-regression feeds the target's own past:
+
+```elixir
+model = Soothsayer.new(%{
+  ar: %{enabled: true, lags: 14},
+  lagged_regressors: %{"temperature" => %{lags: 3}}
+})
+```
+
+They need auto-regression enabled, since their lag windows are built from the same forecast origins. The longest lag among the AR component and the lagged regressors decides where training can start.
+
+The same column can be both a future regressor (its value on the forecast date) and a lagged regressor (its values before the origin). The energy benchmark does exactly that with temperature, matching NeuralProphet's configuration.
+
+### Predicting with lagged regressors
+
+Lagged regressors are read only up to each forecast origin, never on the dates being forecast, and the training values are remembered on the model. So predicting the first block after the training data needs nothing extra. Going further needs the regressor's values for the days in between, passed in the same `regressors:` dataframe:
+
+```elixir
+newer = DataFrame.new(%{"ds" => recent_dates, "temperature" => recent_temperatures})
+Soothsayer.predict(fitted, Series.from_list(future_dates), regressors: newer)
+```
+
+Soothsayer raises naming the first missing date rather than filling in zeros. The `:lagged_regressors` key of `Soothsayer.predict_components/3` holds their combined contribution.
+
 ## Not Yet Supported
 
-- **Lagged regressors**, where past values of the regressor feed the forecast the way auto-regression does. NeuralProphet supports these separately.
+- **Hidden layers for lagged regressors** (NeuralProphet's `lagged_reg_layers`). Lagged regressors are linear.
 - **Multiplicative regressors** that scale with the trend. Regressors are always additive today.
 
 ## Next Steps

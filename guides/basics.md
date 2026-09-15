@@ -50,6 +50,7 @@ If you call `Soothsayer.new()` without arguments, you get sensible defaults:
 | `seasonality.weekly.fourier_terms` | `3` | Flexibility of weekly pattern |
 | `ar.forecast_steps` | `1` | Steps ahead the AR head forecasts directly, NeuralProphet's `n_forecasts` |
 | `regressors` | `[]` | Column names of future regressors, see [Regressors](regressors.md) |
+| `lagged_regressors` | `%{}` | Column name to `%{lags: n}` for lagged regressors, needs AR |
 | `quantiles` | `[]` | Prediction interval quantiles, e.g. `[0.1, 0.9]`, see [Uncertainty](uncertainty.md) |
 | `epochs` | `100` | Passes over the training data |
 | `learning_rate` | `0.01` | How fast to learn |

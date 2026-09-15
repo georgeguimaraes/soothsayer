@@ -89,7 +89,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   describe "Energy price daily" do
     @energy_forecast_steps 7
 
-    test "auto-regression with 14 lags, 7 direct forecast steps and temperature as a regressor" do
+    test "auto-regression with 14 lags, 7 direct forecast steps and temperature as a future and lagged regressor" do
       {train, validation} = load_and_split("energy_price_daily.csv")
 
       model =
@@ -97,6 +97,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
           ar: %{enabled: true, lags: 14, forecast_steps: @energy_forecast_steps},
           trend: %{changepoints: 0},
           regressors: ["temperature"],
+          lagged_regressors: %{"temperature" => %{lags: 3}},
           seed: @seed
         })
 
@@ -108,13 +109,14 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "EnergyPriceDaily",
         metrics,
         %{mean_absolute_error: 5.40186, root_mean_squared_error: 6.70655},
-        notes: "same config and metric; NeuralProphet also lagged temperature"
+        notes: "same configuration and metric"
       )
 
-      # Seed 42 gives 5.56 / 6.93. Across six seeds: MAE 5.48 to 5.96,
-      # RMSE 6.88 to 7.54. Ceilings are 1.25x the worst seed.
-      assert metrics.mean_absolute_error < 7.45
-      assert metrics.root_mean_squared_error < 9.45
+      # Seed 42 gives 5.65 / 7.04. Across six seeds: MAE 5.57 to 6.11,
+      # RMSE 6.95 to 7.70. Without the lagged temperature it was 5.48 to
+      # 5.96 / 6.88 to 7.54. Ceilings are 1.25x the worst seed.
+      assert metrics.mean_absolute_error < 7.65
+      assert metrics.root_mean_squared_error < 9.65
     end
   end
 

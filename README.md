@@ -279,7 +279,18 @@ Soothsayer.get_regressor_effects(fitted_model)
 # => %{"temperature" => 0.42}
 ```
 
-Prediction raises if any requested date is missing from the regressors dataframe rather than guessing. See the [Regressors guide](guides/regressors.md).
+Prediction raises if any requested date is missing from the regressors dataframe rather than guessing.
+
+When it's the regressor's past that matters, make it a lagged regressor alongside auto-regression:
+
+```elixir
+Soothsayer.new(%{
+  ar: %{enabled: true, lags: 14},
+  lagged_regressors: %{"temperature" => %{lags: 3}}  # yesterday's and the two days before
+})
+```
+
+See the [Regressors guide](guides/regressors.md).
 
 ### Uncertainty
 
@@ -381,8 +392,8 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 |---------|--------|---------------|------------|------------------|-------|
 | Peyton Manning (daily) | MAE | 0.350 | 0.286 | 0.29 to 0.35 | identical configuration |
 | Peyton Manning (daily) | RMSE | 0.501 | 0.473 | 0.47 to 0.54 | identical configuration |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature) | MAE | 5.40 | 5.56 | 5.48 to 5.96 | identical configuration and metric (average over horizons 1 to 7); NeuralProphet also lagged temperature |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature) | RMSE | 6.71 | 6.93 | 6.88 to 7.54 | same |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.65 | 5.57 to 6.11 | identical configuration and metric (average over horizons 1 to 7); lagged temperature didn't help here, it was 5.48 to 5.96 without it |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 7.04 | 6.95 to 7.70 | same |
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.1 | 22.0 to 30.7 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 25.0 | 24.1 to 33.2 | same caveat |
 
@@ -392,7 +403,6 @@ The datasets live in `test/fixtures/neuralprophet/` under NeuralProphet's MIT li
 
 The following NeuralProphet features are on the roadmap:
 
-- Lagged Regressors (past values of an external variable, like auto-regression on another series)
 - Country Holidays (automatic holiday detection via `:holidefs` library)
 - Multiplicative Events (events that scale with trend)
 - Event Regularization
