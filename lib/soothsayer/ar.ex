@@ -44,19 +44,46 @@ defmodule Soothsayer.AR do
 
   """
   @spec build_component(Axon.t() | nil, map()) :: Axon.t()
-  def build_component(nil, _config), do: Axon.constant(0)
+  def build_component(input, config) do
+    build_component(input, build_step_mask_input(config), config)
+  end
 
-  def build_component(input, %{ar: %{enabled: true} = ar_config} = config) do
+  @doc """
+  Builds the AR component layer(s) with an explicit step mask input node.
+
+  Use this when the step mask node is shared with other parts of the
+  network, see `build_step_mask_input/1`.
+  """
+  @spec build_component(Axon.t() | nil, Axon.t() | nil, map()) :: Axon.t()
+  def build_component(nil, _step_mask_input, _config), do: Axon.constant(0)
+
+  def build_component(input, step_mask_input, %{ar: %{enabled: true} = ar_config} = config) do
     layers = Map.get(ar_config, :layers, [])
     steps = forecast_steps(config)
 
     input
     |> build_hidden_layers(layers)
     |> Axon.dense(steps, activation: :linear, name: "ar_dense_out")
-    |> select_forecast_step(steps)
+    |> select_forecast_step(step_mask_input)
   end
 
-  def build_component(_input, _config), do: Axon.constant(0)
+  def build_component(_input, _step_mask_input, _config), do: Axon.constant(0)
+
+  @doc """
+  Creates the one-hot `"forecast_step"` input node, `{nil, forecast_steps}`.
+
+  Returns `nil` when AR is disabled or `forecast_steps` is 1, since a single
+  step needs no selection.
+  """
+  @spec build_step_mask_input(map()) :: Axon.t() | nil
+  def build_step_mask_input(%{ar: %{enabled: true}} = config) do
+    case forecast_steps(config) do
+      1 -> nil
+      steps -> Axon.input("forecast_step", shape: {nil, steps})
+    end
+  end
+
+  def build_step_mask_input(_config), do: nil
 
   @doc """
   Returns the configured number of direct forecast steps, defaulting to 1.
@@ -74,13 +101,11 @@ defmodule Soothsayer.AR do
 
   # With a single step the dense layer already outputs {batch, 1}. With more,
   # the {batch, steps} output is masked down to the row's own step.
-  defp select_forecast_step(output, 1), do: output
+  defp select_forecast_step(output, nil), do: output
 
-  defp select_forecast_step(output, steps) do
-    step_mask = Axon.input("forecast_step", shape: {nil, steps})
-
+  defp select_forecast_step(output, step_mask_input) do
     output
-    |> Axon.multiply(step_mask)
+    |> Axon.multiply(step_mask_input)
     |> Axon.nx(&Nx.sum(&1, axes: [1], keep_axes: true), name: "ar_step_select")
   end
 

@@ -45,7 +45,7 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Multiplicative events | Planned | Yes |
 | Event regularization | Planned | Yes |
 | Recurring events | Planned | Yes |
-| Uncertainty estimation | Planned | Yes |
+| Uncertainty estimation | Yes | Yes |
 | Multiplicative seasonality | Yes | Yes |
 
 ## Quick Example

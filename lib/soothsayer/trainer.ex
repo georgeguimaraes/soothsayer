@@ -10,6 +10,8 @@ defmodule Soothsayer.Trainer do
   from the number of rows when that is `nil`.
   """
 
+  alias Soothsayer.Quantiles
+
   @min_auto_batch_size 16
   @max_auto_batch_size 512
 
@@ -189,12 +191,43 @@ defmodule Soothsayer.Trainer do
         fn _ -> :ok end
       )
 
+    quantiles = config[:quantiles] || []
+
     network
     |> Axon.Loop.trainer(
-      &Axon.Losses.huber(&1, &2.combined, reduction: :mean),
+      &loss(&1, &2, quantiles),
       Polaris.Optimizers.adam(learning_rate: config.learning_rate)
     )
     |> Axon.Loop.run(data, initial_params, epochs: epochs, compiler: EXLA)
+  end
+
+  @doc """
+  The training loss: Huber loss on the median forecast plus, for each
+  configured quantile, the pinball loss on that quantile's head.
+
+  ## Parameters
+
+    * `targets` - `{rows, 1}` target values
+    * `predictions` - The network output map, with `:combined` and,
+      when quantiles are configured, a `:quantiles` tuple
+    * `quantiles` - The sorted quantile list from the config
+
+  """
+  @spec loss(Nx.Tensor.t(), map(), list(float())) :: Nx.Tensor.t()
+  def loss(targets, predictions, quantiles) do
+    base_loss = Axon.Losses.huber(targets, predictions.combined, reduction: :mean)
+
+    quantile_predictions =
+      case Map.get(predictions, :quantiles) do
+        nil -> []
+        tuple -> Tuple.to_list(tuple)
+      end
+
+    quantiles
+    |> Enum.zip(quantile_predictions)
+    |> Enum.reduce(base_loss, fn {quantile, prediction}, total ->
+      Nx.add(total, Quantiles.pinball_loss(targets, prediction, quantile))
+    end)
   end
 
   defp train_with_regularization(network, x, y, epochs, batch_size, initial_params, config) do
@@ -206,7 +239,7 @@ defmodule Soothsayer.Trainer do
     {_init_fn, predict_fn} = Axon.build(network)
     {init_optim_fn, update_fn} = Polaris.Optimizers.adam(learning_rate: config.learning_rate)
 
-    objective_fn = build_objective_fn(predict_fn, regularization_layers)
+    objective_fn = build_objective_fn(predict_fn, regularization_layers, config[:quantiles] || [])
     train_step_fn = build_train_step_fn(objective_fn, update_fn)
     jit_train_step = EXLA.jit(train_step_fn)
 
@@ -239,10 +272,10 @@ defmodule Soothsayer.Trainer do
     ar_layers ++ trend_layers
   end
 
-  defp build_objective_fn(predict_fn, regularization_layers) do
+  defp build_objective_fn(predict_fn, regularization_layers, quantiles) do
     fn params, x_input, y_target ->
       predictions = predict_fn.(params, x_input)
-      base_loss = Axon.Losses.huber(y_target, predictions.combined, reduction: :mean)
+      base_loss = loss(y_target, predictions, quantiles)
       penalty = compute_weighted_l1_penalty(params, regularization_layers)
       Nx.add(base_loss, penalty)
     end

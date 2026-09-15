@@ -8,6 +8,7 @@ defmodule Soothsayer do
   alias Soothsayer.AR
   alias Soothsayer.Events
   alias Soothsayer.Model
+  alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
   alias Soothsayer.Trend
@@ -48,6 +49,7 @@ defmodule Soothsayer do
       },
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil, forecast_steps: 1},
       regressors: [],
+      quantiles: [],
       epochs: 100,
       learning_rate: 0.01,
       batch_size: nil,
@@ -56,7 +58,10 @@ defmodule Soothsayer do
 
     merged_config = deep_merge(default_config, config)
     validate_config!(merged_config)
-    Model.new(merged_config)
+
+    merged_config
+    |> Map.update!(:quantiles, &Quantiles.normalize_config!/1)
+    |> Model.new()
   end
 
   @seasonality_modes [:additive, :multiplicative]
@@ -289,7 +294,10 @@ defmodule Soothsayer do
 
     A map with the combined prediction and each component: `:trend`,
     `:yearly_seasonality`, `:weekly_seasonality`, `:ar`, `:events` and
-    `:regressors`.
+    `:regressors`, plus `:quantiles`, a map from each configured quantile
+    to its forecast (empty when none are configured). Quantile forecasts
+    are clipped so an upper quantile is never below `:combined` and a lower
+    one never above it.
 
     The components add up to `:combined`. Trend carries the level of the
     series, so the other components are zero-centered offsets around it.
@@ -312,7 +320,8 @@ defmodule Soothsayer do
         weekly_seasonality: #Nx.Tensor<...>,
         ar: #Nx.Tensor<...>,
         events: #Nx.Tensor<...>,
-        regressors: #Nx.Tensor<...>
+        regressors: #Nx.Tensor<...>,
+        quantiles: %{0.1 => #Nx.Tensor<...>, 0.9 => #Nx.Tensor<...>}
       }
 
   """
@@ -323,7 +332,8 @@ defmodule Soothsayer do
           weekly_seasonality: Nx.Tensor.t(),
           ar: Nx.Tensor.t(),
           events: Nx.Tensor.t(),
-          regressors: Nx.Tensor.t()
+          regressors: Nx.Tensor.t(),
+          quantiles: %{float() => Nx.Tensor.t()}
         }
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
@@ -355,9 +365,31 @@ defmodule Soothsayer do
 
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
 
-    predictions = Model.predict(model, x_normalized)
+    {quantile_outputs, predictions} = Map.pop(Model.predict(model, x_normalized), :quantiles)
+    components = denormalize_components(predictions, model.config.normalization.y)
 
-    denormalize_components(predictions, model.config.normalization.y)
+    Map.put(
+      components,
+      :quantiles,
+      denormalize_quantiles(quantile_outputs, model.config.quantiles, components.combined, model)
+    )
+  end
+
+  defp denormalize_quantiles(nil, _quantiles, _combined, _model), do: %{}
+
+  defp denormalize_quantiles(outputs, quantiles, combined, model) do
+    %{mean: mean, std: std} = model.config.normalization.y
+
+    quantiles
+    |> Enum.zip(Tuple.to_list(outputs))
+    |> Map.new(fn {quantile, tensor} ->
+      forecast = Nx.add(Nx.multiply(tensor, std), mean)
+
+      clipped =
+        if quantile > 0.5, do: Nx.max(forecast, combined), else: Nx.min(forecast, combined)
+
+      {quantile, clipped}
+    end)
   end
 
   defp put_events_input(x, model, dates, events_df) do

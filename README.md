@@ -281,6 +281,22 @@ Soothsayer.get_regressor_effects(fitted_model)
 
 Prediction raises if any requested date is missing from the regressors dataframe rather than guessing. See the [Regressors guide](guides/regressors.md).
 
+### Uncertainty
+
+Ask for quantiles and you get prediction intervals next to the median:
+
+```elixir
+model = Soothsayer.new(%{quantiles: [0.1, 0.9]})
+fitted_model = Soothsayer.fit(model, df)
+
+components = Soothsayer.predict_components(fitted_model, future_dates)
+components.combined        # median
+components.quantiles[0.1]  # lower line of the 80% interval
+components.quantiles[0.9]  # upper line
+```
+
+Each quantile is a linear head over the same inputs as the components, trained with the pinball loss, so intervals widen where the series is noisier. See the [Uncertainty guide](guides/uncertainty.md).
+
 ## Using EXLA for Faster Training
 
 Soothsayer uses EXLA for training by default, which compiles to XLA for faster execution on CPU/GPU.
@@ -345,6 +361,7 @@ model = Soothsayer.new(%{
     "black_friday" => %{lower_window: -1, upper_window: 1},
     "christmas" => %{lower_window: -3, upper_window: 0}
   },
+  quantiles: [0.1, 0.9],
   epochs: 150,
   learning_rate: 0.01
 })
@@ -380,7 +397,7 @@ The following NeuralProphet features are on the roadmap:
 - Multiplicative Events (events that scale with trend)
 - Event Regularization
 - Recurring Events (auto-expand to all years)
-- Uncertainty Estimation
+- Conformal Prediction (calibrating intervals on a holdout set)
 
 ## Contributing
 

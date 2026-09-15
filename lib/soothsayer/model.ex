@@ -5,6 +5,7 @@ defmodule Soothsayer.Model do
 
   alias Soothsayer.AR
   alias Soothsayer.Events
+  alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
   alias Soothsayer.Trainer
@@ -66,7 +67,7 @@ defmodule Soothsayer.Model do
   def build_network(config) do
     {combined, components} = build_network_components(config)
 
-    Axon.container(%{
+    outputs = %{
       combined: combined,
       trend: components.trend,
       yearly_seasonality: components.yearly,
@@ -74,7 +75,17 @@ defmodule Soothsayer.Model do
       ar: components.ar,
       events: components.events,
       regressors: components.regressors
-    })
+    }
+
+    # Only present when quantiles are configured, as a tuple in the same
+    # order as config.quantiles.
+    outputs =
+      case components.quantiles do
+        [] -> outputs
+        nodes -> Map.put(outputs, :quantiles, List.to_tuple(nodes))
+      end
+
+    Axon.container(outputs)
   end
 
   @doc """
@@ -111,7 +122,8 @@ defmodule Soothsayer.Model do
 
     # AR
     ar_input = AR.build_network_input(config)
-    ar_component = AR.build_component(ar_input, config)
+    step_mask_input = AR.build_step_mask_input(config)
+    ar_component = AR.build_component(ar_input, step_mask_input, config)
 
     # Events
     events_input = Events.build_network_input(%{events: config[:events] || %{}})
@@ -131,6 +143,23 @@ defmodule Soothsayer.Model do
         regressors_component
       ])
 
+    # Quantile heads see every input the components see
+    inputs =
+      Enum.reject(
+        [
+          trend_input,
+          seasonality_inputs.yearly,
+          seasonality_inputs.weekly,
+          ar_input,
+          step_mask_input,
+          events_input,
+          regressors_input
+        ],
+        &is_nil/1
+      )
+
+    quantiles = Quantiles.build_components(inputs, combined, config)
+
     {combined,
      %{
        trend: trend,
@@ -138,7 +167,8 @@ defmodule Soothsayer.Model do
        weekly: seasonality.weekly,
        ar: ar_component,
        events: events_component,
-       regressors: regressors_component
+       regressors: regressors_component,
+       quantiles: quantiles
      }}
   end
 
@@ -226,6 +256,7 @@ defmodule Soothsayer.Model do
 
   """
   @spec predict(t(), %{String.t() => Nx.Tensor.t()}) :: %{
+          optional(:quantiles) => tuple(),
           combined: Nx.Tensor.t(),
           trend: Nx.Tensor.t(),
           yearly_seasonality: Nx.Tensor.t(),
