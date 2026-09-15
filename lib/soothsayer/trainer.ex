@@ -5,9 +5,11 @@ defmodule Soothsayer.Trainer do
   Handles standard training and custom training with L1 regularization
   on specified layer weights (AR, trend, etc.).
 
-  Training runs in shuffled minibatches. One epoch is one pass over the
-  data, and the batch size comes from `config[:batch_size]`, or is derived
-  from the number of rows when that is `nil`.
+  Training runs in shuffled minibatches of samples, one sample being a
+  forecast origin with its `forecast_steps` targets (a single timestamp
+  without auto-regression). One epoch is one pass over the samples, and the
+  batch size comes from `config[:batch_size]`, or is derived from the number
+  of samples when that is `nil`.
   """
 
   import Nx.Defn
@@ -35,13 +37,13 @@ defmodule Soothsayer.Trainer do
   ## Parameters
 
     * `network` - An Axon neural network.
-    * `x` - A map of input tensors.
-    * `y` - A tensor of target values.
+    * `x` - A map of input tensors, one sample per row.
+    * `y` - A tensor of target values, `{samples, forecast_steps}`.
     * `epochs` - The number of training epochs.
     * `config` - A map containing training configuration:
       - `:learning_rate` - Learning rate for the optimizer.
-      - `:batch_size` - Rows per gradient step. `nil` (or missing) picks a
-        size based on the number of rows, see `auto_batch_size/1`.
+      - `:batch_size` - Samples per gradient step. `nil` (or missing) picks
+        a size based on the number of samples, see `auto_batch_size/1`.
       - `:seed` - Integer seed for parameter initialization and batch
         shuffling, so two fits with the same seed produce the same model.
         `nil` (or missing) leaves both random. Seeding the shuffle reseeds
@@ -427,9 +429,10 @@ defmodule Soothsayer.Trainer do
 
   ## Parameters
 
-    * `x` - A map of input tensors, all with the same number of rows.
-    * `y` - A tensor of target values with the same number of rows.
-    * `batch_size` - Rows per batch. Must not exceed the number of rows.
+    * `x` - A map of input tensors, all with the same number of samples
+      on the leading axis.
+    * `y` - A tensor of target values with the same number of samples.
+    * `batch_size` - Samples per batch. Must not exceed the number of samples.
 
   ## Returns
 
@@ -527,7 +530,7 @@ defmodule Soothsayer.Trainer do
 
   ## Parameters
 
-    * `targets` - `{rows, 1}` target values
+    * `targets` - `{samples, forecast_steps}` target values
     * `predictions` - The network output map, with `:combined` and,
       when quantiles are configured, a `:quantiles` tuple
     * `quantiles` - The sorted quantile list from the config
