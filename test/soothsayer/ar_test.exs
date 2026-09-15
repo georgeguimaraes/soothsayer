@@ -284,10 +284,10 @@ defmodule Soothsayer.ARTest do
       predictions = Soothsayer.predict(fitted_model, test_dates)
 
       # Predictions should have correct shape
-      assert Nx.shape(predictions) == {10, 1}
+      assert DataFrame.n_rows(predictions) == 10
 
       # Model should produce non-trivial predictions
-      pred_values = Nx.to_flat_list(predictions)
+      pred_values = Series.to_list(predictions["yhat"])
       assert Enum.any?(pred_values, fn v -> abs(v - 50) > 1.0 end)
     end
 
@@ -329,11 +329,11 @@ defmodule Soothsayer.ARTest do
       test_dates = Enum.take(dates, -10) |> Series.from_list()
       predictions = Soothsayer.predict(fitted_model, test_dates)
 
-      # Predictions should be tensors with the right shape
-      assert Nx.shape(predictions) == {10, 1}
+      # One row per requested date
+      assert DataFrame.n_rows(predictions) == 10
 
       # The model should have learned something (predictions shouldn't be all zeros)
-      pred_values = Nx.to_flat_list(predictions)
+      pred_values = Series.to_list(predictions["yhat"])
       assert Enum.any?(pred_values, fn v -> abs(v) > 1.0 end)
     end
   end
@@ -482,15 +482,11 @@ defmodule Soothsayer.ARTest do
 
       target_date = Series.from_list([Date.add(last_training_date, 31)])
 
-      with_history = Soothsayer.predict(fitted_model, target_date, history: history)
-      without_history = Soothsayer.predict(fitted_model, target_date)
+      with_history = Soothsayer.predict(fitted_model, target_date, history: history)["yhat"][0]
+      without_history = Soothsayer.predict(fitted_model, target_date)["yhat"][0]
 
-      assert_in_delta Nx.to_number(Nx.reshape(with_history, {})), 105.4, 1.0
-
-      assert abs(
-               Nx.to_number(Nx.reshape(with_history, {})) -
-                 Nx.to_number(Nx.reshape(without_history, {}))
-             ) > 3
+      assert_in_delta with_history, 105.4, 1.0
+      assert abs(with_history - without_history) > 3
     end
 
     test "history with missing values is imputed before seeding the lags" do
@@ -513,10 +509,11 @@ defmodule Soothsayer.ARTest do
       target_date = Series.from_list([Date.add(last_training_date, 31)])
 
       from_clean =
-        Soothsayer.predict(fitted_model, target_date, history: clean) |> Nx.to_flat_list()
+        Soothsayer.predict(fitted_model, target_date, history: clean)["yhat"] |> Series.to_list()
 
       from_gaps =
-        Soothsayer.predict(fitted_model, target_date, history: with_gaps) |> Nx.to_flat_list()
+        Soothsayer.predict(fitted_model, target_date, history: with_gaps)["yhat"]
+        |> Series.to_list()
 
       assert from_gaps == from_clean
     end
@@ -584,9 +581,13 @@ defmodule Soothsayer.ARTest do
       last_date = List.last(dates)
       future = fn from, to -> Series.from_list(Enum.map(from..to, &Date.add(last_date, &1))) end
 
-      all_six = Soothsayer.predict(fitted_model, future.(1, 6)) |> Nx.to_flat_list()
-      first_three = Soothsayer.predict(fitted_model, future.(1, 3)) |> Nx.to_flat_list()
-      just_fifth = Soothsayer.predict(fitted_model, future.(5, 5)) |> Nx.to_flat_list()
+      forecast = fn dates ->
+        Soothsayer.predict(fitted_model, dates)["yhat"] |> Series.to_list()
+      end
+
+      all_six = forecast.(future.(1, 6))
+      first_three = forecast.(future.(1, 3))
+      just_fifth = forecast.(future.(5, 5))
 
       assert Enum.take(all_six, 3) == first_three
       assert [Enum.at(all_six, 4)] == just_fifth
@@ -616,7 +617,7 @@ defmodule Soothsayer.ARTest do
       predictions =
         Soothsayer.predict(fitted_model, Series.from_list([Date.add(List.last(dates), 2)]))
 
-      assert Nx.shape(predictions) == {1, 1}
+      assert DataFrame.n_rows(predictions) == 1
     end
 
     test "forecast_steps needs lags and must be a positive integer" do

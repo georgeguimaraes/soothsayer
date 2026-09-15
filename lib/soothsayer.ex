@@ -395,6 +395,17 @@ defmodule Soothsayer do
   defp resolve_frequency(:auto, timestamps), do: Frequency.infer(timestamps)
   defp resolve_frequency(frequency, _timestamps), do: frequency
 
+  @component_columns [
+    :trend,
+    :yearly_seasonality,
+    :weekly_seasonality,
+    :daily_seasonality,
+    :ar,
+    :events,
+    :regressors,
+    :lagged_regressors
+  ]
+
   @doc """
   Makes predictions using a fitted Soothsayer model.
 
@@ -413,27 +424,86 @@ defmodule Soothsayer do
 
   ## Returns
 
-    An `Nx.Tensor` containing the predicted values.
+    An `Explorer.DataFrame` with one row per requested timestamp and the
+    columns, in this order:
+
+    * `"ds"` - the timestamps, the series `x` itself
+    * `"yhat"` - the forecast (the median when quantiles are configured)
+    * one column per configured quantile, `"yhat_10"` for `0.1`,
+      `"yhat_97.5"` for `0.975`, ascending
+    * `"trend"` - always present; a flat line at the training mean when the
+      trend is disabled
+    * one column per enabled component among `"yearly_seasonality"`,
+      `"weekly_seasonality"`, `"daily_seasonality"`, `"ar"`, `"events"`,
+      `"regressors"` and `"lagged_regressors"`
+
+    The component columns add up to `"yhat"`. Use `predict_components/3`
+    for the same values as tensors.
 
   ## Examples
 
       iex> fitted_model = Soothsayer.fit(model, training_data)
       iex> future_dates = Explorer.Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]])
-      iex> predictions = Soothsayer.predict(fitted_model, future_dates)
-      #Nx.Tensor<
-        f32[3][1]
-        [
-          [1.5],
-          [2.3],
-          [3.1]
-        ]
+      iex> Soothsayer.predict(fitted_model, future_dates)
+      #Explorer.DataFrame<
+        Polars[3 x 5]
+        ds date [2023-01-01, 2023-01-02, 2023-01-03]
+        yhat f64 [1.5, 2.3, 3.1]
+        trend f64 [1.4, 2.1, 2.8]
+        yearly_seasonality f64 [0.2, 0.3, 0.4]
+        weekly_seasonality f64 [-0.1, -0.1, -0.1]
       >
 
   """
-  @spec predict(Soothsayer.Model.t(), Explorer.Series.t(), keyword()) :: Nx.Tensor.t()
+  @spec predict(Soothsayer.Model.t(), Explorer.Series.t(), keyword()) :: Explorer.DataFrame.t()
   def predict(%Model{} = model, %Series{} = x, opts \\ []) do
-    %{combined: combined} = predict_components(model, x, opts)
-    combined
+    components = predict_components(model, x, opts)
+    rows = Series.size(x)
+
+    quantile_columns =
+      components.quantiles
+      |> Enum.sort()
+      |> Enum.map(fn {quantile, tensor} -> {quantile_column(quantile), tensor} end)
+
+    # Disabled components are scalar zeros and stay out of the frame, except
+    # the trend, which carries the level of the series even when disabled
+    # and is needed for the columns to add up to yhat.
+    component_columns =
+      for key <- @component_columns,
+          tensor = components[key],
+          key == :trend or Nx.rank(tensor) == 2,
+          do: {Atom.to_string(key), tensor}
+
+    columns =
+      [{"yhat", components.combined}] ++ quantile_columns ++ component_columns
+
+    DataFrame.new([
+      {"ds", x} | Enum.map(columns, fn {name, tensor} -> {name, column(tensor, rows)} end)
+    ])
+  end
+
+  # A disabled trend is a single value (the training mean), broadcast to
+  # every row.
+  defp column(tensor, rows) do
+    values =
+      case Nx.size(tensor) do
+        1 -> tensor |> Nx.reshape({}) |> Nx.to_number() |> List.duplicate(rows)
+        _size -> Nx.to_flat_list(tensor)
+      end
+
+    Series.from_list(values, dtype: {:f, 64})
+  end
+
+  # 0.1 -> "yhat_10", 0.975 -> "yhat_97.5"
+  defp quantile_column(quantile) do
+    percent = Float.round(quantile * 100, 1)
+
+    label =
+      if percent == Float.floor(percent),
+        do: Integer.to_string(trunc(percent)),
+        else: :erlang.float_to_binary(percent, decimals: 1)
+
+    "yhat_" <> label
   end
 
   @doc """

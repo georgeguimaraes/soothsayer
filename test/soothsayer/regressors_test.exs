@@ -92,7 +92,12 @@ defmodule Soothsayer.RegressorsTest do
       end
 
       without = Soothsayer.fit(Soothsayer.new(base_config(%{})), training)
-      without_error = mean_absolute_error.(Soothsayer.predict(without, holdout["ds"]))
+
+      without_error =
+        mean_absolute_error.(
+          Soothsayer.predict(without, holdout["ds"])["yhat"]
+          |> Series.to_tensor()
+        )
 
       with_regressor =
         Soothsayer.fit(Soothsayer.new(base_config(%{regressors: ["temperature"]})), training)

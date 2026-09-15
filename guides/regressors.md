@@ -64,7 +64,7 @@ Soothsayer.get_regressor_effects(fitted)
 # => %{"temperature" => 0.42, "marketing_spend" => 0.18}
 ```
 
-Positive means the regressor pushes the forecast up. The `:regressors` key of `Soothsayer.predict_components/3` holds the combined regressor contribution per date in the units of `y`.
+Positive means the regressor pushes the forecast up. The `regressors` column of `Soothsayer.predict/3` (the `:regressors` key of `Soothsayer.predict_components/3`) holds the combined regressor contribution per date in the units of `y`.
 
 ## Example: Energy Price and Temperature
 
@@ -109,7 +109,7 @@ newer = DataFrame.new(%{"ds" => recent_dates, "temperature" => recent_temperatur
 Soothsayer.predict(fitted, Series.from_list(future_dates), regressors: newer)
 ```
 
-Soothsayer raises naming the first missing date rather than filling in zeros. The `:lagged_regressors` key of `Soothsayer.predict_components/3` holds their combined contribution.
+Soothsayer raises naming the first missing date rather than filling in zeros. The `lagged_regressors` column of `Soothsayer.predict/3` holds their combined contribution.
 
 ## Not Yet Supported
 

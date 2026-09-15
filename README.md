@@ -45,14 +45,20 @@ fitted_model = Soothsayer.fit(model, df)
 # Make predictions
 future_dates = Date.range(~D[2023-01-01], ~D[2023-12-31])
 predictions = Soothsayer.predict(fitted_model, Series.from_list(Enum.to_list(future_dates)))
+# => #Explorer.DataFrame<[365 x 5] ds, yhat, trend, yearly_seasonality, weekly_seasonality>
 ```
 
-You can also get individual components to understand what's driving the forecast:
+The result is a DataFrame: `ds`, `yhat`, a column per configured quantile and one per enabled component, which add up to `yhat`. So what drives the forecast is right there:
 
 ```elixir
-components = Soothsayer.predict_components(fitted_model, future_dates_series)
-# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., daily_seasonality: ..., ar: ..., events: ...}
+predictions["yhat"]                 # the forecast
+predictions["trend"]                # what the trend contributes
+predictions["yearly_seasonality"]   # and the yearly pattern
+
+DataFrame.put(df, "yhat", Soothsayer.predict(fitted_model, df["ds"])["yhat"])  # next to the actuals
 ```
+
+`Soothsayer.predict_components/3` returns the same values as a map of tensors, `%{combined: ..., trend: ..., quantiles: %{...}}`.
 
 To model special events like holidays or promotions:
 
@@ -331,10 +337,10 @@ Ask for quantiles and you get prediction intervals next to the median:
 model = Soothsayer.new(%{quantiles: [0.1, 0.9]})
 fitted_model = Soothsayer.fit(model, df)
 
-components = Soothsayer.predict_components(fitted_model, future_dates)
-components.combined        # median
-components.quantiles[0.1]  # lower line of the 80% interval
-components.quantiles[0.9]  # upper line
+predictions = Soothsayer.predict(fitted_model, future_dates)
+predictions["yhat"]     # median
+predictions["yhat_10"]  # lower line of the 80% interval
+predictions["yhat_90"]  # upper line
 ```
 
 Each quantile is a linear head over the same inputs as the components, trained with the pinball loss, so intervals widen where the series is noisier. See the [Uncertainty guide](guides/uncertainty.md).

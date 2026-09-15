@@ -72,7 +72,7 @@ defmodule Soothsayer.FrequencyTest do
       assert fitted.config.frequency == {1, :month}
 
       next = Explorer.Series.from_list([~D[2023-01-31], ~D[2023-02-28]])
-      assert Nx.shape(Soothsayer.predict(fitted, next)) == {2, 1}
+      assert Explorer.DataFrame.n_rows(Soothsayer.predict(fitted, next)) == 2
     end
   end
 

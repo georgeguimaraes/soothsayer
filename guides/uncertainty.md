@@ -16,17 +16,17 @@ model = Soothsayer.new(%{
 
 ## Reading the Output
 
-`Soothsayer.predict/3` still returns the median. The quantiles come from `Soothsayer.predict_components/3`:
+`Soothsayer.predict/3` returns one column per quantile next to the median, named after the quantile as a percentage:
 
 ```elixir
-components = Soothsayer.predict_components(fitted, future_dates)
+predictions = Soothsayer.predict(fitted, future_dates)
 
-components.combined        # median forecast
-components.quantiles[0.1]  # lower line
-components.quantiles[0.9]  # upper line
+predictions["yhat"]     # median forecast
+predictions["yhat_10"]  # lower line
+predictions["yhat_90"]  # upper line
 ```
 
-Each is a `{rows, 1}` tensor in the units of `y`. When no quantiles are configured, `components.quantiles` is an empty map.
+`0.025` becomes `yhat_2.5`, `0.975` becomes `yhat_97.5`. All in the units of `y`. `Soothsayer.predict_components/3` has the same numbers as tensors under `:quantiles`, a map from each configured quantile to its `{rows, 1}` forecast, empty when none are configured.
 
 ## How It Works
 
@@ -47,9 +47,9 @@ At prediction time upper quantiles are clipped to never fall below the median an
 The honest test of an interval is coverage on data the model didn't see:
 
 ```elixir
-components = Soothsayer.predict_components(fitted, holdout_dates)
-lower = Nx.to_flat_list(components.quantiles[0.1])
-upper = Nx.to_flat_list(components.quantiles[0.9])
+predictions = Soothsayer.predict(fitted, holdout_dates)
+lower = Series.to_list(predictions["yhat_10"])
+upper = Series.to_list(predictions["yhat_90"])
 
 covered =
   [holdout_values, lower, upper]

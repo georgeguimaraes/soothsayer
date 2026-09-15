@@ -117,14 +117,23 @@ alias Explorer.Series
 
 future_dates = Series.from_list([~D[2023-01-04], ~D[2023-01-05], ~D[2023-01-06]])
 predictions = Soothsayer.predict(fitted_model, future_dates)
-# => #Nx.Tensor<f32[3][1]>
+# => #Explorer.DataFrame<
+#      Polars[3 x 5]
+#      ds date [2023-01-04, 2023-01-05, 2023-01-06]
+#      yhat f64 [103.1, 104.2, 105.0]
+#      trend f64 [102.9, 103.4, 103.9]
+#      yearly_seasonality f64 [0.4, 0.5, 0.6]
+#      weekly_seasonality f64 [-0.2, 0.3, 0.5]
+#    >
 ```
 
-The result is an Nx tensor with shape `{n_dates, 1}`.
+The result is a DataFrame with one row per date: `ds` (your series, same dtype), `yhat`, one column per configured quantile (`yhat_10`, `yhat_90`, see [Uncertainty](uncertainty.md)), then `trend` and one column per enabled component. The component columns add up to `yhat`.
 
 ## Getting Components
 
-One of Soothsayer's strengths is interpretability. Use `Soothsayer.predict_components/2` to see what each component contributes:
+One of Soothsayer's strengths is interpretability, and the component columns are how you get at it: is the forecast driven by the trend or by seasonality, how much does each pattern contribute, what does auto-regression add. Components that are disabled in the config have no column. When the trend is disabled its column is a flat line at the training mean, so the columns still add up.
+
+`Soothsayer.predict_components/2` returns the same numbers as a map of tensors, for when you'd rather stay in Nx:
 
 ```elixir
 components = Soothsayer.predict_components(fitted_model, future_dates)
@@ -134,7 +143,9 @@ components = Soothsayer.predict_components(fitted_model, future_dates)
 #   yearly_seasonality: #Nx.Tensor<...>,
 #   weekly_seasonality: #Nx.Tensor<...>,
 #   daily_seasonality: #Nx.Tensor<...>,
-#   ar: #Nx.Tensor<...>
+#   ar: #Nx.Tensor<...>,
+#   ...
+#   quantiles: %{}
 # }
 ```
 
@@ -172,9 +183,6 @@ fitted_model = Soothsayer.fit(model, df)
 
 # Predict on training data
 predictions = Soothsayer.predict(fitted_model, df["ds"])
-
-# Get components
-components = Soothsayer.predict_components(fitted_model, df["ds"])
 ```
 
 ## Visualizing Results
@@ -184,7 +192,7 @@ If you're using Livebook, you can visualize with VegaLite:
 ```elixir
 alias VegaLite, as: Vl
 
-df_with_predictions = DataFrame.put(df, "yhat", predictions)
+df_with_predictions = DataFrame.put(df, "yhat", predictions["yhat"])
 
 Vl.new(width: 800, height: 400, title: "Actual vs Predicted")
 |> Vl.data_from_values(df_with_predictions, only: ["ds", "y", "yhat"])

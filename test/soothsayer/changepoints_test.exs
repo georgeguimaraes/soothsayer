@@ -301,9 +301,9 @@ defmodule Soothsayer.ChangepointsTest do
       test_dates = Enum.take(dates, -10) |> Series.from_list()
       predictions = Soothsayer.predict(fitted_model, test_dates)
 
-      assert Nx.shape(predictions) == {10, 1}
+      assert DataFrame.n_rows(predictions) == 10
       # Model should produce reasonable predictions (not all zeros)
-      pred_values = Nx.to_flat_list(predictions)
+      pred_values = Series.to_list(predictions["yhat"])
       assert Enum.any?(pred_values, fn v -> abs(v) > 1.0 end)
     end
 
@@ -333,7 +333,7 @@ defmodule Soothsayer.ChangepointsTest do
       test_dates = Enum.take(dates, -5) |> Series.from_list()
       predictions = Soothsayer.predict(fitted_model, test_dates)
 
-      assert Nx.shape(predictions) == {5, 1}
+      assert DataFrame.n_rows(predictions) == 5
     end
 
     test "stores first_timestamp for prediction" do

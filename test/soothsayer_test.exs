@@ -40,7 +40,7 @@ defmodule SoothsayerTest do
       future_end = Date.add(future_start, 29)
       future_dates = Date.range(future_start, future_end)
       x_test = Series.from_list(Enum.to_list(future_dates))
-      predictions = Soothsayer.predict(fitted_model, x_test) |> Nx.to_flat_list()
+      predictions = Soothsayer.predict(fitted_model, x_test)["yhat"] |> Series.to_list()
 
       # Check if predictions follow the trend (with tolerance for noise)
       Enum.zip(predictions, future_dates)
@@ -88,7 +88,7 @@ defmodule SoothsayerTest do
       future_end = Date.add(future_start, 29)
       future_dates = Date.range(future_start, future_end)
       x_test = Series.from_list(Enum.to_list(future_dates))
-      predictions = Soothsayer.predict(fitted_model, x_test) |> Nx.to_flat_list()
+      predictions = Soothsayer.predict(fitted_model, x_test)["yhat"] |> Series.to_list()
 
       # Check if predictions follow the seasonality pattern (with tolerance for noise)
       Enum.zip(predictions, future_dates)
@@ -139,7 +139,7 @@ defmodule SoothsayerTest do
       future_end = Date.add(future_start, 29)
       future_dates = Date.range(future_start, future_end)
       x_test = Series.from_list(Enum.to_list(future_dates))
-      predictions = Soothsayer.predict(fitted_model, x_test) |> Nx.to_flat_list()
+      predictions = Soothsayer.predict(fitted_model, x_test)["yhat"] |> Series.to_list()
 
       # Check if predictions follow the trend and seasonality (with tolerance for noise)
       Enum.zip(predictions, future_dates)
@@ -216,8 +216,9 @@ defmodule SoothsayerTest do
       x_test = Series.from_list(Enum.to_list(future_dates))
       predictions = Soothsayer.predict(fitted_model, x_test, events: future_events_df)
 
-      assert is_struct(predictions, Nx.Tensor)
-      assert Nx.shape(predictions) == {30, 1}
+      assert is_struct(predictions, DataFrame)
+      assert DataFrame.n_rows(predictions) == 30
+      assert "events" in DataFrame.names(predictions)
     end
 
     test "predict_components returns events component" do
@@ -327,7 +328,7 @@ defmodule SoothsayerTest do
       test_events = DataFrame.new(%{"event" => [], "ds" => []})
 
       predictions = Soothsayer.predict(fitted_model, test_dates, events: test_events)
-      assert Nx.shape(predictions) == {2, 1}
+      assert DataFrame.n_rows(predictions) == 2
     end
 
     test "get_event_effects returns learned coefficients" do
@@ -527,8 +528,8 @@ defmodule SoothsayerTest do
         fitted_model = Soothsayer.fit(Soothsayer.new(mode_config(mode)), df)
         predictions = Soothsayer.predict(fitted_model, Series.from_list(holdout_dates))
 
-        predictions
-        |> Nx.flatten()
+        predictions["yhat"]
+        |> Series.to_tensor()
         |> Nx.subtract(Nx.tensor(holdout))
         |> Nx.abs()
         |> Nx.mean()
@@ -621,7 +622,7 @@ defmodule SoothsayerTest do
       assert components.daily_seasonality |> Nx.abs() |> Nx.sum() |> Nx.to_number() > 0
 
       # A plain date means midnight and sits on the hourly grid
-      assert Nx.shape(Soothsayer.predict(fitted, Series.from_list([~D[2023-01-11]]))) == {1, 1}
+      assert DataFrame.n_rows(Soothsayer.predict(fitted, Series.from_list([~D[2023-01-11]]))) == 1
 
       assert_raise ArgumentError, ~r/not a whole number of 1 hour steps/, fn ->
         Soothsayer.predict(fitted, Series.from_list([~N[2023-01-11 00:30:00]]))
@@ -725,7 +726,7 @@ defmodule SoothsayerTest do
              )
 
       predictions = Soothsayer.predict(fitted, Series.from_list(Enum.take(dates, 3)))
-      assert Nx.shape(predictions) == {3, 1}
+      assert DataFrame.n_rows(predictions) == 3
     end
 
     test "with auto-regression a short gap is imputed linearly" do
@@ -794,6 +795,106 @@ defmodule SoothsayerTest do
 
       assert_raise ArgumentError, ~r/missing.drop_samples must be true or false/, fn ->
         Soothsayer.new(%{missing: %{drop_samples: :maybe}})
+      end
+    end
+  end
+
+  describe "predict dataframe" do
+    defp daily_frame do
+      dates = Date.range(~D[2021-01-01], ~D[2022-12-31]) |> Enum.to_list()
+
+      y =
+        Enum.map(dates, fn date ->
+          day = Date.diff(date, ~D[2021-01-01])
+          100 + 0.1 * day + 10 * :math.sin(2 * :math.pi() * day / 365.25) + rem(day, 7)
+        end)
+
+      {dates, DataFrame.new(%{"ds" => dates, "y" => y})}
+    end
+
+    test "has ds, yhat, quantile and enabled component columns in order" do
+      {dates, df} = daily_frame()
+
+      model =
+        Soothsayer.new(%{
+          seasonality: %{weekly: %{enabled: false}},
+          quantiles: [0.975, 0.1],
+          epochs: 2,
+          learning_rate: 0.01,
+          seed: 1
+        })
+
+      future = Series.from_list(Enum.map(1..5, &Date.add(List.last(dates), &1)))
+      predictions = Soothsayer.fit(model, df) |> Soothsayer.predict(future)
+
+      assert DataFrame.names(predictions) ==
+               ["ds", "yhat", "yhat_10", "yhat_97.5", "trend", "yearly_seasonality"]
+
+      assert DataFrame.n_rows(predictions) == 5
+      assert Series.dtype(predictions["ds"]) == :date
+      assert Series.to_list(predictions["ds"]) == Series.to_list(future)
+
+      assert Series.to_list(predictions["yhat_10"])
+             |> Enum.zip(Series.to_list(predictions["yhat"]))
+             |> Enum.all?(fn {low, median} -> low <= median end)
+    end
+
+    test "keeps the timestamp dtype of the input" do
+      hours = Enum.map(0..99, &NaiveDateTime.add(~N[2023-01-01 00:00:00], &1, :hour))
+      y = Enum.map(0..99, &(10 + :math.sin(&1 / 24 * 2 * :math.pi())))
+      df = DataFrame.new(%{"ds" => hours, "y" => y})
+
+      model =
+        Soothsayer.new(%{
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 1,
+          learning_rate: 0.01
+        })
+
+      next = Series.from_list([~N[2023-01-05 04:00:00], ~N[2023-01-05 05:00:00]])
+      predictions = Soothsayer.fit(model, df) |> Soothsayer.predict(next)
+
+      assert {:naive_datetime, _precision} = Series.dtype(predictions["ds"])
+      assert DataFrame.names(predictions) == ["ds", "yhat", "trend", "daily_seasonality"]
+    end
+
+    test "component columns add up to yhat, with the trend on or off" do
+      {dates, df} = daily_frame()
+      future = Series.from_list(Enum.map(1..10, &Date.add(List.last(dates), &1)))
+
+      for trend_enabled <- [true, false] do
+        model =
+          Soothsayer.new(%{
+            trend: %{enabled: trend_enabled},
+            epochs: 2,
+            learning_rate: 0.01,
+            seed: 1
+          })
+
+        predictions = Soothsayer.fit(model, df) |> Soothsayer.predict(future)
+
+        assert DataFrame.names(predictions) == [
+                 "ds",
+                 "yhat",
+                 "trend",
+                 "yearly_seasonality",
+                 "weekly_seasonality"
+               ]
+
+        summed =
+          ["trend", "yearly_seasonality", "weekly_seasonality"]
+          |> Enum.map(&predictions[&1])
+          |> Enum.reduce(&Series.add/2)
+
+        difference =
+          summed |> Series.subtract(predictions["yhat"]) |> Series.abs() |> Series.max()
+
+        assert difference < 1.0e-3
+
+        unless trend_enabled do
+          # a flat line at the training mean
+          assert Series.n_distinct(predictions["trend"]) == 1
+        end
       end
     end
   end

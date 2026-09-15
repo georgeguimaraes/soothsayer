@@ -113,10 +113,14 @@ Axon.Display.as_graph(Soothsayer.display_network(model), input)
 
 ```elixir
 predictions = Soothsayer.predict(fitted_model, df["ds"])
+```
 
+`predict` returns a DataFrame with `ds`, `yhat` and one column per component. Put the forecast next to the actuals:
+
+```elixir
 df_with_predictions =
   df
-  |> DataFrame.put("yhat", predictions)
+  |> DataFrame.put("yhat", predictions["yhat"])
 ```
 
 ```elixir
@@ -136,16 +140,14 @@ Vl.new(width: 800, height: 400, title: "Actual vs Predicted")
 
 ### Extract components
 
-One of Soothsayer's strengths is interpretability. We can see what each component contributes:
+One of Soothsayer's strengths is interpretability. The component columns of the prediction show what each one contributes, and they add up to `yhat`:
 
 ```elixir
-components = Soothsayer.predict_components(fitted_model, df["ds"])
-
 df_components =
   df
-  |> DataFrame.put("trend", components.trend)
-  |> DataFrame.put("yearly", components.yearly_seasonality)
-  |> DataFrame.put("weekly", components.weekly_seasonality)
+  |> DataFrame.put("trend", predictions["trend"])
+  |> DataFrame.put("yearly", predictions["yearly_seasonality"])
+  |> DataFrame.put("weekly", predictions["weekly_seasonality"])
 ```
 
 ```elixir
@@ -219,7 +221,7 @@ model_linear = Soothsayer.new(%{
 })
 
 fitted_linear = Soothsayer.fit(model_linear, df_cp)
-pred_linear = Soothsayer.predict(fitted_linear, df_cp["ds"])
+pred_linear = Soothsayer.predict(fitted_linear, df_cp["ds"])["yhat"]
 ```
 
 ```elixir
@@ -231,7 +233,7 @@ model_piecewise = Soothsayer.new(%{
 })
 
 fitted_piecewise = Soothsayer.fit(model_piecewise, df_cp)
-pred_piecewise = Soothsayer.predict(fitted_piecewise, df_cp["ds"])
+pred_piecewise = Soothsayer.predict(fitted_piecewise, df_cp["ds"])["yhat"]
 ```
 
 ```elixir
@@ -320,7 +322,7 @@ model_no_ar = Soothsayer.new(%{
 })
 
 fitted_no_ar = Soothsayer.fit(model_no_ar, df_ar)
-pred_no_ar = Soothsayer.predict(fitted_no_ar, df_ar["ds"])
+pred_no_ar = Soothsayer.predict(fitted_no_ar, df_ar["ds"])["yhat"]
 ```
 
 ```elixir
@@ -333,7 +335,7 @@ model_with_ar = Soothsayer.new(%{
 })
 
 fitted_with_ar = Soothsayer.fit(model_with_ar, df_ar)
-pred_with_ar = Soothsayer.predict(fitted_with_ar, df_ar["ds"])
+pred_with_ar = Soothsayer.predict(fitted_with_ar, df_ar["ds"])["yhat"]
 ```
 
 ```elixir
@@ -477,10 +479,7 @@ predictions_events = Soothsayer.predict(fitted_events, future_series, events: fu
 ```
 
 ```elixir
-df_future = DataFrame.new(%{
-  "ds" => future_dates_list,
-  "yhat" => Nx.to_flat_list(predictions_events)
-})
+df_future = DataFrame.select(predictions_events, ["ds", "yhat"])
 
 Vl.new(width: 800, height: 400, title: "Predictions with Future Sale Events")
 |> Vl.data_from_values(df_future)
@@ -605,11 +604,11 @@ Axon.Display.as_graph(Soothsayer.display_network(energy_model), full_input)
 ```
 
 ```elixir
-energy_pred = Soothsayer.predict(fitted_energy, real_df["ds"])
+energy_predictions = Soothsayer.predict(fitted_energy, real_df["ds"])
 
 real_df_pred =
   real_df
-  |> DataFrame.put("yhat", energy_pred)
+  |> DataFrame.put("yhat", energy_predictions["yhat"])
 
 Vl.new(width: 800, height: 400, title: "Energy Prices: Actual vs Predicted")
 |> Vl.data_from_values(real_df_pred, only: ["ds", "y", "yhat"])
@@ -628,13 +627,11 @@ Vl.new(width: 800, height: 400, title: "Energy Prices: Actual vs Predicted")
 ### Decomposed components
 
 ```elixir
-energy_components = Soothsayer.predict_components(fitted_energy, real_df["ds"])
-
 real_df_comp =
   real_df
-  |> DataFrame.put("trend", energy_components.trend)
-  |> DataFrame.put("yearly", energy_components.yearly_seasonality)
-  |> DataFrame.put("weekly", energy_components.weekly_seasonality)
+  |> DataFrame.put("trend", energy_predictions["trend"])
+  |> DataFrame.put("yearly", energy_predictions["yearly_seasonality"])
+  |> DataFrame.put("weekly", energy_predictions["weekly_seasonality"])
 ```
 
 ```elixir
@@ -695,12 +692,10 @@ future_dates = Enum.map(1..90, fn i -> Date.add(last_date, i) end)
 future_series = Series.from_list(future_dates)
 
 # Make predictions
-future_predictions = Soothsayer.predict(fitted_energy, future_series)
-
-future_df = DataFrame.new(%{
-  "ds" => future_dates,
-  "yhat" => Nx.to_flat_list(future_predictions)
-})
+future_df =
+  fitted_energy
+  |> Soothsayer.predict(future_series)
+  |> DataFrame.select(["ds", "yhat"])
 ```
 
 ```elixir
@@ -708,7 +703,7 @@ future_df = DataFrame.new(%{
 historical_subset =
   real_df
   |> DataFrame.tail(180)
-  |> DataFrame.put("yhat", Soothsayer.predict(fitted_energy, DataFrame.tail(real_df, 180)["ds"]))
+  |> DataFrame.put("yhat", Soothsayer.predict(fitted_energy, DataFrame.tail(real_df, 180)["ds"])["yhat"])
   |> DataFrame.put("type", List.duplicate("historical", 180))
   |> DataFrame.select(["ds", "y", "yhat", "type"])
 

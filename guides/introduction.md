@@ -73,10 +73,11 @@ fitted_model = Soothsayer.fit(model, df)
 # Make predictions
 future_dates = Series.from_list(Date.range(~D[2023-01-01], ~D[2023-12-31]) |> Enum.to_list())
 predictions = Soothsayer.predict(fitted_model, future_dates)
+# => a DataFrame with ds, yhat and one column per component:
+#    trend, yearly_seasonality, weekly_seasonality, ...
 
-# Get individual components
-components = Soothsayer.predict_components(fitted_model, future_dates)
-# => %{combined: ..., trend: ..., yearly_seasonality: ..., weekly_seasonality: ..., daily_seasonality: ..., ar: ..., events: ...}
+predictions["yhat"]
+predictions["trend"]
 ```
 
 ## Next Steps

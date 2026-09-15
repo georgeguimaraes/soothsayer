@@ -165,7 +165,7 @@ defmodule Soothsayer.LaggedRegressorsTest do
           Series.from_list([Date.add(last_date, 1), Date.add(last_date, 2)])
         )
 
-      assert Nx.shape(first_block) == {2, 1}
+      assert DataFrame.n_rows(first_block) == 2
 
       # The second block origin is last_date + 2; its window starts at last_date + 1, which has no temperature yet
       assert_raise ArgumentError, ~r/no value for 2022-07-01/, fn ->
@@ -183,7 +183,7 @@ defmodule Soothsayer.LaggedRegressorsTest do
           regressors: newer
         )
 
-      assert Nx.shape(third_day) == {1, 1}
+      assert DataFrame.n_rows(third_day) == 1
     end
   end
 end
