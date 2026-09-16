@@ -35,8 +35,8 @@ defmodule Soothsayer.MixProject do
       {:nx, "~> 1.0", override: true},
       {:axon, "~> 0.8.0"},
       {:exla, "~> 1.0"},
-      # Country holidays. Optional: only needed with holidays: %{countries: [...]}.
-      {:holidefs, "~> 0.4", optional: true},
+      # Country holidays for holidays: %{countries: [...]}.
+      {:dayoff, "~> 0.1.1"},
       {:ex_doc, ">= 0.0.0", only: :docs},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
@@ -71,7 +71,8 @@ defmodule Soothsayer.MixProject do
       deps: [
         axon: "https://hexdocs.pm/axon/",
         nx: "https://hexdocs.pm/nx/",
-        explorer: "https://hexdocs.pm/explorer/"
+        explorer: "https://hexdocs.pm/explorer/",
+        dayoff: "https://hexdocs.pm/dayoff/"
       ],
       extras: [
         "README.md",

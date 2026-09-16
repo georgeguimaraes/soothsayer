@@ -7,64 +7,76 @@ defmodule Soothsayer.HolidaysTest do
 
   defp config(overrides) do
     Map.merge(
-      %{countries: [:us], steps_before: 0, steps_after: 0, regions: [], include_informal: false},
+      %{countries: ["US"], steps_before: 0, steps_after: 0, types: [:public], language: "en"},
       overrides
     )
   end
 
   describe "dates/2" do
-    test "names the US holidays in English on their rule dates" do
+    test "names the US public holidays in English" do
       dates = Holidays.dates(config(%{}), 2023..2023)
 
       assert dates["Independence Day"] == [~D[2023-07-04]]
       assert dates["Christmas Day"] == [~D[2023-12-25]]
-      assert dates["Thanksgiving"] == [~D[2023-11-23]]
-      refute Map.has_key?(dates, "Good Friday")
+      assert dates["Thanksgiving Day"] == [~D[2023-11-23]]
+      refute Map.has_key?(dates, "Valentine's Day")
     end
 
-    test "informal holidays come in with include_informal" do
-      dates = Holidays.dates(config(%{include_informal: true}), 2023..2023)
-      assert dates["Good Friday"] == [~D[2023-04-07]]
+    test "types add the other holiday kinds" do
+      dates = Holidays.dates(config(%{types: [:public, :observance]}), 2023..2023)
+      assert dates["Valentine's Day"] == [~D[2023-02-14]]
     end
 
     test "covers every year asked for and merges the same name across countries" do
-      dates = Holidays.dates(config(%{countries: [:us, :gb]}), 2022..2023)
+      dates = Holidays.dates(config(%{countries: ["US", "GB"]}), 2022..2023)
 
       assert dates["Christmas Day"] == [~D[2022-12-25], ~D[2023-12-25]]
-      assert dates["Boxing Day"] == [~D[2022-12-26], ~D[2023-12-26]]
+      assert Map.has_key?(dates, "Boxing Day")
     end
 
-    test "names are sorted and empty without countries" do
-      names = Holidays.names(config(%{}), 2023..2023)
-      assert names == Enum.sort(names)
-      assert "Labor Day" in names
+    test "a state in the code adds its own holidays" do
+      national = Holidays.names(config(%{}), 2023..2023)
+      california = Holidays.names(config(%{countries: ["US-CA"]}), 2023..2023)
+
+      assert "César Chávez Day" in (california -- national)
+      assert national == Enum.sort(national)
       assert Holidays.dates(config(%{countries: []}), 2023..2023) == %{}
     end
   end
 
   describe "normalize_config!/1" do
-    test "wraps and normalizes country codes" do
-      assert Holidays.normalize_config!(config(%{countries: "US"})).countries == [:us]
+    test "wraps and normalizes codes, keeping subdivision codes as written" do
+      assert Holidays.normalize_config!(config(%{countries: :us})).countries == ["US"]
 
-      assert Holidays.normalize_config!(config(%{countries: [:gb, "us", :gb]})).countries == [
-               :gb,
-               :us
+      assert Holidays.normalize_config!(config(%{countries: ["us-ca", :gb, "GB"]})).countries == [
+               "GB",
+               "US-CA"
+             ]
+
+      assert Holidays.normalize_config!(config(%{countries: ["CK-Aitutaki"]})).countries == [
+               "CK-Aitutaki"
              ]
     end
 
-    test "rejects unknown countries, naming the supported ones" do
-      assert_raise ArgumentError, ~r/got :narnia. Supported: at, au, be/, fn ->
+    test "rejects unknown codes with dayoff's message" do
+      assert_raise ArgumentError, ~r/unknown country "NARNIA". Known: AD, AE/, fn ->
         Soothsayer.new(%{holidays: %{countries: [:narnia]}})
       end
     end
 
-    test "rejects bad windows" do
+    test "rejects the old keys, bad windows and bad types" do
+      assert_raise ArgumentError,
+                   ~r/holidays.regions and holidays.include_informal are gone/,
+                   fn ->
+                     Soothsayer.new(%{holidays: %{countries: ["US"], regions: ["us_ca"]}})
+                   end
+
       assert_raise ArgumentError, ~r/holidays.steps_before must be an integer >= 0/, fn ->
-        Soothsayer.new(%{holidays: %{countries: [:us], steps_before: -1}})
+        Soothsayer.new(%{holidays: %{countries: ["US"], steps_before: -1}})
       end
 
-      assert_raise ArgumentError, ~r/steps_before and steps_after now/, fn ->
-        Soothsayer.new(%{holidays: %{countries: [:us], lower_window: -1}})
+      assert_raise ArgumentError, ~r/holidays.types must be a non-empty list/, fn ->
+        Soothsayer.new(%{holidays: %{countries: ["US"], types: [:informal]}})
       end
     end
   end

@@ -1,75 +1,67 @@
 defmodule Soothsayer.Holidays do
   @moduledoc """
   Country holidays as events, the way NeuralProphet's `add_country_holidays`
-  does it.
+  does it. The dates come from [dayoff](https://hex.pm/packages/dayoff),
+  which ships the date-holidays dataset: 200+ countries with their states
+  and regions.
 
-  Dates come from the `holidefs` package, an optional dependency:
-
-      {:holidefs, "~> 0.4"}
-
-  Every holiday of the configured countries becomes its own event, named as
-  holidefs names it in English ("Independence Day", "Christmas Day"), with
-  the window shared by all of them:
+  Every holiday of the configured countries becomes its own event, named in
+  English by default ("Independence Day", "Christmas Day"), with the window
+  shared by all of them:
 
       Soothsayer.new(%{
-        holidays: %{countries: [:us], steps_before: 1, steps_after: 1}
+        holidays: %{countries: ["US", "BR"], steps_before: 1, steps_after: 1}
       })
 
-  The dates are generated for the years of the data at fit, and again for
-  the years being predicted, so nothing has to be listed by hand. The same
-  holiday name from two countries is one event, as in NeuralProphet.
+  A state or region goes in the code the dayoff way, `"US-CA"` or
+  `"DE-BY-A"`. `types` picks which dayoff holiday types count, public ones
+  by default. The dates are generated for the years of the data at fit, and
+  again for the years being predicted, so nothing has to be listed by hand.
+  The same holiday name from two codes is one event, as in NeuralProphet.
   """
-
-  @compile {:no_warn_undefined, [Holidefs, Gettext]}
 
   @type config :: %{
           optional(:names) => list(String.t()),
-          countries: list(atom()),
+          countries: list(String.t()),
           steps_before: non_neg_integer(),
           steps_after: non_neg_integer(),
-          regions: list(String.t()),
-          include_informal: boolean()
+          types: list(Dayoff.Holiday.type()),
+          language: String.t()
         }
 
   @doc """
-  Whether the holidefs package is available.
+  The country codes dayoff knows, sorted. States and regions are listed by
+  `Dayoff.states/1` and `Dayoff.regions/2`.
   """
-  @spec available?() :: boolean()
-  def available?, do: Code.ensure_loaded?(Holidefs)
-
-  @doc """
-  The locale codes holidefs knows, sorted.
-  """
-  @spec supported() :: list(atom())
-  def supported, do: Holidefs.locales() |> Map.keys() |> Enum.sort()
+  @spec supported() :: list(String.t())
+  def supported, do: Dayoff.countries() |> Map.keys() |> Enum.sort()
 
   @doc """
   Validates the `holidays` config and normalizes `countries` to a sorted
-  list of locale atoms. Raises `ArgumentError` on anything else.
+  list of dayoff codes with the country part uppercased. Raises
+  `ArgumentError` on anything else, including the codes dayoff doesn't know.
   """
   @spec normalize_config!(map()) :: config()
   def normalize_config!(%{countries: countries} = config) do
-    countries = List.wrap(countries)
-
-    if countries != [] and not available?() do
+    for key <- [:regions, :include_informal], Map.has_key?(config, key) do
       raise ArgumentError,
-            "Country holidays need the holidefs package. " <>
-              "Add {:holidefs, \"~> 0.4\"} to your deps."
+            "holidays.regions and holidays.include_informal are gone: put the state in the " <>
+              "country code (\"US-CA\") and pick holiday types with types: [:public, :observance]"
     end
 
-    countries = countries |> Enum.map(&locale!/1) |> Enum.uniq() |> Enum.sort()
-
+    countries = countries |> List.wrap() |> Enum.map(&code!/1) |> Enum.uniq() |> Enum.sort()
     validate_windows!(config)
 
-    unless is_list(config.regions) and Enum.all?(config.regions, &is_binary/1) do
+    unless is_list(config.types) and config.types != [] and
+             Enum.all?(config.types, &(&1 in Dayoff.Holiday.types())) do
       raise ArgumentError,
-            "holidays.regions must be a list of holidefs region strings like \"us_ca\", " <>
-              "got #{inspect(config.regions)}"
+            "holidays.types must be a non-empty list from #{inspect(Dayoff.Holiday.types())}, " <>
+              "got #{inspect(config.types)}"
     end
 
-    unless is_boolean(config.include_informal) do
+    unless is_binary(config.language) do
       raise ArgumentError,
-            "holidays.include_informal must be true or false, got #{inspect(config.include_informal)}"
+            "holidays.language must be a language code like \"en\", got #{inspect(config.language)}"
     end
 
     %{config | countries: countries}
@@ -95,41 +87,66 @@ defmodule Soothsayer.Holidays do
     end
   end
 
-  defp locale!(country) when is_atom(country) do
-    if country in supported() do
-      country
-    else
-      raise ArgumentError,
-            "holidays.countries must be holidefs locale codes, got #{inspect(country)}. " <>
-              "Supported: #{Enum.map_join(supported(), ", ", &Atom.to_string/1)}"
+  # "us-ca" becomes "US-CA": the country is uppercased and the state and
+  # region are spelled the way dayoff has them (it also has codes like
+  # "Aitutaki"). dayoff raises for codes it doesn't know.
+  defp code!(code) when is_atom(code) and not is_nil(code),
+    do: code |> Atom.to_string() |> code!()
+
+  defp code!(code) when is_binary(code) do
+    case String.split(code, "-") do
+      [country] ->
+        country = String.upcase(country)
+        Dayoff.languages(country)
+        country
+
+      [country, state] ->
+        country = String.upcase(country)
+        Enum.join([country, state!(country, state)], "-")
+
+      [country, state, region] ->
+        country = String.upcase(country)
+        state = state!(country, state)
+
+        region =
+          subdivision!(
+            Dayoff.regions(country, state),
+            region,
+            "#{country}-#{state} has no region"
+          )
+
+        Enum.join([country, state, region], "-")
+
+      _ ->
+        raise ArgumentError,
+              "holidays.countries must be dayoff codes like \"US\" or \"US-CA\", got #{inspect(code)}"
     end
   end
 
-  defp locale!(country) when is_binary(country) do
-    supported()
-    |> Enum.find(&(Atom.to_string(&1) == String.downcase(country)))
-    |> case do
-      nil -> locale!(String.to_atom(country))
-      locale -> locale
-    end
-  end
-
-  defp locale!(country) do
+  defp code!(code) do
     raise ArgumentError,
-          "holidays.countries must be holidefs locale codes like :us, got #{inspect(country)}"
+          "holidays.countries must be dayoff codes like \"US\" or \"US-CA\", got #{inspect(code)}"
+  end
+
+  defp state!(country, state),
+    do: subdivision!(Dayoff.states(country), state, "#{country} has no state or region")
+
+  defp subdivision!(known, code, message) do
+    Enum.find(Map.keys(known), &(String.downcase(&1) == String.downcase(code))) ||
+      raise(
+        ArgumentError,
+        "#{message} #{inspect(code)}. Known: #{known |> Map.keys() |> Enum.sort() |> Enum.join(", ")}"
+      )
   end
 
   @doc """
   The holiday dates of the configured countries for the given years, by
-  holiday name.
-
-  Names are the English ones holidefs returns, whatever Gettext locale the
-  calling process has set, so they are stable feature keys. Dates are the
-  rule dates (not the observed ones), sorted and unique per name.
+  holiday name. Substitute days carry their own name and are their own
+  event.
 
   ## Examples
 
-      iex> config = %{countries: [:us], steps_before: 0, steps_after: 0, regions: [], include_informal: false}
+      iex> config = %{countries: ["US"], steps_before: 0, steps_after: 0, types: [:public], language: "en"}
       iex> Soothsayer.Holidays.dates(config, 2023..2023)["Independence Day"]
       [~D[2023-07-04]]
 
@@ -138,18 +155,11 @@ defmodule Soothsayer.Holidays do
   def dates(%{countries: []}, _years), do: %{}
 
   def dates(config, years) do
-    options = [regions: config.regions, include_informal?: config.include_informal]
-
-    holidays =
-      Gettext.with_locale(Holidefs.Gettext, "en", fn ->
-        for country <- config.countries,
-            year <- years,
-            holiday <- year!(country, year, options) do
-          holiday
-        end
-      end)
-
-    holidays
+    for code <- config.countries,
+        year <- years,
+        holiday <- Dayoff.holidays(code, year, types: config.types, language: config.language) do
+      holiday
+    end
     |> Enum.group_by(& &1.name, & &1.date)
     |> Map.new(fn {name, dates} -> {name, dates |> Enum.uniq() |> Enum.sort(Date)} end)
   end
@@ -159,15 +169,4 @@ defmodule Soothsayer.Holidays do
   """
   @spec names(config(), Enumerable.t()) :: list(String.t())
   def names(config, years), do: config |> dates(years) |> Map.keys() |> Enum.sort()
-
-  defp year!(country, year, options) do
-    case Holidefs.year(country, year, options) do
-      {:ok, holidays} ->
-        holidays
-
-      {:error, reason} ->
-        raise ArgumentError,
-              "holidefs has no holidays for #{inspect(country)} in #{year}: #{inspect(reason)}"
-    end
-  end
 end

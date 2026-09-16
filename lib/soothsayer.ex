@@ -63,8 +63,8 @@ defmodule Soothsayer do
         countries: [],
         steps_before: 0,
         steps_after: 0,
-        regions: [],
-        include_informal: false
+        types: [:public],
+        language: "en"
       },
       regressors: [],
       lagged_regressors: %{},
@@ -273,7 +273,7 @@ defmodule Soothsayer do
 
     When the model config lists `regressors`, `data` must contain a column
     for each of them. With `holidays: %{countries: [...]}` every holiday of
-    those countries becomes an event of its own, named as holidefs names it,
+    those countries becomes an event of its own, named as dayoff names it,
     see `Soothsayer.Holidays`; the fitted `config.events` lists them.
 
   ## Missing data
@@ -1220,7 +1220,7 @@ defmodule Soothsayer do
   ## Parameters
 
     * `model` - A fitted `Soothsayer.Model` struct with events or holidays
-      configured. Country holidays show up under their holidefs names, for
+      configured. Country holidays show up under their dayoff names, for
       example `"Christmas Day_0"`.
 
   ## Returns

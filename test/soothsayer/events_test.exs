@@ -411,8 +411,8 @@ defmodule Soothsayer.EventsTest do
           countries: [:us],
           steps_before: 0,
           steps_after: 0,
-          regions: [],
-          include_informal: false,
+          types: [:public],
+          language: "en",
           names: ["Christmas Day"]
         }
       }

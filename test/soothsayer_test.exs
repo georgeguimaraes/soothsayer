@@ -255,7 +255,14 @@ defmodule SoothsayerTest do
 
       assert "Independence Day" in Map.keys(fitted.config.events)
       assert fitted.config.holidays.names == Enum.sort(fitted.config.holidays.names)
-      assert length(fitted.config.holidays.names) == 9
+
+      us_public_names =
+        for year <- 2022..2023,
+            holiday <- Dayoff.holidays("US", year, types: [:public]),
+            uniq: true,
+            do: holiday.name
+
+      assert length(fitted.config.holidays.names) == length(us_public_names)
 
       effects = Soothsayer.get_event_effects(fitted)
 

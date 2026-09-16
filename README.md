@@ -259,16 +259,16 @@ Example: `%{steps_before: 1, steps_after: 1}` creates effects for the day before
 
 #### Country Holidays and Recurring Events
 
-Every holiday of a country becomes an event of its own, dates generated for the years in your data and the years you forecast. It uses the [holidefs](https://hex.pm/packages/holidefs) package, an optional dependency, so add `{:holidefs, "~> 0.4"}` to your deps:
+Every holiday of a country becomes an event of its own, dates generated for the years in your data and the years you forecast. The dates come from [dayoff](https://hex.pm/packages/dayoff), 200+ countries with their states and regions, no setup needed:
 
 ```elixir
 model = Soothsayer.new(%{
-  holidays: %{countries: [:us], steps_before: 1, steps_after: 1}
+  holidays: %{countries: ["US"], steps_before: 1, steps_after: 1}
 })
 
 fitted_model = Soothsayer.fit(model, df)
 Soothsayer.get_event_effects(fitted_model)
-# => %{"Christmas Day_0" => 48.5, "Independence Day_0" => 31.2, "Thanksgiving_0" => ...}
+# => %{"Christmas Day_0" => 48.5, "Independence Day_0" => 31.2, "Thanksgiving Day_0" => ...}
 ```
 
 An event that falls on the same month and day every year can be given once with `recurring: :yearly`, and the occurrences given at fit are remembered, so predicting inside the training period or into future years needs no events dataframe. See the [Events guide](guides/events.md).

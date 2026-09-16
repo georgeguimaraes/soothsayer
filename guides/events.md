@@ -1,6 +1,6 @@
 # Events
 
-Events capture the impact of special occasions that affect your time series - holidays, promotions, product launches, and other one-off or recurring occurrences. Country holidays come built in through the [holidefs](https://hex.pm/packages/holidefs) package, see [Country Holidays](#country-holidays).
+Events capture the impact of special occasions that affect your time series - holidays, promotions, product launches, and other one-off or recurring occurrences. Country holidays come built in through [dayoff](https://hex.pm/packages/dayoff), see [Country Holidays](#country-holidays).
 
 This is useful for:
 - Holiday effects (Christmas, Black Friday)
@@ -232,17 +232,11 @@ Every year in the training data gets its May 10, and so does every year you pred
 
 ## Country Holidays
 
-Every holiday of a country becomes an event of its own, the way NeuralProphet's `add_country_holidays` works. The dates come from the [holidefs](https://hex.pm/packages/holidefs) package, an optional dependency, so add it to your project first:
-
-```elixir
-{:holidefs, "~> 0.4"}
-```
-
-Then name the countries and, optionally, one window for all of their holidays:
+Every holiday of a country becomes an event of its own, the way NeuralProphet's `add_country_holidays` works. The dates come from [dayoff](https://hex.pm/packages/dayoff), which ships the date-holidays dataset for 200+ countries, states and regions. Name the countries and, optionally, one window for all of their holidays:
 
 ```elixir
 model = Soothsayer.new(%{
-  holidays: %{countries: [:us], steps_before: 1, steps_after: 1}
+  holidays: %{countries: ["US"], steps_before: 1, steps_after: 1}
 })
 
 fitted = Soothsayer.fit(model, df)
@@ -254,18 +248,18 @@ That is all. Fit generates the holiday dates for the years in your data, predict
 Soothsayer.get_event_effects(fitted)
 # => %{
 #   "Christmas Day_-1" => 12.1, "Christmas Day_0" => 48.5, "Christmas Day_+1" => -3.2,
-#   "Independence Day_-1" => ..., "Thanksgiving_0" => ..., ...
+#   "Independence Day_-1" => ..., "Thanksgiving Day_0" => ..., ...
 # }
 ```
 
-Holidays are named as holidefs names them in English ("Independence Day", "Thanksgiving", "Christmas Day"), whatever Gettext locale your process has set. The same name from two countries is one event, so `countries: [:us, :gb]` has a single "Christmas Day". Your own events can't reuse a holiday name; fit raises if they do.
+Holidays are named in English by default ("Independence Day", "Thanksgiving Day", "Christmas Day"). The same name from two countries is one event, so `countries: ["US", "GB"]` has a single "Christmas Day". A substitute day ("Christmas Day (substitute day)") is its own event, since the observed Monday behaves differently from the 25th. Your own events can't reuse a holiday name; fit raises if they do.
 
 | Option | Description |
 |--------|-------------|
-| `countries` | holidefs locale codes, `:us`, `:gb`, `:br`, `:de`, ... Ask `Soothsayer.Holidays.supported/0` for the list. |
+| `countries` | dayoff codes: `"US"`, `:br`, or with a state or region, `"US-CA"`, `"DE-BY-A"`. `Soothsayer.Holidays.supported/0` lists the countries, `Dayoff.states/1` and `Dayoff.regions/2` the subdivisions. |
 | `steps_before`, `steps_after` | One window for every holiday, steps before and after like event windows. Default `0`. |
-| `regions` | holidefs regions such as `["us_ca"]`, added to the national holidays. |
-| `include_informal` | Include holidays holidefs marks informal, like Good Friday in the US. Default `false`. |
+| `types` | Which dayoff holiday types count: `:public`, `:bank`, `:school`, `:optional`, `:observance`. Default `[:public]`. |
+| `language` | Language of the holiday names, which are the event names. Default `"en"`, falling back to the country's own language when a name has no translation. |
 
 A holiday is a plain date, so on hourly data it lands on midnight like any date event; use the window to cover the rest of the day. NeuralProphet's holiday regularization and multiplicative mode aren't there yet.
 
