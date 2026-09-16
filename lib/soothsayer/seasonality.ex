@@ -350,6 +350,23 @@ defmodule Soothsayer.Seasonality do
   end
 
   @doc """
+  Raises `ArgumentError` when a condition column of the config is missing
+  from the dataframe.
+  """
+  @spec validate_condition_columns!(DataFrame.t(), map()) :: :ok
+  def validate_condition_columns!(%DataFrame{} = dataframe, config) do
+    columns = DataFrame.names(dataframe)
+
+    for column <- condition_columns(config), column not in columns do
+      raise ArgumentError,
+            "Seasonality condition column #{inspect(column)} not found. " <>
+              "Available columns: #{inspect(columns)}"
+    end
+
+    :ok
+  end
+
+  @doc """
   Condition values by column name and naive timestamp from a dataframe with
   a "ds" column, for every condition column of the config. Booleans become
   1.0 and 0.0. Raises `ArgumentError` when a column is missing or has a
@@ -358,15 +375,9 @@ defmodule Soothsayer.Seasonality do
   @spec condition_values(DataFrame.t(), map()) ::
           %{String.t() => %{NaiveDateTime.t() => float()}}
   def condition_values(%DataFrame{} = dataframe, config) do
-    columns = DataFrame.names(dataframe)
+    validate_condition_columns!(dataframe, config)
 
     Map.new(condition_columns(config), fn column ->
-      unless column in columns do
-        raise ArgumentError,
-              "Seasonality condition column #{inspect(column)} not found. " <>
-                "Available columns: #{inspect(columns)}"
-      end
-
       values = Regressors.values_by_timestamp(dataframe, column)
 
       for {_timestamp, value} <- values, value < 0 or value > 1 do

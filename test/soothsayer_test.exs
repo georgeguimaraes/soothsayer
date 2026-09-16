@@ -948,6 +948,31 @@ defmodule SoothsayerTest do
         Soothsayer.predict(fitted, holdout["ds"])
       end
     end
+
+    test "conditions cover the rows that missing data handling adds" do
+      :rand.seed(:exsss, {2, 2, 2})
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2021-12-31]) |> Enum.to_list()
+      frame = cycle_frame(dates, start_date, 7, true)
+      gapped = DataFrame.filter_with(frame, &Series.not_equal(&1["ds"], ~D[2020-07-15]))
+
+      model =
+        Soothsayer.new(%{
+          trend: %{changepoints: 0},
+          seasonality: %{
+            yearly: %{enabled: false},
+            weekly: %{enabled: true, condition: "summer"}
+          },
+          ar: %{enabled: true, lags: 2},
+          epochs: 1
+        })
+
+      fitted = Soothsayer.fit(model, gapped)
+
+      # the regridded row got an imputed condition value along with its y
+      assert length(fitted.config.training_data.timestamps) == DataFrame.n_rows(gapped) + 1
+      assert fitted.config.training_data.regressors["summer"][~N[2020-07-15 00:00:00]] == 1.0
+    end
   end
 
   describe "multiplicative seasonality" do

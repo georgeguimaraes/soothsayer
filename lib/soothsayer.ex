@@ -363,7 +363,7 @@ defmodule Soothsayer do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
     Regressors.validate_columns!(data, Regressors.names(model.config))
-    conditions = Seasonality.condition_values(data, model.config)
+    Seasonality.validate_condition_columns!(data, model.config)
     Regressors.validate_columns!(data, LaggedRegressors.names(model.config))
 
     timestamps = Timestamp.from_series(data["ds"])
@@ -375,6 +375,9 @@ defmodule Soothsayer do
     # still missing is NaN in `data` and listed in `unfilled` by row.
     {data, unfilled} = MissingData.prepare(data, model.config, frequency)
     timestamps = Timestamp.from_series(data["ds"])
+
+    # Read after prepare, so regridded rows and imputed values are covered.
+    conditions = Seasonality.condition_values(data, model.config)
 
     # The frequency and the :auto seasonalities are settled before anything
     # is built from the config, so every component sees the same answer.
