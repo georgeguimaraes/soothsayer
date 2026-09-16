@@ -4,8 +4,6 @@
 
 Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It decomposes your time series into interpretable components (trend, seasonality, auto-regression, events) and uses neural networks to learn the patterns.
 
-Soothsayer is alpha. The API changes without notice, so pin the version.
-
 ## Installation
 
 Add `soothsayer` to your list of dependencies in `mix.exs`:
@@ -13,7 +11,7 @@ Add `soothsayer` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:soothsayer, "~> 0.6"}
+    {:soothsayer, "~> 1.0"}
   ]
 end
 ```
