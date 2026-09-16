@@ -12,11 +12,19 @@ defmodule Soothsayer.Layers do
   from the lags, and at the target positions, where it is part of the
   forecast. The dense layer is named `name` so its weights can be found for
   regularization and inspection.
+
+  Only the trend gets a bias (`use_bias: true`). It is the one intercept of
+  the model, as in NeuralProphet, so it carries the level of the series and
+  the other components stay zero-centered offsets. With a bias on every
+  component the biases all receive the same gradient and share the level
+  between them, which puts part of the level into the seasonalities.
   """
-  @spec position_dense(Axon.t(), String.t()) :: Axon.t()
-  def position_dense(input, name) do
+  @spec position_dense(Axon.t(), String.t(), keyword()) :: Axon.t()
+  def position_dense(input, name, opts \\ []) do
+    use_bias = Keyword.get(opts, :use_bias, false)
+
     input
-    |> Axon.dense(1, activation: :linear, name: name)
+    |> Axon.dense(1, activation: :linear, use_bias: use_bias, name: name)
     |> Axon.nx(&Nx.squeeze(&1, axes: [-1]), name: name <> "_positions")
   end
 

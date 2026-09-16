@@ -241,7 +241,14 @@ defmodule Soothsayer.Model do
     scale =
       Axon.add(detach_at_lags(trend, AR.lags(config)), Axon.constant(series_level(config)))
 
-    Map.new(seasonality, fn {period, component} -> {period, Axon.multiply(component, scale)} end)
+    # A disabled period is a scalar constant and stays one; multiplying it by
+    # the scale would turn it into a full tensor of zeros that predict would
+    # then report as a component.
+    Map.new(seasonality, fn {period, component} ->
+      if Seasonality.enabled?(config, period),
+        do: {period, Axon.multiply(component, scale)},
+        else: {period, component}
+    end)
   end
 
   defp apply_seasonality_mode(seasonality, _trend, _config), do: seasonality

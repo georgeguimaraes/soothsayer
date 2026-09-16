@@ -700,6 +700,26 @@ defmodule SoothsayerTest do
 
       # The seasonal effect is not a constant offset, it moves with the trend
       assert components.yearly_seasonality |> Nx.abs() |> Nx.sum() |> Nx.to_number() > 0
+
+      # The trend scale must not turn the disabled periods into full tensors,
+      # or predict reports them as columns of zeros.
+      assert Nx.size(components.weekly_seasonality) == 1
+      assert Nx.size(components.daily_seasonality) == 1
+
+      predictions = Soothsayer.predict(fitted_model, Series.from_list(future_dates))
+      assert DataFrame.names(predictions) == ["ds", "yhat", "trend", "yearly_seasonality"]
+    end
+
+    test "only the trend has an intercept, so the seasonality has no level of its own" do
+      :rand.seed(:exsss, {5, 6, 7})
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      df = DataFrame.new(%{"ds" => dates, "y" => multiplicative_series(dates, start_date)})
+      fitted_model = Soothsayer.fit(Soothsayer.new(%{epochs: 5}), df)
+
+      assert Map.has_key?(fitted_model.params.data["trend_dense"], "bias")
+      refute Map.has_key?(fitted_model.params.data["yearly_dense"], "bias")
+      refute Map.has_key?(fitted_model.params.data["weekly_dense"], "bias")
     end
 
     test "rejects unknown modes" do

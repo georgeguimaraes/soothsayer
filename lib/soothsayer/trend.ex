@@ -60,7 +60,7 @@ defmodule Soothsayer.Trend do
   """
   @spec build_component(Axon.t(), map()) :: Axon.t()
   def build_component(input, %{trend: %{enabled: true}}) do
-    Layers.position_dense(input, "trend_dense")
+    Layers.position_dense(input, "trend_dense", use_bias: true)
   end
 
   def build_component(_input, _config), do: Axon.constant(0)
