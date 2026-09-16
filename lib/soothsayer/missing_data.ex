@@ -24,6 +24,7 @@ defmodule Soothsayer.MissingData do
   alias Soothsayer.AR
   alias Soothsayer.Frequency
   alias Soothsayer.LaggedRegressors
+  alias Soothsayer.Regressors
   alias Soothsayer.Timestamp
 
   @type missing_positions :: %{String.t() => MapSet.t(non_neg_integer())}
@@ -43,7 +44,7 @@ defmodule Soothsayer.MissingData do
   """
   @spec prepare(DataFrame.t(), map(), Frequency.t()) :: {DataFrame.t(), missing_positions()}
   def prepare(%DataFrame{} = data, config, frequency) do
-    columns = Enum.uniq(["y" | config.regressors ++ LaggedRegressors.names(config)])
+    columns = Enum.uniq(["y" | Regressors.names(config) ++ LaggedRegressors.names(config)])
     timestamps = Series.to_list(data["ds"])
     values = Map.new(columns, &{&1, column_values(data, &1)})
 

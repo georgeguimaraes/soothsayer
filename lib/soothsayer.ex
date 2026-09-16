@@ -66,7 +66,7 @@ defmodule Soothsayer do
         types: [:public],
         language: "en"
       },
-      regressors: [],
+      regressors: %{},
       lagged_regressors: %{},
       quantiles: [],
       missing: %{impute: true, impute_linear: 10, impute_rolling: 10, drop_samples: false},
@@ -78,7 +78,11 @@ defmodule Soothsayer do
       seed: nil
     }
 
-    merged_config = deep_merge(default_config, config)
+    merged_config =
+      default_config
+      |> deep_merge(config)
+      |> Map.update!(:regressors, &Regressors.normalize_config!/1)
+
     validate_config!(merged_config)
 
     merged_config
@@ -94,7 +98,6 @@ defmodule Soothsayer do
     validate_seasonality_mode!(config)
     validate_seasonality_enabled!(config)
     Frequency.validate!(config.frequency)
-    validate_regressors!(config)
     validate_lagged_regressors!(config)
     validate_forecast_steps!(config)
     validate_missing!(config)
@@ -226,19 +229,6 @@ defmodule Soothsayer do
     :ok
   end
 
-  defp validate_regressors!(%{regressors: regressors}) when is_list(regressors) do
-    for name <- regressors, not is_binary(name) do
-      raise ArgumentError, "regressors must be column name strings, got #{inspect(name)}"
-    end
-
-    :ok
-  end
-
-  defp validate_regressors!(%{regressors: regressors}) do
-    raise ArgumentError,
-          "regressors must be a list of column names, got #{inspect(regressors)}"
-  end
-
   defp validate_forecast_steps!(%{ar: %{forecast_steps: steps}})
        when not (is_integer(steps) and steps > 0) do
     raise ArgumentError, "ar.forecast_steps must be a positive integer, got #{inspect(steps)}"
@@ -317,7 +307,7 @@ defmodule Soothsayer do
   def fit(%Model{} = model, %DataFrame{} = data, opts \\ []) do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
-    Regressors.validate_columns!(data, model.config.regressors)
+    Regressors.validate_columns!(data, Regressors.names(model.config))
     Regressors.validate_columns!(data, LaggedRegressors.names(model.config))
 
     timestamps = Timestamp.from_series(data["ds"])
@@ -436,7 +426,8 @@ defmodule Soothsayer do
       y_normalized: y_normalized_values,
       known_values: known_values,
       last_timestamp: Enum.max(timestamps, NaiveDateTime),
-      regressors: Map.new(config.regressors, &{&1, Regressors.values_by_timestamp(data, &1)}),
+      regressors:
+        Map.new(Regressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)}),
       lagged_regressors:
         Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)}),
       event_dates: Events.frame_dates(events_df)
@@ -675,7 +666,8 @@ defmodule Soothsayer do
     training_data = model.config.training_data
 
     regressor_values = %{
-      regressors: Regressors.known_values(training_data, regressors_df, model.config.regressors),
+      regressors:
+        Regressors.known_values(training_data, regressors_df, Regressors.names(model.config)),
       lagged_regressors: LaggedRegressors.known_values(training_data, regressors_df, model.config)
     }
 
@@ -827,7 +819,7 @@ defmodule Soothsayer do
   end
 
   defp put_training_regressors_input(x, model, timestamps, data) do
-    case model.config.regressors do
+    case Regressors.names(model.config) do
       [] -> x
       names -> Map.put(x, "regressors", Regressors.build_features(timestamps, data, names))
     end
@@ -838,7 +830,7 @@ defmodule Soothsayer do
   # sample get the training mean, which normalizes to zero, since a value
   # there only feeds that position's own output.
   defp put_regressors_input(x, model, timestamps, regressor_values, required_timestamps) do
-    case model.config.regressors do
+    case Regressors.names(model.config) do
       [] ->
         x
 
@@ -918,16 +910,19 @@ defmodule Soothsayer do
     end
   end
 
-  defp validate_regressors_option!(%Model{config: %{regressors: []}}, _regressors_df), do: :ok
+  defp validate_regressors_option!(%Model{} = model, regressors_df) do
+    case {Regressors.names(model.config), regressors_df} do
+      {[], _frame} ->
+        :ok
 
-  defp validate_regressors_option!(%Model{config: %{regressors: names}}, nil) do
-    raise ArgumentError,
-          "This model was fitted with regressors #{inspect(names)}. " <>
-            "Pass regressors: a dataframe with \"ds\" and those columns to predict."
-  end
+      {names, nil} ->
+        raise ArgumentError,
+              "This model was fitted with regressors #{inspect(names)}. " <>
+                "Pass regressors: a dataframe with \"ds\" and those columns to predict."
 
-  defp validate_regressors_option!(%Model{config: %{regressors: names}}, %DataFrame{} = frame) do
-    Regressors.validate_columns!(frame, names)
+      {names, %DataFrame{} = frame} ->
+        Regressors.validate_columns!(frame, names)
+    end
   end
 
   # Builds every input that depends only on the timestamp (trend,

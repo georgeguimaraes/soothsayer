@@ -8,8 +8,9 @@ defmodule Soothsayer.Regressors do
   feeding a linear layer, so its learned coefficient reads directly as the
   effect of one normalized unit of the regressor on the forecast.
 
-  Regressors are configured as a list of column names. The training
-  dataframe must contain those columns, and so must the dataframe passed as
+  Regressors are configured as a list of column names, or as a map from
+  column name to options, see `normalize_config!/1`. The training dataframe
+  must contain those columns, and so must the dataframe passed as
   `regressors:` to `Soothsayer.predict/3`. The training values are kept on
   the fitted model, so with auto-regression the lag timestamps of a
   forecast can reach back into the training data without the prediction
@@ -23,6 +24,68 @@ defmodule Soothsayer.Regressors do
   alias Soothsayer.Timestamp
 
   @layer_name "regressors_dense"
+  @defaults %{mode: :additive, regularization: nil, layers: []}
+  @known_keys Map.keys(@defaults)
+
+  # Configuration
+
+  @doc """
+  Normalizes the `regressors` config to a map from column name to a full
+  spec. A list of names gives every regressor the defaults; a map may give
+  each regressor part of its spec.
+
+  ## Examples
+
+      iex> Soothsayer.Regressors.normalize_config!(["temperature"])
+      %{"temperature" => %{mode: :additive, regularization: nil, layers: []}}
+
+      iex> Soothsayer.Regressors.normalize_config!(%{"temperature" => %{mode: :multiplicative}})
+      %{"temperature" => %{mode: :multiplicative, regularization: nil, layers: []}}
+
+  """
+  @spec normalize_config!(list(String.t()) | %{String.t() => map()}) :: %{String.t() => map()}
+  def normalize_config!(names) when is_list(names) do
+    for name <- names, not is_binary(name) do
+      raise ArgumentError, "regressors must be column name strings, got #{inspect(name)}"
+    end
+
+    Map.new(names, &{&1, @defaults})
+  end
+
+  def normalize_config!(specs) when is_map(specs) do
+    Map.new(specs, fn {name, spec} ->
+      unless is_binary(name) and is_map(spec) do
+        raise ArgumentError,
+              "regressors must map column name strings to option maps, " <>
+                "got #{inspect(name)} => #{inspect(spec)}"
+      end
+
+      for key <- Map.keys(spec), key not in @known_keys do
+        raise ArgumentError,
+              "unknown option #{inspect(key)} for regressor #{inspect(name)}. " <>
+                "Known: #{inspect(@known_keys)}"
+      end
+
+      {name, Map.merge(@defaults, spec)}
+    end)
+  end
+
+  def normalize_config!(other) do
+    raise ArgumentError,
+          "regressors must be a list of column names or a map of name to options, " <>
+            "got #{inspect(other)}"
+  end
+
+  @doc """
+  The configured regressor names, sorted. This is the column order of the
+  regressors input and of the layer kernel.
+  """
+  @spec names(map()) :: list(String.t())
+  def names(%{regressors: regressors}) when is_map(regressors),
+    do: regressors |> Map.keys() |> Enum.sort()
+
+  def names(%{regressors: regressors}) when is_list(regressors), do: Enum.sort(regressors)
+  def names(_config), do: []
 
   # Network Building
 
@@ -37,11 +100,12 @@ defmodule Soothsayer.Regressors do
 
   """
   @spec build_network_input(map()) :: Axon.t() | nil
-  def build_network_input(%{regressors: [_ | _] = names} = config) do
-    Axon.input("regressors", shape: {nil, AR.positions(config), length(names)})
+  def build_network_input(config) do
+    case names(config) do
+      [] -> nil
+      names -> Axon.input("regressors", shape: {nil, AR.positions(config), length(names)})
+    end
   end
-
-  def build_network_input(_config), do: nil
 
   @doc """
   Builds the regressors component layer.
@@ -55,11 +119,12 @@ defmodule Soothsayer.Regressors do
   @spec build_component(Axon.t() | nil, map()) :: Axon.t()
   def build_component(nil, _config), do: Axon.constant(0)
 
-  def build_component(input, %{regressors: [_ | _]}) do
-    Layers.position_dense(input, @layer_name)
+  def build_component(input, config) do
+    case names(config) do
+      [] -> Axon.constant(0)
+      _names -> Layers.position_dense(input, @layer_name)
+    end
   end
-
-  def build_component(_input, _config), do: Axon.constant(0)
 
   # Feature Engineering
 
@@ -77,13 +142,8 @@ defmodule Soothsayer.Regressors do
   ## Examples
 
       iex> dataframe = Explorer.DataFrame.new(%{"ds" => [~D[2023-01-01], ~D[2023-01-02]], "temperature" => [20.0, 22.5]})
-      iex> Soothsayer.Regressors.build_features([~D[2023-01-02]], dataframe, ["temperature"])
-      #Nx.Tensor<
-        f32[1][1]
-        [
-          [22.5]
-        ]
-      >
+      iex> Soothsayer.Regressors.build_features([~D[2023-01-02]], dataframe, ["temperature"]) |> Nx.to_flat_list()
+      [22.5]
 
   """
   @spec build_features(list(Timestamp.input()), DataFrame.t(), list(String.t())) ::
@@ -221,7 +281,7 @@ defmodule Soothsayer.Regressors do
   """
   @spec get_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
   def get_effects(%Soothsayer.Model{} = model) do
-    names = model.config[:regressors] || []
+    names = names(model.config)
 
     if names == [] do
       raise ArgumentError, "No regressors configured on this model"

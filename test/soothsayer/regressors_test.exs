@@ -1,5 +1,6 @@
 defmodule Soothsayer.RegressorsTest do
   use ExUnit.Case, async: true
+  doctest Soothsayer.Regressors
 
   alias Explorer.DataFrame
   alias Explorer.Series
@@ -155,13 +156,23 @@ defmodule Soothsayer.RegressorsTest do
       end
     end
 
-    test "regressors must be a list of column names" do
+    test "regressors are a list of names or a map of name to options" do
+      from_list = Soothsayer.new(%{regressors: ["temperature"]}).config.regressors
+      from_map = Soothsayer.new(%{regressors: %{"temperature" => %{}}}).config.regressors
+
+      assert from_list == from_map
+      assert from_list == %{"temperature" => %{mode: :additive, regularization: nil, layers: []}}
+
       assert_raise ArgumentError, ~r/regressors must be a list/, fn ->
         Soothsayer.new(%{regressors: "temperature"})
       end
 
       assert_raise ArgumentError, ~r/column name strings/, fn ->
         Soothsayer.new(%{regressors: [:temperature]})
+      end
+
+      assert_raise ArgumentError, ~r/unknown option :lag for regressor "temperature"/, fn ->
+        Soothsayer.new(%{regressors: %{"temperature" => %{lag: 1}}})
       end
     end
   end
