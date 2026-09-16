@@ -53,17 +53,28 @@ model = Soothsayer.new(%{
 | `trend.enabled` | `true` | Enable trend component |
 | `trend.changepoints` | `10` | Number of potential changepoints |
 | `trend.changepoints_range` | `0.8` | Place changepoints in first 80% of data |
+| `trend.growth` | `:linear` | `:discontinuous` lets the trend jump at changepoints, see [Trends](trends.md) |
+| `trend.regularization` | `nil` | L1 penalty on the slope changes |
 | `seasonality.mode` | `:additive` | `:additive` or `:multiplicative` seasonality |
+| `seasonality.regularization` | `nil` | L1 penalty on every seasonal coefficient |
 | `seasonality.yearly.enabled` | `true` | Enable yearly seasonality |
 | `seasonality.yearly.fourier_terms` | `6` | Flexibility of yearly pattern |
 | `seasonality.weekly.enabled` | `true` | Enable weekly seasonality |
 | `seasonality.weekly.fourier_terms` | `3` | Flexibility of weekly pattern |
 | `seasonality.daily.enabled` | `:auto` | Daily seasonality, on for sub-daily data with at least two days of it |
 | `seasonality.daily.fourier_terms` | `6` | Flexibility of daily pattern |
+| `seasonality.custom` | `%{}` | Other periods, `%{"monthly" => %{period: 30.5, fourier_terms: 3}}`; any period takes a `condition` column, see [Seasonality](seasonality.md) |
 | `frequency` | `:auto` | Step between rows, inferred from `ds`, or `{amount, unit}` such as `{1, :hour}` |
+| `ar.enabled` | `false` | Auto-regression on the series' own past, with `ar.lags`, see [Auto-regression](autoregression.md) |
+| `ar.layers` | `[]` | Hidden layers of the AR network, empty means linear |
+| `ar.regularization` | `nil` | L1 penalty on the AR weights |
 | `ar.forecast_steps` | `1` | Steps ahead the AR head forecasts directly, NeuralProphet's `n_forecasts` |
-| `regressors` | `[]` | Column names of future regressors, see [Regressors](regressors.md) |
+| `events` | `%{}` | Event name to `%{steps_before, steps_after, mode, regularization, recurring}`, see [Events](events.md) |
+| `holidays` | no countries | `countries`, `steps_before`, `steps_after`, `mode`, `regularization`, `types`, `language`, see [Events](events.md) |
+| `regressors` | `%{}` | Column name to `%{mode, regularization, layers}`, a list of names also works, see [Regressors](regressors.md) |
 | `lagged_regressors` | `%{}` | Column name to `%{lags: n}` for lagged regressors, needs AR |
+| `lagged_regressors_layers` | `[]` | Hidden layers of one shared network over all lagged regressors |
+| `missing` | impute | `impute`, `impute_linear: 10`, `impute_rolling: 10`, `drop_samples: false`, see [Missing data](missing_data.md) |
 | `quantiles` | `[]` | Prediction interval quantiles, e.g. `[0.1, 0.9]`, see [Uncertainty](uncertainty.md) |
 | `epochs` | `:auto` | Passes over the training data, picked from the data size, or a number |
 | `learning_rate` | `:auto` | Found by a learning rate range test before training, or a number |

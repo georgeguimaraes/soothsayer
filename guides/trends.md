@@ -14,6 +14,8 @@ The shape of that hinge depends on `regularization`. Without it the hinge stops 
 
 The trend is the only component with an intercept. Seasonality, events and regressors are zero-centered offsets around it, so the trend carries the level of the series.
 
+By default the trend is continuous: it bends at a changepoint but doesn't jump. With `growth: :discontinuous` it gets one more learned intercept per segment after the first, so the level can jump at a changepoint too. See [Discontinuous growth](#discontinuous-growth).
+
 For the math behind the changepoints, see [NeuralProphet's trend docs](https://neuralprophet.com/html/trend.html).
 
 ## Configuration
@@ -24,6 +26,7 @@ model = Soothsayer.new(%{
     enabled: true,           # default: true
     changepoints: 10,        # potential changepoints, default: 10
     changepoints_range: 0.8, # place them in the first 80% of the data, default: 0.8
+    growth: :linear,         # or :discontinuous to let the level jump at changepoints
     regularization: nil      # L1 penalty on slope changes, default: nil
   }
 })
@@ -34,7 +37,10 @@ model = Soothsayer.new(%{
 | `enabled` | `true` | Turn the trend component on or off |
 | `changepoints` | `10` | Number of potential slope changes |
 | `changepoints_range` | `0.8` | Fraction of the data where changepoints can sit |
-| `regularization` | `nil` | L1 penalty on slope changes, `nil` for none |
+| `growth` | `:linear` | `:linear` for a continuous trend, `:discontinuous` to allow jumps at changepoints |
+| `regularization` | `nil` | L1 penalty on slope changes (and jumps), `nil` for none |
+
+NeuralProphet's `growth: "off"` is `trend: %{enabled: false}` here: a flat line at the training mean.
 
 ## Linear trend
 
@@ -98,6 +104,22 @@ fitted_piecewise = Soothsayer.fit(model_piecewise, df)
 
 The trend column of `Soothsayer.predict/3` shows the difference: the linear model averages the two slopes, the piecewise one follows the bend.
 
+## Discontinuous growth
+
+Some series don't bend, they step: a price change, a new store, a tracking bug fixed. For those, let the trend jump at the changepoints:
+
+```elixir
+model = Soothsayer.new(%{
+  trend: %{changepoints: 10, growth: :discontinuous}
+})
+```
+
+This is NeuralProphet's discontinuous growth. Each segment after the first gets a learned intercept of its own, one extra trend input column per changepoint after the slope columns. Under the segmentwise basis (no regularization) those columns are one-hot segment indicators and the slope columns turn into ramps that only live inside their segment, so a segment's level and slope are trained by its own data and nobody else's. Under the cumulative basis (regularization on) they are steps that switch on at `s_j` and stay on, next to the cumulative hinges, so the L1 penalty means few jumps, the way it means few slope changes.
+
+The jump is only allowed where a changepoint sits, so a step between two changepoints lands on the nearest one. Raise `changepoints` if the steps in your series are close together.
+
+`Soothsayer.Trend.get_weights/1` returns the kernel with one row per input column: `t`, then the `changepoints` slope adjustments, then the `changepoints` intercepts. With `growth: :linear` the intercept rows aren't there.
+
 ## Regularization
 
 When you don't know how many slope changes to expect, set more changepoints than you need and let an L1 penalty zero out the ones that don't earn their keep:
@@ -111,7 +133,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-Setting `regularization` also switches to the cumulative hinge described above, since the penalty only makes sense on slope changes. Higher values mean fewer surviving changes and a smoother trend. There's no universal right value, so start around `0.1` and compare the trend column on a holdout against what you know about the series.
+Setting `regularization` also switches to the cumulative hinge described above, since the penalty only makes sense on slope changes. With `growth: :discontinuous` the penalty covers the jumps as well. Higher values mean fewer surviving changes and a smoother trend. There's no universal right value, so start around `0.1` and compare the trend column on a holdout against what you know about the series.
 
 ## Choosing parameters
 
@@ -123,17 +145,18 @@ Add `regularization` when the trend follows noise instead of the series. Start a
 
 ## Network architecture
 
-With changepoints enabled, the trend input has shape `{batch_size, positions, 1 + changepoints}`, where `positions` is the number of timestamps in a training sample (one without auto-regression, `lags + forecast_steps` with it, see the [auto-regression guide](autoregression.md)):
+With changepoints enabled, the trend input has shape `{batch_size, positions, 1 + changepoints}`, or `{batch_size, positions, 1 + 2 * changepoints}` with discontinuous growth, where `positions` is the number of timestamps in a training sample (one without auto-regression, `lags + forecast_steps` with it, see the [auto-regression guide](autoregression.md)). `Soothsayer.Trend.feature_count/1` gives the width for a config:
 
 ```elixir
 # Per position:
 # - Column 0: time t, scaled so the training data runs from 0 to 1
 # - Columns 1-n: the changepoint hinges f_j(t), in the same units
+# - Columns n+1-2n, discontinuous growth only: the segment intercepts, 0 or 1
 
-input_shape = {nil, positions, 1 + changepoints}
+input_shape = {nil, positions, Soothsayer.Trend.feature_count(config)}
 ```
 
-The time features are scaled by the training span rather than z-scored, as in NeuralProphet. Z-scoring each changepoint feature on its own would blow up the late ones (they are zero for most of the data) and let the slope of the last segment swing with the last few days, which is exactly the slope that gets extrapolated.
+The time columns are scaled by the training span rather than z-scored, as in NeuralProphet. Z-scoring each changepoint feature on its own would blow up the late ones (they are zero for most of the data) and let the slope of the last segment swing with the last few days, which is exactly the slope that gets extrapolated. The intercept columns are 0 or 1 and are left alone.
 
 The [Livebook tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) plots the network and the fitted trend.
 

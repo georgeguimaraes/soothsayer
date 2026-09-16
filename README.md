@@ -122,6 +122,8 @@ trend: %{
 
 Set more changepoints than you think you need and let the penalty zero out the ones that don't matter.
 
+By default the trend is continuous. `growth: :discontinuous` lets it jump at each changepoint too, one learned intercept per segment, for series with a level shift that no slope change explains. NeuralProphet's `growth: "off"` is `trend: %{enabled: false}` here.
+
 ### Seasonality
 
 Repeating patterns, modelled with Fourier terms.
@@ -151,6 +153,19 @@ Soothsayer.new(%{
   seasonality: %{mode: :multiplicative}
 })
 ```
+
+Any other period goes under `custom`, in days, and a `condition` names a 0 to 1 column in the data that switches a pattern on and off, so a weekly cycle can exist only in summer:
+
+```elixir
+Soothsayer.new(%{
+  seasonality: %{
+    weekly: %{enabled: true, condition: "summer"},
+    custom: %{"monthly" => %{period: 30.5, fourier_terms: 3}}
+  }
+})
+```
+
+The condition column travels with the regressors at predict. `seasonality: %{regularization: 0.1}` puts an L1 penalty on every seasonal coefficient. See the [Seasonality guide](guides/seasonality.md).
 
 ### Auto-regression
 
@@ -242,6 +257,15 @@ predictions = Soothsayer.predict(fitted_model, future_dates, events: future_even
 
 `steps_before` and `steps_after` extend the effect around the event date, in steps of the data's frequency: `steps_before: 2` starts two days early on daily data and two hours early on hourly data. Both default to `0`, so `%{}` is the event date alone, and `%{steps_before: 1, steps_after: 1}` learns three coefficients, one for the day before, the day itself and the day after.
 
+An event with `mode: :multiplicative` scales with the trend instead of adding a fixed amount, so a promo that lifts sales by 30% stays 30% as the series grows. `regularization: 0.1` puts an L1 penalty on that event's coefficients, for events you suspect do nothing:
+
+```elixir
+events: %{
+  "promo" => %{steps_before: 1, steps_after: 1, mode: :multiplicative},
+  "maybe" => %{regularization: 0.1}
+}
+```
+
 #### Country holidays and recurring events
 
 Every holiday of a country becomes an event of its own, dates generated for the years in your data and the years you forecast. The dates come from [dayoff](https://hex.pm/packages/dayoff), 200+ countries with their states and regions, no setup needed:
@@ -256,7 +280,7 @@ Soothsayer.get_event_effects(fitted_model)
 # => %{"Christmas Day_0" => 48.5, "Independence Day_0" => 31.2, "Thanksgiving Day_0" => ...}
 ```
 
-An event that falls on the same month and day every year can be given once with `recurring: :yearly`, and the occurrences given at fit are remembered, so predicting inside the training period or into future years needs no events dataframe. See the [Events guide](guides/events.md).
+An event that falls on the same month and day every year can be given once with `recurring: :yearly`, and the occurrences given at fit are remembered, so predicting inside the training period or into future years needs no events dataframe. `holidays` takes `mode` and `regularization` too, one value for every holiday. See the [Events guide](guides/events.md).
 
 #### Event effects
 
@@ -307,12 +331,24 @@ Soothsayer.get_regressor_effects(fitted_model)
 
 Prediction raises if any requested date is missing from the regressors dataframe rather than guessing.
 
-When it's the regressor's past that matters, make it a lagged regressor alongside auto-regression:
+A map instead of the list gives each regressor its own options: `mode: :multiplicative` makes its effect a fraction of the trend, `regularization` puts an L1 penalty on its coefficient, and `layers` swaps the coefficient for a small network, for effects that curve:
+
+```elixir
+Soothsayer.new(%{
+  regressors: %{
+    "temperature" => %{layers: [16, 8]},
+    "marketing_spend" => %{mode: :multiplicative, regularization: 0.1}
+  }
+})
+```
+
+When it's the regressor's past that matters, make it a lagged regressor alongside auto-regression. `lagged_regressors_layers` puts one shared network over all their lags:
 
 ```elixir
 Soothsayer.new(%{
   ar: %{enabled: true, lags: 14},
-  lagged_regressors: %{"temperature" => %{lags: 3}}  # yesterday's and the two days before
+  lagged_regressors: %{"temperature" => %{lags: 3}},  # yesterday's and the two days before
+  lagged_regressors_layers: [32, 16]
 })
 ```
 
@@ -450,9 +486,11 @@ The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's
 
 From NeuralProphet, still missing here:
 
-- multiplicative events (events that scale with the trend)
-- event regularization
 - conformal prediction (calibrating the intervals on a holdout set)
+- global and local modeling of many series at once through an ID column
+- newer-sample weighting in the loss
+- a choice of loss function (it's Huber)
+- the data split utilities, `split_df` and the cross-validation splits
 
 ## Contributing
 

@@ -47,8 +47,11 @@ fitted = Soothsayer.fit(model, df, events: events_df)
 |-----------|-------------|
 | `steps_before` | Steps before the event that the effect covers, default `0` |
 | `steps_after` | Steps after the event that the effect covers, default `0` |
+| `mode` | `:additive` (default) adds the effect to the forecast, `:multiplicative` scales it with the trend, see [Multiplicative events](#multiplicative-events) |
+| `regularization` | L1 penalty on the event's coefficients, `nil` (default) or a number, see [Regularization](#regularization) |
+| `recurring` | `:yearly` to repeat the event on its month and day every year, see [Recurring events](#recurring-events) |
 
-Both are counts, so `%{steps_before: 2, steps_after: 1}` covers two steps before, the event itself and one step after, four features. `%{}` means the event date alone.
+Both windows are counts, so `%{steps_before: 2, steps_after: 1}` covers two steps before, the event itself and one step after, four features. `%{}` means the event date alone.
 
 A step is one row of the data at its frequency: a day for daily data, an hour for hourly data. Event dates given as plain dates mean midnight, so on hourly data an event on `~D[2023-11-24]` with `steps_before: 1, steps_after: 1` covers 23:00 the day before, midnight and 01:00.
 
@@ -174,7 +177,36 @@ effects = Soothsayer.get_event_effects(fitted)
 # => %{"black_friday_-1" => 12.3, "black_friday_0" => 45.2, "black_friday_+1" => 8.1}
 ```
 
-A positive coefficient lifts the forecast on that day, a negative one lowers it.
+A positive coefficient lifts the forecast on that day, a negative one lowers it. Coefficients are per normalized unit of the event feature (inputs are z-scored like everything else the network sees), so read them relative to each other rather than in units of `y`. The `events` column of `Soothsayer.predict/3` has the combined effect per date in the units of `y`.
+
+## Multiplicative events
+
+By default an event adds a fixed amount. When the bump grows with the level of the series, a promo that lifts sales by 30% whatever the sales are that year, make it multiplicative:
+
+```elixir
+model = Soothsayer.new(%{
+  events: %{"promo" => %{steps_before: 1, steps_after: 1, mode: :multiplicative}}
+})
+```
+
+The coefficient is then a fraction of the trend per normalized unit of the event feature, and the effect on a date is that fraction times the trend on that date. Additive and multiplicative events can share a model. Each mode gets its own layer (`events_dense` and `events_multiplicative_dense`) and predict still reports one `events` column with everything in the units of `y`, so the components keep adding up to `yhat`. This is NeuralProphet's multiplicative events, with one difference: the trend that scales the effect is detached only at the lag positions of an auto-regressive sample, NeuralProphet detaches it everywhere.
+
+With the trend disabled the scale is just the level of the series, so a multiplicative event behaves like an additive one with a different unit. NeuralProphet raises in that case, soothsayer lets it through.
+
+## Regularization
+
+An L1 penalty on an event's coefficients pulls the ones the data doesn't support toward zero, handy when you list many events and only some of them matter:
+
+```elixir
+model = Soothsayer.new(%{
+  events: %{
+    "black_friday" => %{steps_before: 2, steps_after: 1},
+    "maybe_relevant" => %{steps_before: 0, steps_after: 0, regularization: 0.5}
+  }
+})
+```
+
+The penalty is the lambda times the sum of the absolute coefficients of that event, applied from the first training step, same as the `regularization` on `ar` and `trend`. NeuralProphet applies its event penalties only in the last third of training and rescales some of its lambdas, so its values don't carry over. `0` and `nil` both mean no penalty.
 
 ## Multiple events
 
@@ -251,8 +283,10 @@ Holidays are named in English by default ("Independence Day", "Thanksgiving Day"
 | `steps_before`, `steps_after` | One window for every holiday, steps before and after like event windows. Default `0`. |
 | `types` | Which dayoff holiday types count: `:public`, `:bank`, `:school`, `:optional`, `:observance`. Default `[:public]`. |
 | `language` | Language of the holiday names, which are the event names. Default `"en"`, falling back to the country's own language when a name has no translation. |
+| `mode` | `:additive` (default) or `:multiplicative`, for every holiday at once, like an event's `mode`. |
+| `regularization` | One L1 lambda for every holiday, like an event's `regularization`. Default `nil`. |
 
-A holiday is a plain date, so on hourly data it lands on midnight like any date event. Use the window to cover the rest of the day. NeuralProphet's holiday regularization and multiplicative mode aren't there yet.
+A holiday is a plain date, so on hourly data it lands on midnight like any date event. Use the window to cover the rest of the day. Holidays share one window, one mode and one regularization, like NeuralProphet's `add_country_holidays`; an event you name yourself can have its own.
 
 ## Network architecture
 
@@ -263,7 +297,7 @@ Events add an input branch to the network:
 events_input_shape = {nil, positions, n_event_features}
 ```
 
-`positions` is the number of timestamps in a training sample (one without auto-regression, the lags plus the forecast steps with it). The `events_dense` layer learns one weight per event feature, shared across positions.
+`positions` is the number of timestamps in a training sample (one without auto-regression, the lags plus the forecast steps with it). The feature columns are laid out additive events first, then multiplicative, each group sorted by name. The `events_dense` layer learns one weight per additive feature and `events_multiplicative_dense` one per multiplicative feature, shared across positions, and the multiplicative output is multiplied by the trend before the two are summed.
 
 ## Next steps
 

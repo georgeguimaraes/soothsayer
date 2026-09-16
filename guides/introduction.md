@@ -41,11 +41,26 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 | Lagged regressors | Yes | Yes |
 | Future regressors | Yes | Yes |
 | Country holidays | Yes | Yes |
-| Multiplicative events | Planned | Yes |
-| Event regularization | Planned | Yes |
+| Multiplicative events | Yes | Yes |
+| Multiplicative regressors | Yes | Yes |
+| Event regularization | Yes | Yes |
+| Regressor and seasonality regularization | Yes | Yes |
+| Custom seasonal periods | Yes | Yes |
+| Conditional seasonality | Yes | Yes |
+| Discontinuous growth | Yes | Yes |
+| Networks on future regressors | Yes | Yes |
+| Networks on lagged regressors | Yes | Yes |
 | Recurring events | Yes | No |
 | Uncertainty estimation | Yes | Yes |
 | Multiplicative seasonality | Yes | Yes |
+| Conformal prediction | No | Yes |
+| Global and local modeling (ID column) | No | Yes |
+| Newer sample weighting | No | Yes |
+| Data split utilities | No | Yes |
+
+## Where the numbers differ from NeuralProphet
+
+Same model, a few deliberate differences in the details. Regularization here is the lambda times the sum of absolute weights, applied from the first step with no rescaling, while NeuralProphet scales some of its lambdas and only starts the penalty at 66% of training, so a lambda that works there needs retuning here. The trend scale that multiplies seasonality, events and regressors in multiplicative mode is detached from the gradient only at the lag positions, NeuralProphet detaches it everywhere. Multiplicative components work with the trend disabled, they become rescaled additive ones, where NeuralProphet raises. Predict gives one `events` column and one `regressors` column in the units of the series instead of additive and multiplicative pairs. The Fourier columns are interleaved, sine then cosine per term, where NeuralProphet 1.0 puts all sines first, which only matters when you compare kernels. The trend basis is the same as NeuralProphet's: segmentwise without regularization, cumulative with it.
 
 ## Quick example
 

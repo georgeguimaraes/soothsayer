@@ -1,4 +1,4 @@
-# Missing Data
+# Missing data
 
 Real series have holes: a sensor that stopped for an hour, a day nobody logged, a NaN from a join. Soothsayer handles them at fit the way NeuralProphet does, so you can pass the data as it is and read the log to see what happened.
 
