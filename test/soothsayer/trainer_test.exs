@@ -221,6 +221,59 @@ defmodule Soothsayer.TrainerTest do
     end
   end
 
+  describe "regularization_terms/2 and weighted_l1_penalty/2" do
+    test "one lambda per kernel column, from the component that owns the column" do
+      params = %Axon.ModelState{
+        data: %{
+          "events_dense" => %{"kernel" => Nx.tensor([[1.0], [-2.0], [4.0]])},
+          "regressors_dense" => %{"kernel" => Nx.tensor([[3.0], [-1.0]])},
+          "trend_dense" => %{"kernel" => Nx.tensor([[2.0], [2.0]])},
+          "yearly_dense" => %{"kernel" => Nx.tensor([[0.5], [0.5]])}
+        }
+      }
+
+      config = %{
+        events: %{
+          "a" => %{steps_before: 1, steps_after: 0, regularization: 0.5},
+          "b" => %{steps_before: 0, steps_after: 0}
+        },
+        regressors: %{"x" => %{mode: :additive, regularization: 2.0}, "z" => %{mode: :additive}},
+        trend: %{regularization: 0.1},
+        seasonality: %{regularization: nil}
+      }
+
+      terms = Trainer.regularization_terms(params, config)
+
+      assert terms |> Enum.map(&elem(&1, 0)) |> Enum.sort() ==
+               ["events_dense", "regressors_dense", "trend_dense"]
+
+      weights = Map.new(terms)
+      assert Nx.to_flat_list(weights["events_dense"]) == [0.5, 0.5, 0.0]
+      assert Nx.to_flat_list(weights["regressors_dense"]) == [2.0, 0.0]
+      assert Nx.to_flat_list(weights["trend_dense"]) == [0.10000000149011612, 0.10000000149011612]
+
+      # 0.5 * (1 + 2) + 2 * 3 + 0.1 * (2 + 2)
+      assert_in_delta Nx.to_number(Trainer.weighted_l1_penalty(params, weights)), 7.9, 1.0e-5
+    end
+
+    test "seasonality regularization covers every seasonal layer and nothing gives no terms" do
+      params = %Axon.ModelState{
+        data: %{
+          "yearly_dense" => %{"kernel" => Nx.tensor([[1.0], [1.0]])},
+          "weekly_dense" => %{"kernel" => Nx.tensor([[1.0]])},
+          "trend_dense" => %{"kernel" => Nx.tensor([[1.0]])}
+        }
+      }
+
+      terms = Trainer.regularization_terms(params, %{seasonality: %{regularization: 0.3}})
+      assert terms |> Enum.map(&elem(&1, 0)) |> Enum.sort() == ["weekly_dense", "yearly_dense"]
+
+      assert Trainer.regularization_terms(params, %{}) == []
+      assert Trainer.regularization_terms(params, %{trend: %{regularization: 0}}) == []
+      assert Nx.to_number(Trainer.weighted_l1_penalty(params, [])) == 0.0
+    end
+  end
+
   describe "compute_l1_penalty/2" do
     test "returns zero for empty layer list" do
       params = %Axon.ModelState{data: %{}}

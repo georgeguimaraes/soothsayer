@@ -81,6 +81,13 @@ defmodule Soothsayer.Regressors do
                 "got #{inspect(spec.mode)}"
       end
 
+      unless is_nil(spec.regularization) or
+               (is_number(spec.regularization) and spec.regularization >= 0) do
+        raise ArgumentError,
+              "regressor #{inspect(name)} regularization must be nil or a number >= 0, " <>
+                "got #{inspect(spec.regularization)}"
+      end
+
       {name, spec}
     end)
   end
@@ -134,6 +141,35 @@ defmodule Soothsayer.Regressors do
 
   defp range_from(_start, 0), do: nil
   defp range_from(start, count), do: start..(start + count - 1)
+
+  @doc """
+  The L1 lambda of every input column, by layer, from each regressor's
+  `regularization` (`nil` and `0` mean none), in `names/1` order split by
+  mode. Layers with no columns are left out.
+
+  ## Examples
+
+      iex> config = %{regressors: %{"a" => %{mode: :additive, regularization: 0.2}, "b" => %{mode: :multiplicative}}}
+      iex> Soothsayer.Regressors.regularization_weights(config)
+      %{"regressors_dense" => [0.2], "regressors_multiplicative_dense" => [0.0]}
+
+  """
+  @spec regularization_weights(map()) :: %{String.t() => list(float())}
+  def regularization_weights(%{regressors: regressors}) when is_map(regressors) do
+    [{@layer_name, :additive}, {@multiplicative_layer_name, :multiplicative}]
+    |> Enum.map(fn {layer, mode} ->
+      lambdas =
+        for name <- names_in(regressors, mode) do
+          (Map.get(regressors[name], :regularization) || 0) * 1.0
+        end
+
+      {layer, lambdas}
+    end)
+    |> Enum.reject(fn {_layer, lambdas} -> lambdas == [] end)
+    |> Map.new()
+  end
+
+  def regularization_weights(_config), do: %{}
 
   # Network Building
 

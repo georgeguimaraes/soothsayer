@@ -26,6 +26,7 @@ defmodule Soothsayer.Holidays do
           steps_before: non_neg_integer(),
           steps_after: non_neg_integer(),
           mode: :additive | :multiplicative,
+          regularization: nil | number(),
           types: list(Dayoff.Holiday.type()),
           language: String.t()
         }
@@ -65,18 +66,32 @@ defmodule Soothsayer.Holidays do
             "holidays.language must be a language code like \"en\", got #{inspect(config.language)}"
     end
 
-    unless Map.get(config, :mode, :additive) in [:additive, :multiplicative] do
-      raise ArgumentError,
-            "holidays.mode must be :additive or :multiplicative, got #{inspect(config.mode)}"
-    end
+    validate_effect!(config)
 
-    config |> Map.put(:countries, countries) |> Map.put_new(:mode, :additive)
+    config
+    |> Map.put(:countries, countries)
+    |> Map.put_new(:mode, :additive)
+    |> Map.put_new(:regularization, nil)
   end
 
   def normalize_config!(config) do
     raise ArgumentError,
           "holidays must be a map with :countries, :steps_before and :steps_after, " <>
             "got #{inspect(config)}"
+  end
+
+  defp validate_effect!(config) do
+    unless Map.get(config, :mode, :additive) in [:additive, :multiplicative] do
+      raise ArgumentError,
+            "holidays.mode must be :additive or :multiplicative, got #{inspect(config.mode)}"
+    end
+
+    regularization = Map.get(config, :regularization)
+
+    unless is_nil(regularization) or (is_number(regularization) and regularization >= 0) do
+      raise ArgumentError,
+            "holidays.regularization must be nil or a number >= 0, got #{inspect(regularization)}"
+    end
   end
 
   defp validate_windows!(config) do

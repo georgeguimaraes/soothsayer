@@ -734,7 +734,67 @@ defmodule SoothsayerTest do
                Enum.sort(["launch_-1", "launch_0", "launch_+1", "promo_0"])
     end
 
+    test "regularization shrinks the coefficients it is put on" do
+      :rand.seed(:exsss, {8, 8, 8})
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      training = scaled_frame(dates, start_date)
+      noise_dates = Enum.filter(dates, &(&1.day == 3))
+
+      events =
+        DataFrame.concat_rows(
+          promo_frame(dates),
+          DataFrame.new(%{
+            "event" => List.duplicate("noise", length(noise_dates)),
+            "ds" => noise_dates
+          })
+        )
+
+      fit_with = fn regularization ->
+        model =
+          Soothsayer.new(%{
+            trend: %{changepoints: 0},
+            seasonality: %{
+              yearly: %{enabled: false},
+              weekly: %{enabled: true},
+              regularization: regularization
+            },
+            events: %{"promo" => %{}, "noise" => %{regularization: regularization}},
+            epochs: 30,
+            seed: 3
+          })
+
+        fitted = Soothsayer.fit(model, training, events: events)
+
+        weekly =
+          fitted.params.data["weekly_dense"]["kernel"] |> Nx.abs() |> Nx.sum() |> Nx.to_number()
+
+        {Soothsayer.get_event_effects(fitted), weekly}
+      end
+
+      {plain_effects, plain_weekly} = fit_with.(nil)
+      {shrunk_effects, shrunk_weekly} = fit_with.(1.0)
+
+      # There is no weekly pattern and "noise" hits no real effect, so both shrink
+      assert abs(shrunk_effects["noise_0"]) < abs(plain_effects["noise_0"]) * 0.5
+      assert shrunk_weekly < plain_weekly * 0.5
+      # The promo effect is real and unpenalized, so it stays
+      assert shrunk_effects["promo_0"] > plain_effects["promo_0"] * 0.5
+    end
+
     test "rejects an unknown mode" do
+      assert_raise ArgumentError,
+                   ~r/seasonality.regularization must be nil or a number >= 0/,
+                   fn ->
+                     Soothsayer.new(%{seasonality: %{regularization: -1}})
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/events.promo.regularization must be nil or a number >= 0/,
+                   fn ->
+                     Soothsayer.new(%{events: %{"promo" => %{regularization: "lots"}}})
+                   end
+
       assert_raise ArgumentError, ~r/events.promo.mode must be one of/, fn ->
         Soothsayer.new(%{events: %{"promo" => %{mode: :scaled}}})
       end

@@ -14,7 +14,10 @@ defmodule Soothsayer.Trainer do
 
   import Nx.Defn
 
+  alias Soothsayer.Events
   alias Soothsayer.Quantiles
+  alias Soothsayer.Regressors
+  alias Soothsayer.Seasonality
 
   @min_auto_batch_size 16
   @max_auto_batch_size 512
@@ -92,10 +95,9 @@ defmodule Soothsayer.Trainer do
     total_steps = epochs * div(n_rows, batch_size)
     optimizer = build_optimizer(config, config.learning_rate, total_steps)
 
-    ar_reg = get_in(config, [:ar, :regularization])
-    trend_reg = get_in(config, [:trend, :regularization])
-
-    if ar_reg || trend_reg do
+    if regularization_terms(initial_params, config) == [] do
+      train_standard(network, x, y, epochs, batch_size, initial_params, config, optimizer)
+    else
       train_with_regularization(
         network,
         x,
@@ -106,8 +108,6 @@ defmodule Soothsayer.Trainer do
         config,
         optimizer
       )
-    else
-      train_standard(network, x, y, epochs, batch_size, initial_params, config, optimizer)
     end
   end
 
@@ -187,11 +187,16 @@ defmodule Soothsayer.Trainer do
     {init_optimizer_fn, update_fn} = Polaris.Optimizers.adam(learning_rate: schedule)
     quantiles = config[:quantiles] || []
 
-    objective_fn = fn params, x_input, y_target ->
+    # No penalty during the range test, so the weights map stays empty.
+    objective_fn = fn params, x_input, y_target, _weights ->
       loss(y_target, predict_fn.(params, x_input), quantiles)
     end
 
-    train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
+    jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
+
+    train_step = fn params, opt_state, x_batch, y_batch ->
+      jit_train_step.(params, opt_state, x_batch, y_batch, %{})
+    end
 
     # Each step updates on one minibatch like real training, but the loss
     # that goes on the curve is measured on the whole training set, since a
@@ -206,7 +211,7 @@ defmodule Soothsayer.Trainer do
       |> Enum.reduce({[], initial_params, init_optimizer_fn.(initial_params)}, fn
         {x_batch, y_batch}, {losses, params, opt_state} ->
           {_batch_loss, params, opt_state} = train_step.(params, opt_state, x_batch, y_batch)
-          {[Nx.to_number(full_loss.(params, x, y)) | losses], params, opt_state}
+          {[Nx.to_number(full_loss.(params, x, y, %{})) | losses], params, opt_state}
       end)
 
     suggest_learning_rate(Enum.reverse(losses), learning_rates)
@@ -563,73 +568,112 @@ defmodule Soothsayer.Trainer do
          config,
          optimizer
        ) do
-    ar_reg = get_in(config, [:ar, :regularization]) || 0.0
-    trend_reg = get_in(config, [:trend, :regularization]) || 0.0
-
-    regularization_layers = build_regularization_layers(initial_params, ar_reg, trend_reg)
+    # The weights ride along as a jit argument. Captured in a closure they
+    # would sit on a backend the gradient can't reach.
+    weights = Map.new(regularization_terms(initial_params, config))
 
     {_init_fn, predict_fn} = Axon.build(network)
     {init_optim_fn, update_fn} = optimizer
 
-    objective_fn = build_objective_fn(predict_fn, regularization_layers, config[:quantiles] || [])
-    train_step_fn = build_train_step_fn(objective_fn, update_fn)
-    jit_train_step = EXLA.jit(train_step_fn)
+    objective_fn = build_objective_fn(predict_fn, config[:quantiles] || [])
+    jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
+
+    train_step = fn params, opt_state, x_batch, y_batch ->
+      jit_train_step.(params, opt_state, x_batch, y_batch, weights)
+    end
 
     initial_opt_state = init_optim_fn.(initial_params)
 
-    run_training_loop(epochs, batch_size, initial_params, initial_opt_state, x, y, jit_train_step)
+    run_training_loop(epochs, batch_size, initial_params, initial_opt_state, x, y, train_step)
   end
 
-  defp build_regularization_layers(params, ar_reg, trend_reg) do
-    ar_layers =
-      if ar_reg > 0 do
-        params.data
-        |> Map.keys()
-        |> Enum.filter(&String.starts_with?(&1, "ar_dense"))
-        |> Enum.map(fn name -> {name, ar_reg} end)
-      else
-        []
+  @doc """
+  The L1 terms a config asks for, as `{layer_name, weights}` pairs where
+  `weights` holds one lambda per kernel row (input column), so a layer whose
+  columns belong to different events or regressors can penalize each with
+  its own strength. Layers the params don't have are skipped, and a config
+  with no regularization anywhere gives `[]`.
+
+  `ar.regularization` covers every `ar_dense*` layer, `trend.regularization`
+  the `trend_dense` layer, `seasonality.regularization` every seasonal layer,
+  and events and regressors bring their per-column lambdas from
+  `Soothsayer.Events.regularization_weights/1` and
+  `Soothsayer.Regressors.regularization_weights/1`.
+  """
+  @spec regularization_terms(Axon.ModelState.t(any(), any()), map()) ::
+          list({String.t(), Nx.Tensor.t()})
+  def regularization_terms(params, config) do
+    layer_names = Map.keys(params.data)
+
+    prefix_terms =
+      for {prefix, lambda} <-
+            [
+              {"ar_dense", get_in(config, [:ar, :regularization])},
+              {"trend_dense", get_in(config, [:trend, :regularization])}
+            ] ++ seasonality_lambdas(config),
+          lambda != nil and lambda > 0,
+          name <- layer_names,
+          String.starts_with?(name, prefix) do
+        {name, uniform_weights(params.data[name]["kernel"], lambda)}
       end
 
-    trend_layers =
-      if trend_reg > 0 do
-        params.data
-        |> Map.keys()
-        |> Enum.filter(&String.starts_with?(&1, "trend_dense"))
-        |> Enum.map(fn name -> {name, trend_reg} end)
-      else
-        []
+    column_terms =
+      for {name, lambdas} <-
+            Enum.concat(
+              Events.regularization_weights(config[:events] || %{}),
+              Regressors.regularization_weights(config)
+            ),
+          name in layer_names,
+          Enum.any?(lambdas, &(&1 > 0)) do
+        {name, Nx.tensor(lambdas, type: :f32) |> Nx.reshape({:auto, 1})}
       end
 
-    ar_layers ++ trend_layers
+    prefix_terms ++ column_terms
   end
 
-  defp build_objective_fn(predict_fn, regularization_layers, quantiles) do
-    fn params, x_input, y_target ->
-      predictions = predict_fn.(params, x_input)
-      base_loss = loss(y_target, predictions, quantiles)
-      penalty = compute_weighted_l1_penalty(params, regularization_layers)
-      Nx.add(base_loss, penalty)
-    end
+  defp seasonality_lambdas(config) do
+    lambda = get_in(config, [:seasonality, :regularization])
+    for period <- Seasonality.periods(), do: {"#{period}_dense", lambda}
   end
 
-  defp compute_weighted_l1_penalty(params, regularization_layers) do
-    if Enum.empty?(regularization_layers) do
+  defp uniform_weights(kernel, lambda) do
+    Nx.broadcast(Nx.tensor(lambda, type: :f32), {Nx.axis_size(kernel, 0), 1})
+  end
+
+  @doc """
+  The weighted L1 penalty for `regularization_terms/2`: for every term,
+  `sum(|kernel| * weights)` with the weights broadcast over the kernel's
+  output columns.
+  """
+  @spec weighted_l1_penalty(
+          Axon.ModelState.t(any(), any()),
+          list({String.t(), Nx.Tensor.t()}) | %{String.t() => Nx.Tensor.t()}
+        ) :: Nx.Tensor.t()
+  def weighted_l1_penalty(params, terms) do
+    if Enum.empty?(terms) do
       Nx.tensor(0.0)
     else
-      regularization_layers
-      |> Enum.map(fn {layer_name, reg_weight} ->
+      terms
+      |> Enum.map(fn {layer_name, weights} ->
         kernel = params.data[layer_name]["kernel"]
-        Nx.multiply(reg_weight, Nx.sum(Nx.abs(kernel)))
+        Nx.sum(Nx.multiply(Nx.abs(kernel), weights))
       end)
       |> Enum.reduce(&Nx.add/2)
     end
   end
 
+  defp build_objective_fn(predict_fn, quantiles) do
+    fn params, x_input, y_target, weights ->
+      predictions = predict_fn.(params, x_input)
+      base_loss = loss(y_target, predictions, quantiles)
+      Nx.add(base_loss, weighted_l1_penalty(params, weights))
+    end
+  end
+
   defp build_train_step_fn(objective_fn, update_fn) do
-    fn params, opt_state, x_input, y_target ->
+    fn params, opt_state, x_input, y_target, weights ->
       {loss, grads} =
-        Nx.Defn.value_and_grad(params, fn p -> objective_fn.(p, x_input, y_target) end)
+        Nx.Defn.value_and_grad(params, fn p -> objective_fn.(p, x_input, y_target, weights) end)
 
       {updates, new_opt_state} = update_fn.(grads, opt_state, params)
       new_params = Polaris.Updates.apply_updates(params, updates)

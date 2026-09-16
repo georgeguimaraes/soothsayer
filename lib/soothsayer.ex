@@ -52,6 +52,7 @@ defmodule Soothsayer do
       },
       seasonality: %{
         mode: :additive,
+        regularization: nil,
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3},
         daily: %{enabled: :auto, fourier_terms: 6}
@@ -64,6 +65,7 @@ defmodule Soothsayer do
         steps_before: 0,
         steps_after: 0,
         mode: :additive,
+        regularization: nil,
         types: [:public],
         language: "en"
       },
@@ -98,6 +100,9 @@ defmodule Soothsayer do
   defp validate_config!(config) do
     validate_seasonality_mode!(config)
     validate_seasonality_enabled!(config)
+    validate_regularization!(config, [:seasonality, :regularization])
+    validate_regularization!(config, [:trend, :regularization])
+    validate_regularization!(config, [:ar, :regularization])
     Frequency.validate!(config.frequency)
     validate_lagged_regressors!(config)
     validate_forecast_steps!(config)
@@ -132,9 +137,15 @@ defmodule Soothsayer do
         raise ArgumentError,
               "events.#{name}.mode must be one of #{inspect(@event_modes)}, got #{inspect(spec.mode)}"
       end
+
+      validate_regularization!(%{events: %{name => spec}}, [:events, name, :regularization])
     end
 
     :ok
+  end
+
+  defp validate_events!(%{events: events}) do
+    raise ArgumentError, "events must be a map of event names to windows, got #{inspect(events)}"
   end
 
   defp validate_event_window!(name, spec) do
@@ -152,8 +163,13 @@ defmodule Soothsayer do
     end
   end
 
-  defp validate_events!(%{events: events}) do
-    raise ArgumentError, "events must be a map of event names to windows, got #{inspect(events)}"
+  defp validate_regularization!(config, path) do
+    value = get_in(config, path)
+
+    unless is_nil(value) or (is_number(value) and value >= 0) do
+      raise ArgumentError,
+            "#{Enum.join(path, ".")} must be nil or a number >= 0, got #{inspect(value)}"
+    end
   end
 
   defp validate_missing!(%{missing: missing}) do
@@ -273,7 +289,9 @@ defmodule Soothsayer do
         every year on the same month and day. An event or regressor with
         `mode: :multiplicative` scales with the trend instead of adding to
         it, and `holidays: %{mode: :multiplicative}` does the same for every
-        holiday.
+        holiday. A `regularization` on an event, a regressor, the holidays or
+        the seasonality is an L1 penalty on its coefficients, like the one on
+        `ar` and `trend`.
 
     When the model config lists `regressors`, `data` must contain a column
     for each of them. With `holidays: %{countries: [...]}` every holiday of
@@ -819,7 +837,8 @@ defmodule Soothsayer do
     window = %{
       steps_before: config.holidays.steps_before,
       steps_after: config.holidays.steps_after,
-      mode: config.holidays.mode
+      mode: config.holidays.mode,
+      regularization: config.holidays.regularization
     }
 
     config

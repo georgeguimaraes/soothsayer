@@ -123,6 +123,32 @@ defmodule Soothsayer.Events do
   @spec mode(map()) :: :additive | :multiplicative
   def mode(spec), do: Map.get(spec, :mode, :additive)
 
+  @doc """
+  The L1 lambda of every feature column, by layer, from each event's
+  `regularization` (`nil` and `0` mean none). Same column order as
+  `feature_names/1`, split by mode. Layers with no columns are left out.
+
+  ## Examples
+
+      iex> Events.regularization_weights(%{"a" => %{steps_before: 1, steps_after: 0, regularization: 0.5}, "b" => %{steps_before: 0, steps_after: 0}})
+      %{"events_dense" => [0.5, 0.5, 0.0]}
+
+  """
+  @spec regularization_weights(map()) :: %{String.t() => list(float())}
+  def regularization_weights(events_config) do
+    {additive, multiplicative} = by_mode(events_config)
+
+    [{"events_dense", additive}, {"events_multiplicative_dense", multiplicative}]
+    |> Enum.reject(fn {_layer, events} -> events == [] end)
+    |> Map.new(fn {layer, events} ->
+      {layer,
+       Enum.flat_map(events, fn {_name, spec} ->
+         lambda = (Map.get(spec, :regularization) || 0) * 1.0
+         List.duplicate(lambda, Range.size(offsets(spec)))
+       end)}
+    end)
+  end
+
   # Weight Extraction
 
   @doc """
