@@ -619,6 +619,132 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "multiplicative events and regressors" do
+    # y = trend * (1 + 0.3 on promo days) * (1 + 0.2 * x) + noise: both the
+    # event and the regressor effects grow with the level of the series.
+    defp scaled_frame(dates, start_date) do
+      x = Enum.map(dates, fn date -> :math.sin(Date.diff(date, start_date) / 23) end)
+
+      y =
+        dates
+        |> Enum.zip(x)
+        |> Enum.map(fn {date, x_value} ->
+          trend = 100 + 0.2 * Date.diff(date, start_date)
+          promo = if date.day == 15, do: 0.3, else: 0.0
+          trend * (1 + promo) * (1 + 0.2 * x_value) + :rand.normal(0, 2)
+        end)
+
+      DataFrame.new(%{"ds" => dates, "y" => y, "x" => x})
+    end
+
+    defp promo_frame(dates) do
+      promo_dates = Enum.filter(dates, &(&1.day == 15))
+
+      DataFrame.new(%{
+        "event" => List.duplicate("promo", length(promo_dates)),
+        "ds" => promo_dates
+      })
+    end
+
+    defp scaled_model(event_mode, regressor_mode) do
+      Soothsayer.new(%{
+        trend: %{changepoints: 0},
+        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+        events: %{"promo" => %{mode: event_mode}},
+        regressors: %{"x" => %{mode: regressor_mode}},
+        epochs: 60,
+        seed: 3
+      })
+    end
+
+    test "multiplicative events and regressors follow the level where additive ones cannot" do
+      :rand.seed(:exsss, {8, 8, 8})
+      start_date = ~D[2018-01-01]
+      training_dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-12-31]) |> Enum.to_list()
+      training = scaled_frame(training_dates, start_date)
+      holdout = scaled_frame(holdout_dates, start_date)
+
+      holdout_error = fn event_mode, regressor_mode ->
+        fitted =
+          Soothsayer.fit(scaled_model(event_mode, regressor_mode), training,
+            events: promo_frame(training_dates)
+          )
+
+        predictions =
+          Soothsayer.predict(fitted, holdout["ds"],
+            events: promo_frame(holdout_dates),
+            regressors: holdout
+          )
+
+        errors = Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs()
+        promo_rows = Series.equal(Series.day_of_month(holdout["ds"]), 15)
+
+        %{
+          all: Series.mean(errors),
+          promo_days: Series.mean(Series.mask(errors, promo_rows)),
+          effects: Soothsayer.get_event_effects(fitted)
+        }
+      end
+
+      additive = holdout_error.(:additive, :additive)
+      multiplicative = holdout_error.(:multiplicative, :multiplicative)
+
+      assert multiplicative.promo_days < additive.promo_days * 0.5
+      assert multiplicative.all < additive.all * 0.7
+      assert multiplicative.effects["promo_0"] > 0
+    end
+
+    test "components still sum to combined with both modes in play" do
+      :rand.seed(:exsss, {8, 8, 8})
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2021-12-31]) |> Enum.to_list()
+      training = scaled_frame(dates, start_date)
+
+      model =
+        Soothsayer.new(%{
+          trend: %{changepoints: 2},
+          events: %{
+            "promo" => %{mode: :multiplicative},
+            "launch" => %{steps_before: 1, steps_after: 1}
+          },
+          regressors: %{"x" => %{mode: :multiplicative}},
+          epochs: 3,
+          seed: 3
+        })
+
+      events = promo_frame(dates)
+      launch = DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2020-06-01]]})
+      fitted = Soothsayer.fit(model, training, events: DataFrame.concat_rows(events, launch))
+
+      predictions =
+        Soothsayer.predict(fitted, training["ds"], events: events, regressors: training)
+
+      summed =
+        ["trend", "yearly_seasonality", "weekly_seasonality", "events", "regressors"]
+        |> Enum.map(&Series.to_tensor(predictions[&1]))
+        |> Enum.reduce(&Nx.add/2)
+
+      assert Nx.all_close(summed, Series.to_tensor(predictions["yhat"]), atol: 1.0e-2)
+             |> Nx.to_number() == 1
+
+      effects = Soothsayer.get_event_effects(fitted)
+
+      assert Enum.sort(Map.keys(effects)) ==
+               Enum.sort(["launch_-1", "launch_0", "launch_+1", "promo_0"])
+    end
+
+    test "rejects an unknown mode" do
+      assert_raise ArgumentError, ~r/events.promo.mode must be one of/, fn ->
+        Soothsayer.new(%{events: %{"promo" => %{mode: :scaled}}})
+      end
+
+      assert_raise ArgumentError, ~r/regressor "x" mode must be one of/, fn ->
+        Soothsayer.new(%{regressors: %{"x" => %{mode: :scaled}}})
+      end
+    end
+  end
+
   describe "multiplicative seasonality" do
     # y = trend * (1 + 0.3 * yearly cycle): the seasonal swing grows with the level
     defp multiplicative_series(dates, start_date) do

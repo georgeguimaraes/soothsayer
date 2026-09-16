@@ -29,6 +29,19 @@ defmodule Soothsayer.Layers do
   end
 
   @doc """
+  A `position_dense/3` over a slice of the feature axis, for inputs whose
+  columns belong to more than one layer. `nil` when the range is `nil`.
+  """
+  @spec position_dense_over(Axon.t(), Range.t() | nil, String.t()) :: Axon.t() | nil
+  def position_dense_over(_input, nil, _name), do: nil
+
+  def position_dense_over(input, range, name) do
+    input
+    |> Axon.nx(fn tensor -> tensor[[.., .., range]] end, name: name <> "_columns")
+    |> position_dense(name)
+  end
+
+  @doc """
   Slices the positions axis of a component output. Disabled components are
   scalar constants and pass through untouched, since they broadcast anyway.
   """

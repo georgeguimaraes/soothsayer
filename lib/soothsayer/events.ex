@@ -6,6 +6,14 @@ defmodule Soothsayer.Events do
   launches, holidays). Each event becomes one binary feature per window
   offset, 1.0 where the event is that many steps away.
 
+  An event is `mode: :additive` (the default, its coefficients are added to
+  the forecast) or `mode: :multiplicative` (its coefficients are fractions of
+  the trend, so the effect grows with the level of the series, like
+  NeuralProphet's multiplicative events). The feature columns are laid out
+  additive events first, then multiplicative, each group sorted by name, so
+  every mode is a contiguous slice of the input and gets its own linear
+  layer: `events_dense` and `events_multiplicative_dense`.
+
   Where the dates come from, see `event_dates/3`: the events dataframe
   given to fit or predict, the occurrences the fitted model remembers from
   fit, yearly recurrence for events configured with `recurring: :yearly`,
@@ -58,14 +66,62 @@ defmodule Soothsayer.Events do
     are configured, `Axon.constant(0)` otherwise.
 
   """
-  @spec build_component(Axon.t() | nil, map()) :: Axon.t()
-  def build_component(nil, _config), do: Axon.constant(0)
+  @spec build_component(Axon.t() | nil, map()) :: %{
+          additive: Axon.t() | nil,
+          multiplicative: Axon.t() | nil
+        }
+  def build_component(nil, _config), do: %{additive: nil, multiplicative: nil}
 
   def build_component(input, %{events: events_config}) when map_size(events_config) > 0 do
-    Layers.position_dense(input, "events_dense")
+    ranges = mode_ranges(events_config)
+
+    %{
+      additive: Layers.position_dense_over(input, ranges.additive, "events_dense"),
+      multiplicative:
+        Layers.position_dense_over(input, ranges.multiplicative, "events_multiplicative_dense")
+    }
   end
 
-  def build_component(_input, _config), do: Axon.constant(0)
+  def build_component(_input, _config), do: %{additive: nil, multiplicative: nil}
+
+  @doc """
+  The column ranges of the events input by mode, `nil` for a mode with no
+  columns. Additive columns come first.
+
+  ## Examples
+
+      iex> Events.mode_ranges(%{"a" => %{steps_before: 1, steps_after: 0}, "b" => %{steps_before: 0, steps_after: 0, mode: :multiplicative}})
+      %{additive: 0..1, multiplicative: 2..2}
+
+  """
+  @spec mode_ranges(map()) :: %{additive: Range.t() | nil, multiplicative: Range.t() | nil}
+  def mode_ranges(events_config) do
+    {additive, multiplicative} = by_mode(events_config)
+    additive_count = n_features(Map.new(additive))
+    multiplicative_count = n_features(Map.new(multiplicative))
+
+    %{
+      additive: range_from(0, additive_count),
+      multiplicative: range_from(additive_count, multiplicative_count)
+    }
+  end
+
+  defp range_from(_start, 0), do: nil
+  defp range_from(start, count), do: start..(start + count - 1)
+
+  # The events split by mode, each group sorted by name. A spec without a
+  # mode is additive, so configs built by hand keep working.
+  defp by_mode(events_config) do
+    events_config
+    |> Enum.sort_by(fn {name, _} -> name end)
+    |> Enum.split_with(fn {_name, spec} -> mode(spec) == :additive end)
+  end
+
+  @doc """
+  The mode of an event spec, `:additive` unless it says `:multiplicative`.
+  """
+  @spec mode(map()) :: :additive | :multiplicative
+  def mode(spec), do: Map.get(spec, :mode, :additive)
 
   # Weight Extraction
 
@@ -100,14 +156,17 @@ defmodule Soothsayer.Events do
       raise ArgumentError, "Model has not been fitted yet"
     end
 
-    events_layer = model.params.data["events_dense"]
+    coefficients =
+      Enum.flat_map(["events_dense", "events_multiplicative_dense"], fn layer ->
+        case model.params.data[layer] do
+          nil -> []
+          %{"kernel" => kernel} -> kernel |> Nx.flatten() |> Nx.to_flat_list()
+        end
+      end)
 
-    unless events_layer do
+    if coefficients == [] do
       raise ArgumentError, "Events layer not found in model params"
     end
-
-    kernel = events_layer["kernel"]
-    coefficients = kernel |> Nx.flatten() |> Nx.to_flat_list()
 
     feature_names(events_config)
     |> Enum.zip(coefficients)
@@ -146,7 +205,9 @@ defmodule Soothsayer.Events do
   end
 
   @doc """
-  Returns list of feature names for all configured events.
+  Returns list of feature names for all configured events, in the column
+  order of the events input: additive events first, then multiplicative,
+  each sorted by name.
 
   Names are formatted as "event_name_offset" where offset indicates
   the window position relative to the event date.
@@ -167,9 +228,8 @@ defmodule Soothsayer.Events do
   def feature_names(events_config) when events_config == %{}, do: []
 
   def feature_names(events_config) do
-    events_config
-    |> Enum.sort_by(fn {name, _} -> name end)
-    |> Enum.flat_map(&feature_names_for_event/1)
+    {additive, multiplicative} = by_mode(events_config)
+    Enum.flat_map(additive ++ multiplicative, &feature_names_for_event/1)
   end
 
   defp feature_names_for_event({name, spec}) do

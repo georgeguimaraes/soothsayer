@@ -32,29 +32,33 @@ defmodule Soothsayer.EventsTest do
   end
 
   describe "build_component/2" do
-    test "returns constant 0 when no events configured" do
-      config = %{}
+    test "returns no layers when no events configured" do
       input = Axon.input("events", shape: {nil, 1, 1})
 
-      component = Events.build_component(input, config)
-
-      {init_fn, predict_fn} = Axon.build(component)
-      params = init_fn.(%{"events" => Nx.tensor([[[1.0]]])}, Axon.ModelState.empty())
-      output = predict_fn.(params, %{"events" => Nx.tensor([[[1.0]]])})
-
-      assert Nx.to_number(output) == 0.0
+      assert Events.build_component(input, %{}) == %{additive: nil, multiplicative: nil}
+      assert Events.build_component(nil, %{events: %{}}) == %{additive: nil, multiplicative: nil}
     end
 
-    test "returns dense layer when events configured" do
-      config = %{events: %{"sale" => %{steps_before: 0, steps_after: 0}}}
-      input = Axon.input("events", shape: {nil, 1, 1})
+    test "builds one dense layer per mode over that mode's columns" do
+      config = %{
+        events: %{
+          "sale" => %{steps_before: 0, steps_after: 0},
+          "promo" => %{steps_before: 1, steps_after: 0, mode: :multiplicative}
+        }
+      }
 
+      input = Axon.input("events", shape: {nil, 1, 3})
       component = Events.build_component(input, config)
+      features = %{"events" => Nx.tensor([[[1.0, 0.0, 1.0]]])}
 
-      {init_fn, _predict_fn} = Axon.build(component)
-      params = init_fn.(%{"events" => Nx.tensor([[[1.0]]])}, Axon.ModelState.empty())
+      {init_fn, predict_fn} = Axon.build(component.additive)
+      params = init_fn.(features, Axon.ModelState.empty())
+      assert Nx.shape(params.data["events_dense"]["kernel"]) == {1, 1}
+      assert Nx.shape(predict_fn.(params, features)) == {1, 1}
 
-      assert Map.has_key?(params.data, "events_dense")
+      {init_fn, _predict_fn} = Axon.build(component.multiplicative)
+      params = init_fn.(features, Axon.ModelState.empty())
+      assert Nx.shape(params.data["events_multiplicative_dense"]["kernel"]) == {2, 1}
     end
   end
 
@@ -105,6 +109,27 @@ defmodule Soothsayer.EventsTest do
       assert "black_friday_-1" in names
       assert "black_friday_0" in names
       assert "black_friday_+1" in names
+    end
+
+    test "puts additive events before multiplicative ones and reports the column ranges" do
+      config = %{
+        "zebra" => %{steps_before: 0, steps_after: 0},
+        "apple" => %{steps_before: 0, steps_after: 1, mode: :multiplicative},
+        "mango" => %{steps_before: 1, steps_after: 0}
+      }
+
+      assert Events.feature_names(config) == [
+               "mango_-1",
+               "mango_0",
+               "zebra_0",
+               "apple_0",
+               "apple_+1"
+             ]
+
+      assert Events.mode_ranges(config) == %{additive: 0..2, multiplicative: 3..4}
+
+      assert Events.mode_ranges(%{"zebra" => %{steps_before: 0, steps_after: 0}}) ==
+               %{additive: 0..0, multiplicative: nil}
     end
 
     test "returns names for multiple events sorted by event name" do
@@ -498,6 +523,26 @@ defmodule Soothsayer.EventsTest do
       assert Map.has_key?(effects, "sale_0")
       assert_in_delta effects["sale_-1"], 1.5, 0.001
       assert_in_delta effects["sale_0"], 2.5, 0.001
+    end
+
+    test "reads the multiplicative kernel after the additive one" do
+      model = %Soothsayer.Model{
+        config: %{
+          events: %{
+            "sale" => %{steps_before: 0, steps_after: 0},
+            "promo" => %{steps_before: 0, steps_after: 0, mode: :multiplicative}
+          }
+        },
+        params: %Axon.ModelState{
+          data: %{
+            "events_dense" => %{"kernel" => Nx.tensor([[1.5]])},
+            "events_multiplicative_dense" => %{"kernel" => Nx.tensor([[0.2]])}
+          }
+        },
+        network: nil
+      }
+
+      assert Events.get_effects(model) == %{"sale_0" => 1.5, "promo_0" => 0.20000000298023224}
     end
   end
 end

@@ -141,6 +141,9 @@ defmodule Soothsayer.Model do
     trend_input = Trend.build_input(config)
     trend = Trend.build_component(trend_input, config)
 
+    # Everything multiplicative is scaled by the trend through this one node.
+    scale = multiplicative_scale(trend, config)
+
     # Seasonality, one component per period. Periods missing from the config
     # (only in unit tests, Soothsayer.new fills them all in) become zero.
     seasonality_inputs = Seasonality.build_inputs(config)
@@ -148,18 +151,22 @@ defmodule Soothsayer.Model do
     seasonality =
       seasonality_inputs
       |> Seasonality.build_components(config)
-      |> apply_seasonality_mode(trend, config)
+      |> scale_seasonality(scale, config)
       |> then(fn components ->
         Map.new(Seasonality.periods(), &{&1, Map.get(components, &1, Axon.constant(0))})
       end)
 
-    # Events
+    # Events, the additive ones plus the multiplicative ones times the trend
     events_input = Events.build_network_input(config)
-    events = Events.build_component(events_input, config)
+    events = events_input |> Events.build_component(config) |> combine_modes(scale, "events")
 
-    # Future regressors
+    # Future regressors, same split
     regressors_input = Regressors.build_network_input(config)
-    regressors = Regressors.build_component(regressors_input, config)
+
+    regressors =
+      regressors_input
+      |> Regressors.build_component(config)
+      |> combine_modes(scale, "regressors")
 
     # Everything that depends only on the timestamp, over all positions.
     # Its values at the lag positions are what the AR network subtracts
@@ -228,22 +235,22 @@ defmodule Soothsayer.Model do
      }}
   end
 
-  # Multiplicative seasonality scales the seasonal effect by the trend. The
+  # Multiplicative components (seasonality in multiplicative mode, events and
+  # regressors with mode: :multiplicative) are scaled by the trend. The
   # network works in normalized y space, where the trend is centered near
   # zero, so the multiplier is the trend plus the series level (mean / std).
   # The level is only known after fit computes the normalization, which is
-  # why fit rebuilds the network; before that the level is zero.
-  defp apply_seasonality_mode(
-         seasonality,
-         trend,
-         %{seasonality: %{mode: :multiplicative}} = config
-       ) do
-    scale =
-      Axon.add(detach_at_lags(trend, AR.lags(config)), Axon.constant(series_level(config)))
+  # why fit rebuilds the network; before that the level is zero. NeuralProphet
+  # computes trend + additive + trend.detach() * multiplicative, the same sum,
+  # except that the trend is detached only at the lag positions here.
+  defp multiplicative_scale(trend, config) do
+    Axon.add(detach_at_lags(trend, AR.lags(config)), Axon.constant(series_level(config)))
+  end
 
-    # A disabled period is a scalar constant and stays one; multiplying it by
-    # the scale would turn it into a full tensor of zeros that predict would
-    # then report as a component.
+  # A disabled period is a scalar constant and stays one; multiplying it by
+  # the scale would turn it into a full tensor of zeros that predict would
+  # then report as a component.
+  defp scale_seasonality(seasonality, scale, %{seasonality: %{mode: :multiplicative}} = config) do
     Map.new(seasonality, fn {period, component} ->
       if Seasonality.enabled?(config, period),
         do: {period, Axon.multiply(component, scale)},
@@ -251,7 +258,19 @@ defmodule Soothsayer.Model do
     end)
   end
 
-  defp apply_seasonality_mode(seasonality, _trend, _config), do: seasonality
+  defp scale_seasonality(seasonality, _scale, _config), do: seasonality
+
+  # Joins the additive and the scaled multiplicative half of a component
+  # into the one node the rest of the network sums.
+  defp combine_modes(%{additive: additive, multiplicative: multiplicative}, scale, name) do
+    scaled = if multiplicative, do: Axon.multiply(multiplicative, scale)
+
+    case Enum.reject([additive, scaled], &is_nil/1) do
+      [] -> Axon.constant(0)
+      [only] -> only
+      [additive_node, scaled_node] -> Axon.add(additive_node, scaled_node, name: name)
+    end
+  end
 
   # At the lag positions the seasonal terms are only there to be subtracted
   # from the lags, and NeuralProphet detaches the trend inside them so that

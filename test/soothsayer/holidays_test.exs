@@ -78,6 +78,10 @@ defmodule Soothsayer.HolidaysTest do
       assert_raise ArgumentError, ~r/holidays.types must be a non-empty list/, fn ->
         Soothsayer.new(%{holidays: %{countries: ["US"], types: [:informal]}})
       end
+
+      assert_raise ArgumentError, ~r/holidays.mode must be :additive or :multiplicative/, fn ->
+        Soothsayer.new(%{holidays: %{countries: ["US"], mode: :scaled}})
+      end
     end
   end
 end

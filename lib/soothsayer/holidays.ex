@@ -25,6 +25,7 @@ defmodule Soothsayer.Holidays do
           countries: list(String.t()),
           steps_before: non_neg_integer(),
           steps_after: non_neg_integer(),
+          mode: :additive | :multiplicative,
           types: list(Dayoff.Holiday.type()),
           language: String.t()
         }
@@ -64,7 +65,12 @@ defmodule Soothsayer.Holidays do
             "holidays.language must be a language code like \"en\", got #{inspect(config.language)}"
     end
 
-    %{config | countries: countries}
+    unless Map.get(config, :mode, :additive) in [:additive, :multiplicative] do
+      raise ArgumentError,
+            "holidays.mode must be :additive or :multiplicative, got #{inspect(config.mode)}"
+    end
+
+    config |> Map.put(:countries, countries) |> Map.put_new(:mode, :additive)
   end
 
   def normalize_config!(config) do

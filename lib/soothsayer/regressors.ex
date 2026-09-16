@@ -9,7 +9,12 @@ defmodule Soothsayer.Regressors do
   effect of one normalized unit of the regressor on the forecast.
 
   Regressors are configured as a list of column names, or as a map from
-  column name to options, see `normalize_config!/1`. The training dataframe
+  column name to options, see `normalize_config!/1`. A regressor is
+  `mode: :additive` (its coefficient is added to the forecast) or
+  `mode: :multiplicative` (its coefficient is a fraction of the trend). The
+  input columns are laid out additive regressors first, then multiplicative,
+  each group sorted by name, and each mode gets its own linear layer,
+  `regressors_dense` and `regressors_multiplicative_dense`. The training dataframe
   must contain those columns, and so must the dataframe passed as
   `regressors:` to `Soothsayer.predict/3`. The training values are kept on
   the fitted model, so with auto-regression the lag timestamps of a
@@ -24,8 +29,10 @@ defmodule Soothsayer.Regressors do
   alias Soothsayer.Timestamp
 
   @layer_name "regressors_dense"
+  @multiplicative_layer_name "regressors_multiplicative_dense"
   @defaults %{mode: :additive, regularization: nil, layers: []}
   @known_keys Map.keys(@defaults)
+  @modes [:additive, :multiplicative]
 
   # Configuration
 
@@ -66,7 +73,15 @@ defmodule Soothsayer.Regressors do
                 "Known: #{inspect(@known_keys)}"
       end
 
-      {name, Map.merge(@defaults, spec)}
+      spec = Map.merge(@defaults, spec)
+
+      unless spec.mode in @modes do
+        raise ArgumentError,
+              "regressor #{inspect(name)} mode must be one of #{inspect(@modes)}, " <>
+                "got #{inspect(spec.mode)}"
+      end
+
+      {name, spec}
     end)
   end
 
@@ -77,15 +92,48 @@ defmodule Soothsayer.Regressors do
   end
 
   @doc """
-  The configured regressor names, sorted. This is the column order of the
-  regressors input and of the layer kernel.
+  The configured regressor names in the column order of the regressors
+  input: additive regressors first, then multiplicative, each sorted.
   """
   @spec names(map()) :: list(String.t())
-  def names(%{regressors: regressors}) when is_map(regressors),
-    do: regressors |> Map.keys() |> Enum.sort()
+  def names(%{regressors: regressors}) when is_map(regressors) do
+    names_in(regressors, :additive) ++ names_in(regressors, :multiplicative)
+  end
 
   def names(%{regressors: regressors}) when is_list(regressors), do: Enum.sort(regressors)
   def names(_config), do: []
+
+  defp names_in(regressors, mode) do
+    for {name, spec} <- Enum.sort(regressors), Map.get(spec, :mode, :additive) == mode, do: name
+  end
+
+  @doc """
+  The column ranges of the regressors input by mode, `nil` for a mode with
+  no columns.
+
+  ## Examples
+
+      iex> config = %{regressors: %{"a" => %{mode: :additive}, "b" => %{mode: :multiplicative}, "c" => %{mode: :additive}}}
+      iex> Soothsayer.Regressors.mode_ranges(config)
+      %{additive: 0..1, multiplicative: 2..2}
+
+  """
+  @spec mode_ranges(map()) :: %{additive: Range.t() | nil, multiplicative: Range.t() | nil}
+  def mode_ranges(%{regressors: regressors} = config) when is_map(regressors) do
+    additive_count = length(names_in(regressors, :additive))
+    total = length(names(config))
+
+    %{
+      additive: range_from(0, additive_count),
+      multiplicative: range_from(additive_count, total - additive_count)
+    }
+  end
+
+  def mode_ranges(config),
+    do: %{additive: range_from(0, length(names(config))), multiplicative: nil}
+
+  defp range_from(_start, 0), do: nil
+  defp range_from(start, count), do: start..(start + count - 1)
 
   # Network Building
 
@@ -116,14 +164,20 @@ defmodule Soothsayer.Regressors do
     regressors are configured, `Axon.constant(0)` otherwise.
 
   """
-  @spec build_component(Axon.t() | nil, map()) :: Axon.t()
-  def build_component(nil, _config), do: Axon.constant(0)
+  @spec build_component(Axon.t() | nil, map()) :: %{
+          additive: Axon.t() | nil,
+          multiplicative: Axon.t() | nil
+        }
+  def build_component(nil, _config), do: %{additive: nil, multiplicative: nil}
 
   def build_component(input, config) do
-    case names(config) do
-      [] -> Axon.constant(0)
-      _names -> Layers.position_dense(input, @layer_name)
-    end
+    ranges = mode_ranges(config)
+
+    %{
+      additive: Layers.position_dense_over(input, ranges.additive, @layer_name),
+      multiplicative:
+        Layers.position_dense_over(input, ranges.multiplicative, @multiplicative_layer_name)
+    }
   end
 
   # Feature Engineering
@@ -271,8 +325,10 @@ defmodule Soothsayer.Regressors do
   @doc """
   Extracts the learned regressor coefficients from a fitted model.
 
-  Coefficients are in normalized units: the change in normalized y for a one
-  standard deviation change in the regressor.
+  Coefficients of additive regressors are in normalized units: the change
+  in normalized y for a one standard deviation change in the regressor.
+  Coefficients of multiplicative regressors are fractions of the trend per
+  standard deviation of the regressor.
 
   ## Returns
 
@@ -291,7 +347,13 @@ defmodule Soothsayer.Regressors do
       raise ArgumentError, "Model has not been fitted yet"
     end
 
-    coefficients = model.params.data[@layer_name]["kernel"] |> Nx.to_flat_list()
+    coefficients =
+      Enum.flat_map([@layer_name, @multiplicative_layer_name], fn layer ->
+        case model.params.data[layer] do
+          nil -> []
+          %{"kernel" => kernel} -> Nx.to_flat_list(kernel)
+        end
+      end)
 
     Enum.zip(names, coefficients) |> Map.new()
   end

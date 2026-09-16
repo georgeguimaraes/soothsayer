@@ -63,6 +63,7 @@ defmodule Soothsayer do
         countries: [],
         steps_before: 0,
         steps_after: 0,
+        mode: :additive,
         types: [:public],
         language: "en"
       },
@@ -105,7 +106,8 @@ defmodule Soothsayer do
     validate_training_options!(config)
   end
 
-  @event_defaults %{steps_before: 0, steps_after: 0}
+  @event_defaults %{steps_before: 0, steps_after: 0, mode: :additive}
+  @event_modes [:additive, :multiplicative]
 
   defp fill_event_defaults(events) do
     Map.new(events, fn {name, spec} -> {name, Map.merge(@event_defaults, spec)} end)
@@ -119,26 +121,35 @@ defmodule Soothsayer do
                 "got #{inspect(name)} => #{inspect(spec)}"
       end
 
-      if Map.has_key?(spec, :lower_window) or Map.has_key?(spec, :upper_window) do
-        raise ArgumentError,
-              "events.#{name} uses steps_before and steps_after now, both counts >= 0 " <>
-                "(lower_window: -2, upper_window: 1 becomes steps_before: 2, steps_after: 1)"
-      end
-
-      for key <- [:steps_before, :steps_after],
-          value = Map.get(spec, key, 0),
-          not (is_integer(value) and value >= 0) do
-        raise ArgumentError,
-              "events.#{name}.#{key} must be an integer >= 0, got #{inspect(value)}"
-      end
+      validate_event_window!(name, spec)
 
       unless spec[:recurring] in [nil, :yearly] do
         raise ArgumentError,
               "events.#{name}.recurring must be :yearly or left out, got #{inspect(spec[:recurring])}"
       end
+
+      unless Map.get(spec, :mode, :additive) in @event_modes do
+        raise ArgumentError,
+              "events.#{name}.mode must be one of #{inspect(@event_modes)}, got #{inspect(spec.mode)}"
+      end
     end
 
     :ok
+  end
+
+  defp validate_event_window!(name, spec) do
+    if Map.has_key?(spec, :lower_window) or Map.has_key?(spec, :upper_window) do
+      raise ArgumentError,
+            "events.#{name} uses steps_before and steps_after now, both counts >= 0 " <>
+              "(lower_window: -2, upper_window: 1 becomes steps_before: 2, steps_after: 1)"
+    end
+
+    for key <- [:steps_before, :steps_after],
+        value = Map.get(spec, key, 0),
+        not (is_integer(value) and value >= 0) do
+      raise ArgumentError,
+            "events.#{name}.#{key} must be an integer >= 0, got #{inspect(value)}"
+    end
   end
 
   defp validate_events!(%{events: events}) do
@@ -259,7 +270,10 @@ defmodule Soothsayer do
         one row per occurrence of each configured event. The dates are
         remembered by the model, so predicting inside the training period
         doesn't need them again. Events with `recurring: :yearly` repeat
-        every year on the same month and day.
+        every year on the same month and day. An event or regressor with
+        `mode: :multiplicative` scales with the trend instead of adding to
+        it, and `holidays: %{mode: :multiplicative}` does the same for every
+        holiday.
 
     When the model config lists `regressors`, `data` must contain a column
     for each of them. With `holidays: %{countries: [...]}` every holiday of
@@ -804,7 +818,8 @@ defmodule Soothsayer do
 
     window = %{
       steps_before: config.holidays.steps_before,
-      steps_after: config.holidays.steps_after
+      steps_after: config.holidays.steps_after,
+      mode: config.holidays.mode
     }
 
     config
@@ -1236,6 +1251,10 @@ defmodule Soothsayer do
       iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
       iex> effects = Soothsayer.get_event_effects(fitted_model)
       %{"promo_-1" => 12.5, "promo_0" => 50.0, "promo_+1" => 8.3}
+
+  Coefficients are per normalized unit of the event feature: for an
+  additive event the change in normalized y, for a `mode: :multiplicative`
+  event the fraction of the trend.
 
   """
   @spec get_event_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
