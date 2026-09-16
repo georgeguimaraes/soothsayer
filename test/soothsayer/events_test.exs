@@ -19,8 +19,8 @@ defmodule Soothsayer.EventsTest do
     test "returns Axon input with correct shape when events configured" do
       config = %{
         events: %{
-          "sale" => %{lower_window: 0, upper_window: 0},
-          "holiday" => %{lower_window: -1, upper_window: 1}
+          "sale" => %{steps_before: 0, steps_after: 0},
+          "holiday" => %{steps_before: 1, steps_after: 1}
         }
       }
 
@@ -46,7 +46,7 @@ defmodule Soothsayer.EventsTest do
     end
 
     test "returns dense layer when events configured" do
-      config = %{events: %{"sale" => %{lower_window: 0, upper_window: 0}}}
+      config = %{events: %{"sale" => %{steps_before: 0, steps_after: 0}}}
       input = Axon.input("events", shape: {nil, 1, 1})
 
       component = Events.build_component(input, config)
@@ -64,22 +64,22 @@ defmodule Soothsayer.EventsTest do
     end
 
     test "returns 1 for single event with no window" do
-      config = %{"sale" => %{lower_window: 0, upper_window: 0}}
+      config = %{"sale" => %{steps_before: 0, steps_after: 0}}
       assert Events.n_features(config) == 1
     end
 
     test "counts window positions correctly" do
-      # lower_window: -2, upper_window: 1 = positions [-2, -1, 0, +1] = 4 features
-      config = %{"black_friday" => %{lower_window: -2, upper_window: 1}}
+      # steps_before: 2, steps_after: 1 = positions [-2, -1, 0, +1] = 4 features
+      config = %{"black_friday" => %{steps_before: 2, steps_after: 1}}
       assert Events.n_features(config) == 4
     end
 
     test "sums features across multiple events" do
       config = %{
         # 4 features
-        "black_friday" => %{lower_window: -2, upper_window: 1},
+        "black_friday" => %{steps_before: 2, steps_after: 1},
         # 2 features
-        "christmas" => %{lower_window: -1, upper_window: 0}
+        "christmas" => %{steps_before: 1, steps_after: 0}
       }
 
       assert Events.n_features(config) == 6
@@ -92,12 +92,12 @@ defmodule Soothsayer.EventsTest do
     end
 
     test "returns single name for event with no window" do
-      config = %{"sale" => %{lower_window: 0, upper_window: 0}}
+      config = %{"sale" => %{steps_before: 0, steps_after: 0}}
       assert Events.feature_names(config) == ["sale_0"]
     end
 
     test "returns names for all window positions" do
-      config = %{"black_friday" => %{lower_window: -2, upper_window: 1}}
+      config = %{"black_friday" => %{steps_before: 2, steps_after: 1}}
       names = Events.feature_names(config)
 
       assert length(names) == 4
@@ -109,8 +109,8 @@ defmodule Soothsayer.EventsTest do
 
     test "returns names for multiple events sorted by event name" do
       config = %{
-        "christmas" => %{lower_window: 0, upper_window: 0},
-        "black_friday" => %{lower_window: -1, upper_window: 0}
+        "christmas" => %{steps_before: 0, steps_after: 0},
+        "black_friday" => %{steps_before: 1, steps_after: 0}
       }
 
       names = Events.feature_names(config)
@@ -130,7 +130,7 @@ defmodule Soothsayer.EventsTest do
           "ds" => [~D[2023-01-02]]
         })
 
-      config = %{"sale" => %{lower_window: 0, upper_window: 0}}
+      config = %{"sale" => %{steps_before: 0, steps_after: 0}}
 
       tensor = Events.build_features(dates, events_df, config)
 
@@ -155,7 +155,7 @@ defmodule Soothsayer.EventsTest do
           "ds" => [~D[2023-01-02]]
         })
 
-      config = %{"sale" => %{lower_window: 0, upper_window: 0}}
+      config = %{"sale" => %{steps_before: 0, steps_after: 0}}
 
       tensor = Events.build_features(dates, events_df, config)
 
@@ -176,8 +176,8 @@ defmodule Soothsayer.EventsTest do
         })
 
       config = %{
-        "event_a" => %{lower_window: 0, upper_window: 0},
-        "event_b" => %{lower_window: 0, upper_window: 0}
+        "event_a" => %{steps_before: 0, steps_after: 0},
+        "event_b" => %{steps_before: 0, steps_after: 0}
       }
 
       tensor = Events.build_features(dates, events_df, config)
@@ -207,7 +207,7 @@ defmodule Soothsayer.EventsTest do
           "ds" => [~D[2023-01-01], ~D[2023-01-03]]
         })
 
-      config = %{"sale" => %{lower_window: 0, upper_window: 0}}
+      config = %{"sale" => %{steps_before: 0, steps_after: 0}}
 
       tensor = Events.build_features(dates, events_df, config)
 
@@ -215,8 +215,8 @@ defmodule Soothsayer.EventsTest do
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
 
-    test "handles lower_window (days before event)" do
-      # Event on Jan 3, with lower_window: -2
+    test "handles steps_before" do
+      # Event on Jan 3, with steps_before: 2
       # Should create feature columns for: -2 (Jan 1), -1 (Jan 2), 0 (Jan 3)
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]])
 
@@ -226,7 +226,7 @@ defmodule Soothsayer.EventsTest do
           "ds" => [~D[2023-01-03]]
         })
 
-      config = %{"sale" => %{lower_window: -2, upper_window: 0}}
+      config = %{"sale" => %{steps_before: 2, steps_after: 0}}
 
       tensor = Events.build_features(dates, events_df, config)
 
@@ -251,8 +251,8 @@ defmodule Soothsayer.EventsTest do
       assert Nx.equal(tensor, expected) |> Nx.all() |> Nx.to_number() == 1
     end
 
-    test "handles upper_window (days after event)" do
-      # Event on Jan 1, with upper_window: 2
+    test "handles steps_after" do
+      # Event on Jan 1, with steps_after: 2
       # Should create feature columns for: 0 (Jan 1), +1 (Jan 2), +2 (Jan 3)
       dates = Series.from_list([~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03], ~D[2023-01-04]])
 
@@ -262,7 +262,7 @@ defmodule Soothsayer.EventsTest do
           "ds" => [~D[2023-01-01]]
         })
 
-      config = %{"sale" => %{lower_window: 0, upper_window: 2}}
+      config = %{"sale" => %{steps_before: 0, steps_after: 2}}
 
       tensor = Events.build_features(dates, events_df, config)
 
@@ -288,7 +288,7 @@ defmodule Soothsayer.EventsTest do
     end
 
     test "handles both lower and upper windows" do
-      # Event on Jan 3, with lower_window: -1, upper_window: 1
+      # Event on Jan 3, with steps_before: 1, steps_after: 1
       # Should create features for: -1 (Jan 2), 0 (Jan 3), +1 (Jan 4)
       dates =
         Series.from_list([
@@ -305,7 +305,7 @@ defmodule Soothsayer.EventsTest do
           "ds" => [~D[2023-01-03]]
         })
 
-      config = %{"sale" => %{lower_window: -1, upper_window: 1}}
+      config = %{"sale" => %{steps_before: 1, steps_after: 1}}
 
       tensor = Events.build_features(dates, events_df, config)
 
@@ -340,8 +340,8 @@ defmodule Soothsayer.EventsTest do
         })
 
       config = %{
-        "event_a" => %{lower_window: -1, upper_window: 0},
-        "event_b" => %{lower_window: -1, upper_window: 0}
+        "event_a" => %{steps_before: 1, steps_after: 0},
+        "event_b" => %{steps_before: 1, steps_after: 0}
       }
 
       tensor = Events.build_features(dates, events_df, config)
@@ -368,7 +368,7 @@ defmodule Soothsayer.EventsTest do
 
   describe "event_dates/3" do
     test "repeats yearly events on their month and day over the years asked for" do
-      config = %{events: %{"launch" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}}
+      config = %{events: %{"launch" => %{steps_before: 0, steps_after: 0, recurring: :yearly}}}
       events_df = DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2022-03-01]]})
       timestamps = [~N[2022-01-01 00:00:00], ~N[2023-12-31 00:00:00]]
 
@@ -377,7 +377,7 @@ defmodule Soothsayer.EventsTest do
     end
 
     test "a leap day recurs only in leap years and keeps its time of day" do
-      config = %{events: %{"leap" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}}
+      config = %{events: %{"leap" => %{steps_before: 0, steps_after: 0, recurring: :yearly}}}
       events_df = DataFrame.new(%{"event" => ["leap"], "ds" => [~N[2020-02-29 09:00:00]]})
       timestamps = Enum.map(2020..2024, &NaiveDateTime.new!(&1, 6, 1, 0, 0, 0))
 
@@ -387,7 +387,7 @@ defmodule Soothsayer.EventsTest do
 
     test "unions what the model remembers with the frame, and ignores unconfigured events" do
       config = %{
-        events: %{"sale" => %{lower_window: 0, upper_window: 0}},
+        events: %{"sale" => %{steps_before: 0, steps_after: 0}},
         training_data: %{
           event_dates: %{"sale" => [~N[2022-05-01 00:00:00]], "old" => [~N[2022-01-01 00:00:00]]}
         }
@@ -406,11 +406,11 @@ defmodule Soothsayer.EventsTest do
 
     test "adds the country holidays named on the config as midnight timestamps" do
       config = %{
-        events: %{"Christmas Day" => %{lower_window: 0, upper_window: 0}},
+        events: %{"Christmas Day" => %{steps_before: 0, steps_after: 0}},
         holidays: %{
           countries: [:us],
-          lower_window: 0,
-          upper_window: 0,
+          steps_before: 0,
+          steps_after: 0,
           regions: [],
           include_informal: false,
           names: ["Christmas Day"]
@@ -428,7 +428,7 @@ defmodule Soothsayer.EventsTest do
     test "windows are steps of the frequency and event dates mean midnight" do
       hours = Enum.map(0..47, &NaiveDateTime.add(~N[2023-01-04 00:00:00], &1, :hour))
       events_df = DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-05]]})
-      config = %{"sale" => %{lower_window: -1, upper_window: 1}}
+      config = %{"sale" => %{steps_before: 1, steps_after: 1}}
 
       tensor = Events.build_features(Series.from_list(hours), events_df, config, {1, :hour})
 
@@ -470,7 +470,7 @@ defmodule Soothsayer.EventsTest do
 
     test "raises when model not fitted" do
       model = %Soothsayer.Model{
-        config: %{events: %{"sale" => %{lower_window: 0, upper_window: 0}}},
+        config: %{events: %{"sale" => %{steps_before: 0, steps_after: 0}}},
         params: nil,
         network: nil
       }
@@ -486,7 +486,7 @@ defmodule Soothsayer.EventsTest do
       bias = Nx.tensor([0.0])
 
       model = %Soothsayer.Model{
-        config: %{events: %{"sale" => %{lower_window: -1, upper_window: 0}}},
+        config: %{events: %{"sale" => %{steps_before: 1, steps_after: 0}}},
         params: %Axon.ModelState{data: %{"events_dense" => %{"kernel" => kernel, "bias" => bias}}},
         network: nil
       }

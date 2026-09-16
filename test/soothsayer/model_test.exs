@@ -133,8 +133,8 @@ defmodule Soothsayer.ModelTest do
           weekly: %{enabled: true, fourier_terms: 2}
         },
         events: %{
-          "sale" => %{lower_window: 0, upper_window: 0},
-          "holiday" => %{lower_window: -1, upper_window: 1}
+          "sale" => %{steps_before: 0, steps_after: 0},
+          "holiday" => %{steps_before: 1, steps_after: 1}
         }
       }
 
@@ -166,7 +166,7 @@ defmodule Soothsayer.ModelTest do
           weekly: %{enabled: true, fourier_terms: 2}
         },
         events: %{
-          "sale" => %{lower_window: 0, upper_window: 0}
+          "sale" => %{steps_before: 0, steps_after: 0}
         },
         learning_rate: 0.01,
         epochs: 1

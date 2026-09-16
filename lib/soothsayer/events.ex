@@ -119,18 +119,18 @@ defmodule Soothsayer.Events do
   @doc """
   Computes total number of event features based on config.
 
-  Each event with window [lower_window, upper_window] creates
-  |lower_window| + 1 + upper_window features.
+  Each event with `steps_before` and `steps_after` creates
+  `steps_before + 1 + steps_after` features.
 
   ## Examples
 
       iex> Events.n_features(%{})
       0
 
-      iex> Events.n_features(%{"sale" => %{lower_window: 0, upper_window: 0}})
+      iex> Events.n_features(%{"sale" => %{steps_before: 0, steps_after: 0}})
       1
 
-      iex> Events.n_features(%{"black_friday" => %{lower_window: -2, upper_window: 1}})
+      iex> Events.n_features(%{"black_friday" => %{steps_before: 2, steps_after: 1}})
       4
 
   """
@@ -139,8 +139,8 @@ defmodule Soothsayer.Events do
 
   def n_features(events_config) do
     events_config
-    |> Enum.map(fn {_name, %{lower_window: lower, upper_window: upper}} ->
-      abs(lower) + 1 + upper
+    |> Enum.map(fn {_name, %{steps_before: before, steps_after: after_}} ->
+      before + 1 + after_
     end)
     |> Enum.sum()
   end
@@ -156,10 +156,10 @@ defmodule Soothsayer.Events do
       iex> Events.feature_names(%{})
       []
 
-      iex> Events.feature_names(%{"sale" => %{lower_window: 0, upper_window: 0}})
+      iex> Events.feature_names(%{"sale" => %{steps_before: 0, steps_after: 0}})
       ["sale_0"]
 
-      iex> Events.feature_names(%{"bf" => %{lower_window: -1, upper_window: 1}})
+      iex> Events.feature_names(%{"bf" => %{steps_before: 1, steps_after: 1}})
       ["bf_-1", "bf_0", "bf_+1"]
 
   """
@@ -172,9 +172,11 @@ defmodule Soothsayer.Events do
     |> Enum.flat_map(&feature_names_for_event/1)
   end
 
-  defp feature_names_for_event({name, %{lower_window: lower, upper_window: upper}}) do
-    Enum.map(lower..upper, fn offset -> format_feature_name(name, offset) end)
+  defp feature_names_for_event({name, spec}) do
+    Enum.map(offsets(spec), fn offset -> format_feature_name(name, offset) end)
   end
+
+  defp offsets(%{steps_before: before, steps_after: after_}), do: -before..after_//1
 
   defp format_feature_name(name, offset) do
     offset_str = if offset > 0, do: "+#{offset}", else: "#{offset}"
@@ -194,7 +196,7 @@ defmodule Soothsayer.Events do
 
   ## Examples
 
-      iex> config = %{events: %{"launch" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}}
+      iex> config = %{events: %{"launch" => %{steps_before: 0, steps_after: 0, recurring: :yearly}}}
       iex> events_df = Explorer.DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2022-03-01]]})
       iex> timestamps = [~N[2022-01-01 00:00:00], ~N[2023-12-31 00:00:00]]
       iex> Soothsayer.Events.event_dates(events_df, config, timestamps)
@@ -284,7 +286,7 @@ defmodule Soothsayer.Events do
 
       iex> dates = Explorer.Series.from_list([~D[2023-01-01], ~D[2023-01-02]])
       iex> events_df = Explorer.DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-01-02]]})
-      iex> config = %{"sale" => %{lower_window: 0, upper_window: 0}}
+      iex> config = %{"sale" => %{steps_before: 0, steps_after: 0}}
       iex> Events.build_features(dates, events_df, config)
       #Nx.Tensor<
         f32[2][1]
@@ -314,10 +316,11 @@ defmodule Soothsayer.Events do
     columns =
       events_config
       |> Enum.sort_by(fn {name, _} -> name end)
-      |> Enum.flat_map(fn {event_name, %{lower_window: lower, upper_window: upper}} ->
+      |> Enum.flat_map(fn {event_name, spec} ->
         event_dates = Map.get(event_dates_map, event_name, [])
 
-        lower..upper
+        spec
+        |> offsets()
         |> Enum.map(fn offset ->
           build_feature_column(dates_list, event_dates, offset, frequency)
         end)

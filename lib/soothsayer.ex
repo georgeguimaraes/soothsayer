@@ -61,8 +61,8 @@ defmodule Soothsayer do
       events: %{},
       holidays: %{
         countries: [],
-        lower_window: 0,
-        upper_window: 0,
+        steps_before: 0,
+        steps_after: 0,
         regions: [],
         include_informal: false
       },
@@ -84,6 +84,7 @@ defmodule Soothsayer do
     merged_config
     |> Map.update!(:quantiles, &Quantiles.normalize_config!/1)
     |> Map.update!(:holidays, &Holidays.normalize_config!/1)
+    |> Map.update!(:events, &fill_event_defaults/1)
     |> Model.new()
   end
 
@@ -101,14 +102,31 @@ defmodule Soothsayer do
     validate_training_options!(config)
   end
 
+  @event_defaults %{steps_before: 0, steps_after: 0}
+
+  defp fill_event_defaults(events) do
+    Map.new(events, fn {name, spec} -> {name, Map.merge(@event_defaults, spec)} end)
+  end
+
   defp validate_events!(%{events: events}) when is_map(events) do
     for {name, spec} <- events do
-      unless is_binary(name) and is_map(spec) and is_integer(spec[:lower_window]) and
-               is_integer(spec[:upper_window]) and spec[:lower_window] <= 0 and
-               spec[:upper_window] >= 0 do
+      unless is_binary(name) and is_map(spec) do
         raise ArgumentError,
-              "events must map names to %{lower_window: integer <= 0, upper_window: integer >= 0}, " <>
+              "events must map names to %{steps_before: count, steps_after: count}, " <>
                 "got #{inspect(name)} => #{inspect(spec)}"
+      end
+
+      if Map.has_key?(spec, :lower_window) or Map.has_key?(spec, :upper_window) do
+        raise ArgumentError,
+              "events.#{name} uses steps_before and steps_after now, both counts >= 0 " <>
+                "(lower_window: -2, upper_window: 1 becomes steps_before: 2, steps_after: 1)"
+      end
+
+      for key <- [:steps_before, :steps_after],
+          value = Map.get(spec, key, 0),
+          not (is_integer(value) and value >= 0) do
+        raise ArgumentError,
+              "events.#{name}.#{key} must be an integer >= 0, got #{inspect(value)}"
       end
 
       unless spec[:recurring] in [nil, :yearly] do
@@ -793,8 +811,8 @@ defmodule Soothsayer do
     end
 
     window = %{
-      lower_window: config.holidays.lower_window,
-      upper_window: config.holidays.upper_window
+      steps_before: config.holidays.steps_before,
+      steps_after: config.holidays.steps_after
     }
 
     config
@@ -1211,12 +1229,12 @@ defmodule Soothsayer do
 
   ## Examples
 
-      iex> model = Soothsayer.new(%{events: %{"sale" => %{lower_window: 0, upper_window: 0}}})
+      iex> model = Soothsayer.new(%{events: %{"sale" => %{steps_before: 0, steps_after: 0}}})
       iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
       iex> effects = Soothsayer.get_event_effects(fitted_model)
       %{"sale_0" => 45.2}
 
-      iex> model = Soothsayer.new(%{events: %{"promo" => %{lower_window: -1, upper_window: 1}}})
+      iex> model = Soothsayer.new(%{events: %{"promo" => %{steps_before: 1, steps_after: 1}}})
       iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
       iex> effects = Soothsayer.get_event_effects(fitted_model)
       %{"promo_-1" => 12.5, "promo_0" => 50.0, "promo_+1" => 8.3}

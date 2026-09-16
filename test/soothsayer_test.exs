@@ -193,7 +193,7 @@ defmodule SoothsayerTest do
             weekly: %{enabled: false}
           },
           events: %{
-            "sale" => %{lower_window: 0, upper_window: 0}
+            "sale" => %{steps_before: 0, steps_after: 0}
           },
           epochs: 10
         })
@@ -283,7 +283,7 @@ defmodule SoothsayerTest do
 
       model =
         event_model(%{
-          events: %{"founders_day" => %{lower_window: 0, upper_window: 0, recurring: :yearly}}
+          events: %{"founders_day" => %{recurring: :yearly}}
         })
 
       fitted = Soothsayer.fit(model, df, events: events_df)
@@ -302,7 +302,7 @@ defmodule SoothsayerTest do
       :rand.seed(:exsss, {6, 6, 6})
       df = holiday_frame(&(&1 == ~D[2023-03-15]))
       events_df = DataFrame.new(%{"event" => ["sale"], "ds" => [~D[2023-03-15]]})
-      model = event_model(%{events: %{"sale" => %{lower_window: 0, upper_window: 0}}})
+      model = event_model(%{events: %{"sale" => %{steps_before: 0, steps_after: 0}}})
       fitted = Soothsayer.fit(model, df, events: events_df)
 
       predictions = Soothsayer.predict(fitted, Series.from_list([~D[2023-03-14], ~D[2023-03-15]]))
@@ -315,7 +315,7 @@ defmodule SoothsayerTest do
 
       model =
         event_model(%{
-          events: %{"Christmas Day" => %{lower_window: 0, upper_window: 0}},
+          events: %{"Christmas Day" => %{steps_before: 0, steps_after: 0}},
           holidays: %{countries: [:us]}
         })
 
@@ -327,13 +327,17 @@ defmodule SoothsayerTest do
     end
 
     test "rejects bad event windows and recurrence" do
-      assert_raise ArgumentError, ~r/lower_window: integer <= 0/, fn ->
-        Soothsayer.new(%{events: %{"sale" => %{lower_window: 1, upper_window: 0}}})
+      assert_raise ArgumentError, ~r/events.sale.steps_before must be an integer >= 0/, fn ->
+        Soothsayer.new(%{events: %{"sale" => %{steps_before: -1, steps_after: 0}}})
+      end
+
+      assert_raise ArgumentError, ~r/steps_before and steps_after now/, fn ->
+        Soothsayer.new(%{events: %{"sale" => %{lower_window: -1, upper_window: 0}}})
       end
 
       assert_raise ArgumentError, ~r/events.sale.recurring must be :yearly/, fn ->
         Soothsayer.new(%{
-          events: %{"sale" => %{lower_window: 0, upper_window: 0, recurring: :monthly}}
+          events: %{"sale" => %{steps_before: 0, steps_after: 0, recurring: :monthly}}
         })
       end
     end
@@ -368,7 +372,7 @@ defmodule SoothsayerTest do
             weekly: %{enabled: false}
           },
           events: %{
-            "sale" => %{lower_window: 0, upper_window: 0}
+            "sale" => %{steps_before: 0, steps_after: 0}
           },
           epochs: 5
         })
@@ -430,7 +434,7 @@ defmodule SoothsayerTest do
             weekly: %{enabled: false}
           },
           events: %{
-            "promo" => %{lower_window: -1, upper_window: 1}
+            "promo" => %{steps_before: 1, steps_after: 1}
           },
           epochs: 5
         })
@@ -479,7 +483,7 @@ defmodule SoothsayerTest do
             weekly: %{enabled: false}
           },
           events: %{
-            "sale" => %{lower_window: 0, upper_window: 0}
+            "sale" => %{steps_before: 0, steps_after: 0}
           },
           epochs: 10
         })
@@ -531,7 +535,7 @@ defmodule SoothsayerTest do
             weekly: %{enabled: false}
           },
           events: %{
-            "promo" => %{lower_window: -1, upper_window: 1}
+            "promo" => %{steps_before: 1, steps_after: 1}
           },
           epochs: 5
         })
@@ -569,7 +573,7 @@ defmodule SoothsayerTest do
 
       model =
         Soothsayer.new(%{
-          events: %{"sale" => %{lower_window: 0, upper_window: 0}},
+          events: %{"sale" => %{steps_before: 0, steps_after: 0}},
           epochs: 5
         })
 
@@ -754,7 +758,7 @@ defmodule SoothsayerTest do
       model =
         Soothsayer.new(%{
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-          events: %{"sale" => %{lower_window: 0, upper_window: 0}},
+          events: %{"sale" => %{steps_before: 0, steps_after: 0}},
           trend: %{changepoints: 0},
           epochs: 2
         })

@@ -7,7 +7,7 @@ defmodule Soothsayer.HolidaysTest do
 
   defp config(overrides) do
     Map.merge(
-      %{countries: [:us], lower_window: 0, upper_window: 0, regions: [], include_informal: false},
+      %{countries: [:us], steps_before: 0, steps_after: 0, regions: [], include_informal: false},
       overrides
     )
   end
@@ -59,8 +59,12 @@ defmodule Soothsayer.HolidaysTest do
     end
 
     test "rejects bad windows" do
-      assert_raise ArgumentError, ~r/lower_window <= 0 <= upper_window/, fn ->
-        Soothsayer.new(%{holidays: %{countries: [:us], lower_window: 1}})
+      assert_raise ArgumentError, ~r/holidays.steps_before must be an integer >= 0/, fn ->
+        Soothsayer.new(%{holidays: %{countries: [:us], steps_before: -1}})
+      end
+
+      assert_raise ArgumentError, ~r/steps_before and steps_after now/, fn ->
+        Soothsayer.new(%{holidays: %{countries: [:us], lower_window: -1}})
       end
     end
   end

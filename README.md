@@ -65,7 +65,7 @@ To model special events like holidays or promotions:
 ```elixir
 # Define events with optional windows (steps before/after, days here)
 model = Soothsayer.new(%{
-  events: %{"black_friday" => %{lower_window: -1, upper_window: 1}}
+  events: %{"black_friday" => %{steps_before: 1, steps_after: 1}}
 })
 
 events_df = DataFrame.new(%{
@@ -224,8 +224,8 @@ alias Explorer.DataFrame
 # Define which events to model and their windows
 model = Soothsayer.new(%{
   events: %{
-    "black_friday" => %{lower_window: -1, upper_window: 1},
-    "christmas" => %{lower_window: -3, upper_window: 0}
+    "black_friday" => %{steps_before: 1, steps_after: 1},
+    "christmas" => %{steps_before: 3, steps_after: 0}
   }
 })
 
@@ -250,10 +250,12 @@ predictions = Soothsayer.predict(fitted_model, future_dates, events: future_even
 
 Windows allow events to affect surrounding days, not just the event date itself:
 
-- **`lower_window`**: Steps before the event (use negative numbers). `-2` means the effect starts 2 days before on daily data, 2 hours before on hourly data.
-- **`upper_window`**: Steps after the event. `1` means the effect extends 1 step after.
+- **`steps_before`**: Steps before the event the effect covers. `2` means it starts 2 days before on daily data, 2 hours before on hourly data.
+- **`steps_after`**: Steps after the event the effect covers. `1` means it extends 1 step after.
 
-Example: `%{lower_window: -1, upper_window: 1}` creates effects for the day before, the event day, and the day after (3 separate learned coefficients).
+Both default to `0`, so `%{}` means the event date alone.
+
+Example: `%{steps_before: 1, steps_after: 1}` creates effects for the day before, the event day, and the day after (3 separate learned coefficients).
 
 #### Country Holidays and Recurring Events
 
@@ -261,7 +263,7 @@ Every holiday of a country becomes an event of its own, dates generated for the 
 
 ```elixir
 model = Soothsayer.new(%{
-  holidays: %{countries: [:us], lower_window: -1, upper_window: 1}
+  holidays: %{countries: [:us], steps_before: 1, steps_after: 1}
 })
 
 fitted_model = Soothsayer.fit(model, df)
@@ -437,8 +439,8 @@ model = Soothsayer.new(%{
     regularization: 0.05
   },
   events: %{
-    "black_friday" => %{lower_window: -1, upper_window: 1},
-    "christmas" => %{lower_window: -3, upper_window: 0}
+    "black_friday" => %{steps_before: 1, steps_after: 1},
+    "christmas" => %{steps_before: 3, steps_after: 0}
   },
   quantiles: [0.1, 0.9],
   epochs: 150,

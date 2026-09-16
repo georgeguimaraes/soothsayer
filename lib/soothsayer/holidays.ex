@@ -12,7 +12,7 @@ defmodule Soothsayer.Holidays do
   the window shared by all of them:
 
       Soothsayer.new(%{
-        holidays: %{countries: [:us], lower_window: -1, upper_window: 1}
+        holidays: %{countries: [:us], steps_before: 1, steps_after: 1}
       })
 
   The dates are generated for the years of the data at fit, and again for
@@ -25,8 +25,8 @@ defmodule Soothsayer.Holidays do
   @type config :: %{
           optional(:names) => list(String.t()),
           countries: list(atom()),
-          lower_window: integer(),
-          upper_window: integer(),
+          steps_before: non_neg_integer(),
+          steps_after: non_neg_integer(),
           regions: list(String.t()),
           include_informal: boolean()
         }
@@ -59,17 +59,7 @@ defmodule Soothsayer.Holidays do
 
     countries = countries |> Enum.map(&locale!/1) |> Enum.uniq() |> Enum.sort()
 
-    for key <- [:lower_window, :upper_window],
-        value = Map.get(config, key),
-        not is_integer(value) do
-      raise ArgumentError, "holidays.#{key} must be an integer, got #{inspect(value)}"
-    end
-
-    unless config.lower_window <= 0 and config.upper_window >= 0 do
-      raise ArgumentError,
-            "holidays windows must satisfy lower_window <= 0 <= upper_window, " <>
-              "got #{config.lower_window} and #{config.upper_window}"
-    end
+    validate_windows!(config)
 
     unless is_list(config.regions) and Enum.all?(config.regions, &is_binary/1) do
       raise ArgumentError,
@@ -87,8 +77,22 @@ defmodule Soothsayer.Holidays do
 
   def normalize_config!(config) do
     raise ArgumentError,
-          "holidays must be a map with :countries, :lower_window and :upper_window, " <>
+          "holidays must be a map with :countries, :steps_before and :steps_after, " <>
             "got #{inspect(config)}"
+  end
+
+  defp validate_windows!(config) do
+    if Map.has_key?(config, :lower_window) or Map.has_key?(config, :upper_window) do
+      raise ArgumentError,
+            "holidays use steps_before and steps_after now, both counts >= 0 " <>
+              "(lower_window: -2, upper_window: 1 becomes steps_before: 2, steps_after: 1)"
+    end
+
+    for key <- [:steps_before, :steps_after],
+        value = Map.get(config, key),
+        not (is_integer(value) and value >= 0) do
+      raise ArgumentError, "holidays.#{key} must be an integer >= 0, got #{inspect(value)}"
+    end
   end
 
   defp locale!(country) when is_atom(country) do
@@ -125,7 +129,7 @@ defmodule Soothsayer.Holidays do
 
   ## Examples
 
-      iex> config = %{countries: [:us], lower_window: 0, upper_window: 0, regions: [], include_informal: false}
+      iex> config = %{countries: [:us], steps_before: 0, steps_after: 0, regions: [], include_informal: false}
       iex> Soothsayer.Holidays.dates(config, 2023..2023)["Independence Day"]
       [~D[2023-07-04]]
 

@@ -35,8 +35,8 @@ alias Explorer.DataFrame
 # 1. Configure the model
 model = Soothsayer.new(%{
   events: %{
-    "black_friday" => %{lower_window: -1, upper_window: 1},
-    "christmas" => %{lower_window: -3, upper_window: 0}
+    "black_friday" => %{steps_before: 1, steps_after: 1},
+    "christmas" => %{steps_before: 3, steps_after: 0}
   }
 })
 
@@ -54,10 +54,12 @@ fitted = Soothsayer.fit(model, df, events: events_df)
 
 | Parameter | Description |
 |-----------|-------------|
-| `lower_window` | Steps before the event (use negative numbers) |
-| `upper_window` | Steps after the event (use positive numbers) |
+| `steps_before` | Steps before the event that the effect covers, default `0` |
+| `steps_after` | Steps after the event that the effect covers, default `0` |
 
-A step is one row of the data at its frequency: a day for daily data, an hour for hourly data. Event dates given as plain dates mean midnight, so on hourly data an event on `~D[2023-11-24]` with a window of `-1..1` covers 23:00 the day before, midnight and 01:00.
+Both are counts, so `%{steps_before: 2, steps_after: 1}` covers two steps before, the event itself and one step after, four features. `%{}` means the event date alone.
+
+A step is one row of the data at its frequency: a day for daily data, an hour for hourly data. Event dates given as plain dates mean midnight, so on hourly data an event on `~D[2023-11-24]` with `steps_before: 1, steps_after: 1` covers 23:00 the day before, midnight and 01:00.
 
 ## Event Windows
 
@@ -69,7 +71,7 @@ For events that only affect the exact date:
 
 ```elixir
 events: %{
-  "sale" => %{lower_window: 0, upper_window: 0}
+  "sale" => %{steps_before: 0, steps_after: 0}
 }
 ```
 
@@ -81,7 +83,7 @@ For events where the impact starts before the date:
 
 ```elixir
 events: %{
-  "black_friday" => %{lower_window: -2, upper_window: 0}
+  "black_friday" => %{steps_before: 2, steps_after: 0}
 }
 ```
 
@@ -93,7 +95,7 @@ For events with lingering effects:
 
 ```elixir
 events: %{
-  "christmas" => %{lower_window: 0, upper_window: 2}
+  "christmas" => %{steps_before: 0, steps_after: 2}
 }
 ```
 
@@ -105,7 +107,7 @@ For events with both pre and post effects:
 
 ```elixir
 events: %{
-  "product_launch" => %{lower_window: -3, upper_window: 7}
+  "product_launch" => %{steps_before: 3, steps_after: 7}
 }
 ```
 
@@ -142,7 +144,7 @@ model = Soothsayer.new(%{
   trend: %{enabled: true, changepoints: 0},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   events: %{
-    "sale" => %{lower_window: 0, upper_window: 0}
+    "sale" => %{steps_before: 0, steps_after: 0}
   },
   epochs: 50
 })
@@ -195,9 +197,9 @@ events_df = DataFrame.new(%{
 
 model = Soothsayer.new(%{
   events: %{
-    "black_friday" => %{lower_window: -2, upper_window: 1},
-    "christmas" => %{lower_window: -7, upper_window: 0},
-    "new_year" => %{lower_window: 0, upper_window: 0}
+    "black_friday" => %{steps_before: 2, steps_after: 1},
+    "christmas" => %{steps_before: 7, steps_after: 0},
+    "new_year" => %{steps_before: 0, steps_after: 0}
   }
 })
 ```
@@ -219,7 +221,7 @@ For something that falls on the same month and day every year, say so once with 
 
 ```elixir
 model = Soothsayer.new(%{
-  events: %{"founders_day" => %{lower_window: 0, upper_window: 1, recurring: :yearly}}
+  events: %{"founders_day" => %{steps_before: 0, steps_after: 1, recurring: :yearly}}
 })
 
 events_df = DataFrame.new(%{"event" => ["founders_day"], "ds" => [~D[2022-05-10]]})
@@ -240,7 +242,7 @@ Then name the countries and, optionally, one window for all of their holidays:
 
 ```elixir
 model = Soothsayer.new(%{
-  holidays: %{countries: [:us], lower_window: -1, upper_window: 1}
+  holidays: %{countries: [:us], steps_before: 1, steps_after: 1}
 })
 
 fitted = Soothsayer.fit(model, df)
@@ -261,7 +263,7 @@ Holidays are named as holidefs names them in English ("Independence Day", "Thank
 | Option | Description |
 |--------|-------------|
 | `countries` | holidefs locale codes, `:us`, `:gb`, `:br`, `:de`, ... Ask `Soothsayer.Holidays.supported/0` for the list. |
-| `lower_window`, `upper_window` | One window for every holiday, steps before and after like event windows. |
+| `steps_before`, `steps_after` | One window for every holiday, steps before and after like event windows. Default `0`. |
 | `regions` | holidefs regions such as `["us_ca"]`, added to the national holidays. |
 | `include_informal` | Include holidays holidefs marks informal, like Good Friday in the US. Default `false`. |
 
