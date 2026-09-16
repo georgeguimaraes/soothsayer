@@ -1320,12 +1320,12 @@ defmodule Soothsayer do
       iex> model = Soothsayer.new(%{events: %{"sale" => %{steps_before: 0, steps_after: 0}}})
       iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
       iex> effects = Soothsayer.get_event_effects(fitted_model)
-      %{"sale_0" => 45.2}
+      %{"sale_0" => 0.9}
 
       iex> model = Soothsayer.new(%{events: %{"promo" => %{steps_before: 1, steps_after: 1}}})
       iex> fitted_model = Soothsayer.fit(model, data, events: events_df)
       iex> effects = Soothsayer.get_event_effects(fitted_model)
-      %{"promo_-1" => 12.5, "promo_0" => 50.0, "promo_+1" => 8.3}
+      %{"promo_-1" => 0.2, "promo_0" => 1.1, "promo_+1" => 0.1}
 
   Coefficients are per normalized unit of the event feature: for an
   additive event the change in normalized y, for a `mode: :multiplicative`
@@ -1341,8 +1341,10 @@ defmodule Soothsayer do
   Extracts the learned future regressor coefficients from a fitted model.
 
   Coefficients are in normalized units: the change in normalized y for a one
-  standard deviation change in the regressor. Positive means the regressor
-  pushes the forecast up.
+  standard deviation change in the regressor, or for a `mode: :multiplicative`
+  regressor the fraction of the trend per standard deviation. Positive means
+  the regressor pushes the forecast up. A regressor with `layers` has no
+  single coefficient, it maps to its network's weights by layer name.
 
   ## Examples
 
@@ -1350,6 +1352,12 @@ defmodule Soothsayer do
       iex> fitted_model = Soothsayer.fit(model, data)
       iex> Soothsayer.get_regressor_effects(fitted_model)
       %{"temperature" => 0.42}
+
+      iex> model = Soothsayer.new(%{regressors: %{"temperature" => %{layers: [8]}}})
+      iex> fitted_model = Soothsayer.fit(model, data)
+      iex> Soothsayer.get_regressor_effects(fitted_model)
+      %{"temperature" => %{"regressor_temperature_dense_0" => %{kernel: ..., bias: ...},
+                           "regressor_temperature_dense_out" => %{kernel: ...}}}
 
   """
   @spec get_regressor_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
