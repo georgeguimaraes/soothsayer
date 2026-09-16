@@ -805,6 +805,96 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "custom and conditional seasonalities" do
+    defp cycle_frame(dates, start_date, period, summer_only?) do
+      y =
+        Enum.map(dates, fn date ->
+          days = Date.diff(date, start_date)
+          summer = if date.month in 6..8, do: 1.0, else: 0.0
+          weekly = 8 * :math.sin(2 * :math.pi() * Date.day_of_week(date) / 7)
+          cycle = 10 * :math.sin(2 * :math.pi() * days / period)
+          seasonal = if summer_only?, do: weekly * summer, else: cycle
+          100 + 0.02 * days + seasonal + :rand.normal(0, 1)
+        end)
+
+      summer = Enum.map(dates, &(&1.month in 6..8))
+      DataFrame.new(%{"ds" => dates, "y" => y, "summer" => summer})
+    end
+
+    defp cycle_model(seasonality) do
+      Soothsayer.new(%{
+        trend: %{changepoints: 0},
+        seasonality:
+          Map.merge(%{yearly: %{enabled: false}, weekly: %{enabled: false}}, seasonality),
+        epochs: 40,
+        seed: 3
+      })
+    end
+
+    defp holdout_mae(model, training, holdout) do
+      fitted = Soothsayer.fit(model, training)
+      predictions = Soothsayer.predict(fitted, holdout["ds"], regressors: holdout)
+
+      {Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs() |> Series.mean(),
+       predictions}
+    end
+
+    test "a custom period picks up a cycle the built-in periods can't" do
+      :rand.seed(:exsss, {2, 2, 2})
+      start_date = ~D[2020-01-01]
+      training_dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-06-30]) |> Enum.to_list()
+      training = cycle_frame(training_dates, start_date, 30.5, false)
+      holdout = cycle_frame(holdout_dates, start_date, 30.5, false)
+
+      {without_error, _} = holdout_mae(cycle_model(%{}), training, holdout)
+
+      {with_error, predictions} =
+        holdout_mae(
+          cycle_model(%{custom: %{"monthly" => %{period: 30.5, fourier_terms: 3}}}),
+          training,
+          holdout
+        )
+
+      assert with_error < without_error * 0.4
+      assert "monthly_seasonality" in DataFrame.names(predictions)
+      refute "yearly_seasonality" in DataFrame.names(predictions)
+    end
+
+    test "a conditional weekly pattern beats one that has to apply all year" do
+      :rand.seed(:exsss, {2, 2, 2})
+      start_date = ~D[2020-01-01]
+      training_dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-12-31]) |> Enum.to_list()
+      training = cycle_frame(training_dates, start_date, 7, true)
+      holdout = cycle_frame(holdout_dates, start_date, 7, true)
+
+      {plain_error, _} = holdout_mae(cycle_model(%{weekly: %{enabled: true}}), training, holdout)
+
+      {conditional_error, predictions} =
+        holdout_mae(
+          cycle_model(%{weekly: %{enabled: true, condition: "summer"}}),
+          training,
+          holdout
+        )
+
+      assert conditional_error < plain_error * 0.7
+
+      winter =
+        Series.mask(predictions["weekly_seasonality"], Series.equal(holdout["summer"], false))
+
+      # Outside the condition the features are zero, which z-scoring puts a hair off 0
+      assert Series.max(Series.abs(winter)) < 0.1
+
+      fitted =
+        Soothsayer.fit(cycle_model(%{weekly: %{enabled: true, condition: "summer"}}), training)
+
+      assert_raise ArgumentError, ~r/seasonality conditions \["summer"\]/, fn ->
+        Soothsayer.predict(fitted, holdout["ds"])
+      end
+    end
+  end
+
   describe "multiplicative seasonality" do
     # y = trend * (1 + 0.3 * yearly cycle): the seasonal swing grows with the level
     defp multiplicative_series(dates, start_date) do

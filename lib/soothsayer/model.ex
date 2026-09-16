@@ -91,17 +91,18 @@ defmodule Soothsayer.Model do
   def build_network(config) do
     {combined, components} = build_network_components(config)
 
-    outputs = %{
-      combined: combined,
-      trend: components.trend,
-      yearly_seasonality: components.seasonality.yearly,
-      weekly_seasonality: components.seasonality.weekly,
-      daily_seasonality: components.seasonality.daily,
-      ar: components.ar,
-      events: components.events,
-      regressors: components.regressors,
-      lagged_regressors: components.lagged_regressors
-    }
+    seasonality_outputs =
+      Map.new(components.seasonality, fn {period, node} -> {seasonality_key(period), node} end)
+
+    outputs =
+      Map.merge(seasonality_outputs, %{
+        combined: combined,
+        trend: components.trend,
+        ar: components.ar,
+        events: components.events,
+        regressors: components.regressors,
+        lagged_regressors: components.lagged_regressors
+      })
 
     # Only present when quantiles are configured, as a tuple in the same
     # order as config.quantiles.
@@ -113,6 +114,13 @@ defmodule Soothsayer.Model do
 
     Axon.container(outputs)
   end
+
+  @doc """
+  The output key of a seasonal period: `:yearly_seasonality` for `:yearly`,
+  `:monthly_seasonality` for a custom `:monthly`.
+  """
+  @spec seasonality_key(atom()) :: atom()
+  def seasonality_key(period), do: :"#{period}_seasonality"
 
   @doc """
   Returns a display-friendly version of the network that outputs a single tensor.
@@ -153,7 +161,7 @@ defmodule Soothsayer.Model do
       |> Seasonality.build_components(config)
       |> scale_seasonality(scale, config)
       |> then(fn components ->
-        Map.new(Seasonality.periods(), &{&1, Map.get(components, &1, Axon.constant(0))})
+        Map.new(Seasonality.periods(config), &{&1, Map.get(components, &1, Axon.constant(0))})
       end)
 
     # Events, the additive ones plus the multiplicative ones times the trend
@@ -173,7 +181,8 @@ defmodule Soothsayer.Model do
     # from the lags, its values at the target positions are the forecast.
     nonstationary =
       Axon.add(
-        [trend] ++ Enum.map(Seasonality.periods(), &seasonality[&1]) ++ [events, regressors],
+        [trend] ++
+          Enum.map(Seasonality.periods(config), &seasonality[&1]) ++ [events, regressors],
         name: "nonstationary"
       )
 
@@ -208,7 +217,7 @@ defmodule Soothsayer.Model do
     combined =
       Axon.add(
         [trend_at_targets] ++
-          Enum.map(Seasonality.periods(), &seasonality_at_targets[&1]) ++
+          Enum.map(Seasonality.periods(config), &seasonality_at_targets[&1]) ++
           [ar, events_at_targets, regressors_at_targets, lagged_regressors]
       )
 
@@ -216,7 +225,7 @@ defmodule Soothsayer.Model do
     inputs =
       Enum.reject(
         [trend_input] ++
-          Enum.map(Seasonality.periods(), &seasonality_inputs[&1]) ++
+          Enum.map(Seasonality.periods(config), &seasonality_inputs[&1]) ++
           [ar_input, events_input, regressors_input, lagged_regressors_input],
         &is_nil/1
       )

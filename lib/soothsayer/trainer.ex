@@ -633,7 +633,7 @@ defmodule Soothsayer.Trainer do
 
   defp seasonality_lambdas(config) do
     lambda = get_in(config, [:seasonality, :regularization])
-    for period <- Seasonality.periods(), do: {"#{period}_dense", lambda}
+    for period <- Seasonality.periods(config), do: {"#{period}_dense", lambda}
   end
 
   defp uniform_weights(kernel, lambda) do

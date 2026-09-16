@@ -282,4 +282,113 @@ defmodule Soothsayer.SeasonalityTest do
                config
     end
   end
+
+  describe "custom and conditional seasonalities" do
+    test "custom periods are listed after the built-in ones and are always enabled" do
+      config = %{
+        seasonality: %{
+          yearly: %{enabled: false, fourier_terms: 6},
+          custom: %{
+            "monthly" => %{period: 30.5, fourier_terms: 2},
+            "biweekly" => %{period: 14, fourier_terms: 1}
+          }
+        }
+      }
+
+      assert Seasonality.periods(config) == [:yearly, :weekly, :daily, :biweekly, :monthly]
+      assert Seasonality.enabled?(config, :monthly)
+      refute Seasonality.enabled?(config, :yearly)
+
+      features = Seasonality.build_features([~D[2023-01-01], ~D[2023-03-03]], config)
+      assert Nx.shape(features.monthly) == {2, 4}
+      assert Nx.shape(features.biweekly) == {2, 2}
+      # 61 days apart is two full 30.5 day periods, so the same phase
+      assert Nx.all_close(features.monthly[0], features.monthly[1], atol: 1.0e-4)
+             |> Nx.to_number() == 1
+    end
+
+    test "a condition scales the period's features row by row and 0 outside the required set" do
+      config = %{seasonality: %{weekly: %{enabled: true, fourier_terms: 1, condition: "summer"}}}
+      dates = [~D[2023-01-02], ~D[2023-07-03], ~D[2023-07-04]]
+      naive = Enum.map(dates, &NaiveDateTime.new!(&1, ~T[00:00:00]))
+
+      conditions = %{"summer" => %{Enum.at(naive, 0) => 0.0, Enum.at(naive, 1) => 1.0}}
+
+      plain =
+        Seasonality.build_features(dates, %{
+          seasonality: %{weekly: %{enabled: true, fourier_terms: 1}}
+        })
+
+      masked =
+        Seasonality.build_features(dates, config, conditions,
+          required: MapSet.new(Enum.take(naive, 2))
+        )
+
+      assert Nx.to_flat_list(masked.weekly[0]) == [0.0, 0.0]
+      assert Nx.to_flat_list(masked.weekly[1]) == Nx.to_flat_list(plain.weekly[1])
+      assert Nx.to_flat_list(masked.weekly[2]) == [0.0, 0.0]
+
+      assert_raise ArgumentError, ~r/condition "summer" has no value for 2023-07-04/, fn ->
+        Seasonality.build_features(dates, config, conditions)
+      end
+
+      assert Seasonality.condition_columns(config) == ["summer"]
+    end
+
+    test "condition values come from the dataframe as 0 to 1 floats" do
+      config = %{seasonality: %{weekly: %{enabled: true, fourier_terms: 1, condition: "summer"}}}
+
+      frame =
+        Explorer.DataFrame.new(%{
+          "ds" => [~D[2023-01-02], ~D[2023-07-03]],
+          "summer" => [false, true]
+        })
+
+      values = Seasonality.condition_values(frame, config)
+      assert values["summer"][~N[2023-01-02 00:00:00]] == 0.0
+      assert values["summer"][~N[2023-07-03 00:00:00]] == 1.0
+
+      bad = Explorer.DataFrame.new(%{"ds" => [~D[2023-01-02]], "summer" => [2.0]})
+
+      assert_raise ArgumentError, ~r/must be between 0 and 1 or boolean/, fn ->
+        Seasonality.condition_values(bad, config)
+      end
+
+      assert_raise ArgumentError, ~r/condition column "summer" not found/, fn ->
+        Seasonality.condition_values(Explorer.DataFrame.new(%{"ds" => [~D[2023-01-02]]}), config)
+      end
+    end
+
+    test "rejects unknown keys, bad names and bad specs" do
+      assert_raise ArgumentError, ~r/unknown seasonality key :monthly/, fn ->
+        Soothsayer.new(%{seasonality: %{monthly: %{period: 30.5, fourier_terms: 3}}})
+      end
+
+      assert_raise ArgumentError, ~r/lowercase identifiers other than yearly/, fn ->
+        Soothsayer.new(%{seasonality: %{custom: %{"weekly" => %{period: 7, fourier_terms: 3}}}})
+      end
+
+      assert_raise ArgumentError, ~r/lowercase identifiers/, fn ->
+        Soothsayer.new(%{
+          seasonality: %{custom: %{"Monthly cycle" => %{period: 30.5, fourier_terms: 3}}}
+        })
+      end
+
+      assert_raise ArgumentError, ~r/custom.monthly.period must be a positive number/, fn ->
+        Soothsayer.new(%{seasonality: %{custom: %{"monthly" => %{fourier_terms: 3}}}})
+      end
+
+      assert_raise ArgumentError,
+                   ~r/custom.monthly.fourier_terms must be a positive integer/,
+                   fn ->
+                     Soothsayer.new(%{
+                       seasonality: %{custom: %{"monthly" => %{period: 30.5, fourier_terms: 0}}}
+                     })
+                   end
+
+      assert_raise ArgumentError, ~r/seasonality.weekly.condition must be a column name/, fn ->
+        Soothsayer.new(%{seasonality: %{weekly: %{condition: :summer}}})
+      end
+    end
+  end
 end

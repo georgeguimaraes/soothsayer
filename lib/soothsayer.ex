@@ -55,7 +55,8 @@ defmodule Soothsayer do
         regularization: nil,
         yearly: %{enabled: true, fourier_terms: 6},
         weekly: %{enabled: true, fourier_terms: 3},
-        daily: %{enabled: :auto, fourier_terms: 6}
+        daily: %{enabled: :auto, fourier_terms: 6},
+        custom: %{}
       },
       frequency: :auto,
       ar: %{enabled: false, lags: 0, layers: [], regularization: nil, forecast_steps: 1},
@@ -98,6 +99,7 @@ defmodule Soothsayer do
   @seasonality_modes [:additive, :multiplicative]
 
   defp validate_config!(config) do
+    Seasonality.validate_config!(config.seasonality)
     validate_seasonality_mode!(config)
     validate_seasonality_enabled!(config)
     validate_regularization!(config, [:seasonality, :regularization])
@@ -340,6 +342,7 @@ defmodule Soothsayer do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
     Regressors.validate_columns!(data, Regressors.names(model.config))
+    conditions = Seasonality.condition_values(data, model.config)
     Regressors.validate_columns!(data, LaggedRegressors.names(model.config))
 
     timestamps = Timestamp.from_series(data["ds"])
@@ -409,7 +412,7 @@ defmodule Soothsayer do
 
     x =
       %{"trend" => trend_full}
-      |> Map.merge(seasonality_inputs(timestamps, config))
+      |> Map.merge(seasonality_inputs(timestamps, config, conditions))
       |> put_events_input(model, timestamps, events_df)
       |> put_training_regressors_input(model, timestamps, data)
       |> Map.new(fn {key, features} -> {key, Nx.take(features, position_indices, axis: 0)} end)
@@ -459,7 +462,10 @@ defmodule Soothsayer do
       known_values: known_values,
       last_timestamp: Enum.max(timestamps, NaiveDateTime),
       regressors:
-        Map.new(Regressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)}),
+        Map.new(
+          Regressors.names(config) ++ Seasonality.condition_columns(config),
+          &{&1, Regressors.values_by_timestamp(data, &1)}
+        ),
       lagged_regressors:
         Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)}),
       event_dates: Events.frame_dates(events_df)
@@ -478,16 +484,13 @@ defmodule Soothsayer do
   defp resolve_frequency(:auto, timestamps), do: Frequency.infer(timestamps)
   defp resolve_frequency(frequency, _timestamps), do: frequency
 
-  @component_columns [
-    :trend,
-    :yearly_seasonality,
-    :weekly_seasonality,
-    :daily_seasonality,
-    :ar,
-    :events,
-    :regressors,
-    :lagged_regressors
-  ]
+  # The component columns of predict, in order. Custom seasonalities come
+  # after the built-in ones.
+  defp component_columns(config) do
+    [:trend] ++
+      Enum.map(Seasonality.periods(config), &Model.seasonality_key/1) ++
+      [:ar, :events, :regressors, :lagged_regressors]
+  end
 
   @doc """
   Makes predictions using a fitted Soothsayer model.
@@ -560,7 +563,7 @@ defmodule Soothsayer do
     # the trend, which carries the level of the series even when disabled
     # and is needed for the columns to add up to yhat.
     component_columns =
-      for key <- @component_columns,
+      for key <- component_columns(model.config),
           tensor = components[key],
           key == :trend or Nx.rank(tensor) == 2,
           do: {Atom.to_string(key), tensor}
@@ -699,7 +702,11 @@ defmodule Soothsayer do
 
     regressor_values = %{
       regressors:
-        Regressors.known_values(training_data, regressors_df, Regressors.names(model.config)),
+        Regressors.known_values(
+          training_data,
+          regressors_df,
+          Regressors.names(model.config) ++ Seasonality.condition_columns(model.config)
+        ),
       lagged_regressors: LaggedRegressors.known_values(training_data, regressors_df, model.config)
     }
 
@@ -846,9 +853,9 @@ defmodule Soothsayer do
     |> put_in([:holidays, :names], names)
   end
 
-  defp seasonality_inputs(timestamps, config) do
+  defp seasonality_inputs(timestamps, config, conditions, opts \\ []) do
     timestamps
-    |> Seasonality.build_features(config)
+    |> Seasonality.build_features(config, conditions, opts)
     |> Map.new(fn {period, features} -> {Atom.to_string(period), features} end)
   end
 
@@ -945,17 +952,21 @@ defmodule Soothsayer do
   end
 
   defp validate_regressors_option!(%Model{} = model, regressors_df) do
-    case {Regressors.names(model.config), regressors_df} do
+    names = Regressors.names(model.config)
+    conditions = Seasonality.condition_columns(model.config)
+
+    case {names ++ conditions, regressors_df} do
       {[], _frame} ->
         :ok
 
-      {names, nil} ->
+      {_columns, nil} ->
         raise ArgumentError,
-              "This model was fitted with regressors #{inspect(names)}. " <>
-                "Pass regressors: a dataframe with \"ds\" and those columns to predict."
+              "This model was fitted with regressors #{inspect(names)} and seasonality " <>
+                "conditions #{inspect(conditions)}. Pass regressors: a dataframe with " <>
+                "\"ds\" and those columns to predict."
 
-      {names, %DataFrame{} = frame} ->
-        Regressors.validate_columns!(frame, names)
+      {columns, %DataFrame{} = frame} ->
+        Regressors.validate_columns!(frame, columns)
     end
   end
 
@@ -976,7 +987,14 @@ defmodule Soothsayer do
     trend_input = Trend.build_trend_input(t, changepoint_features)
 
     %{"trend" => trend_input}
-    |> Map.merge(seasonality_inputs(timestamps, config))
+    |> Map.merge(
+      seasonality_inputs(
+        timestamps,
+        config,
+        Map.take(regressor_values, Seasonality.condition_columns(config)),
+        required: required_timestamps
+      )
+    )
     |> put_events_input(model, timestamps, events_df)
     |> put_regressors_input(model, timestamps, regressor_values, required_timestamps)
     |> Map.new(fn {key, features} ->
