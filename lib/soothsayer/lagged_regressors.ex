@@ -44,13 +44,22 @@ defmodule Soothsayer.LaggedRegressors do
 
   @doc """
   Builds the lagged regressors layer, one linear output per forecast step,
-  `Axon.constant(0)` when there are none.
+  `Axon.constant(0)` when there are none. With `lagged_regressors_layers`
+  set, that many hidden dense layers with ReLU come first, one shared
+  network over every lag of every lagged regressor, NeuralProphet's
+  `lagged_reg_layers`. They are named `lagged_regressors_dense_<i>`.
   """
   @spec build_component(Axon.t() | nil, map()) :: Axon.t()
   def build_component(nil, _config), do: Axon.constant(0)
 
   def build_component(input, config) do
-    Axon.dense(input, AR.forecast_steps(config), activation: :linear, name: @layer_name)
+    config
+    |> Map.get(:lagged_regressors_layers, [])
+    |> Enum.with_index()
+    |> Enum.reduce(input, fn {units, index}, acc ->
+      Axon.dense(acc, units, activation: :relu, name: "#{@layer_name}_#{index}")
+    end)
+    |> Axon.dense(AR.forecast_steps(config), activation: :linear, name: @layer_name)
   end
 
   @doc """

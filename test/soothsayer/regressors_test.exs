@@ -156,6 +156,73 @@ defmodule Soothsayer.RegressorsTest do
       end
     end
 
+    test "a networked regressor fits a curve a coefficient can't" do
+      :rand.seed(:exsss, {9, 9, 9})
+      start_date = ~D[2021-01-01]
+      training_dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-02-28]) |> Enum.to_list()
+
+      # y = 100 + 3 * x^2, symmetric in x, so a linear coefficient reads nothing
+      frame = fn dates ->
+        x = Enum.map(dates, fn date -> 2 * :math.sin(Date.diff(date, start_date) / 11) end)
+        y = Enum.map(x, fn value -> 100 + 3 * value * value + :rand.normal(0, 1) end)
+        DataFrame.new(%{"ds" => dates, "y" => y, "x" => x})
+      end
+
+      training = frame.(training_dates)
+      holdout = frame.(holdout_dates)
+
+      holdout_error = fn spec ->
+        fitted =
+          Soothsayer.fit(Soothsayer.new(base_config(%{regressors: %{"x" => spec}})), training)
+
+        predictions = Soothsayer.predict(fitted, holdout["ds"], regressors: holdout)
+
+        {Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs() |> Series.mean(),
+         fitted}
+      end
+
+      {linear_error, _} = holdout_error.(%{})
+      {network_error, fitted} = holdout_error.(%{layers: [16, 8]})
+
+      assert network_error < linear_error * 0.5
+
+      assert %{"x" => layers} = Soothsayer.get_regressor_effects(fitted)
+      assert Nx.shape(layers["regressor_x_dense_0"].kernel) == {1, 16}
+      assert Nx.shape(layers["regressor_x_dense_1"].kernel) == {16, 8}
+      assert Nx.shape(layers["regressor_x_dense_out"].kernel) == {8, 1}
+      refute Map.has_key?(layers["regressor_x_dense_out"], :bias)
+    end
+
+    test "linear regressors come before networked ones and keep their coefficients" do
+      config =
+        Soothsayer.new(%{
+          regressors: %{
+            "net" => %{layers: [4]},
+            "plain" => %{},
+            "scaled" => %{mode: :multiplicative}
+          }
+        }).config
+
+      assert Regressors.names(config) == ["plain", "scaled", "net"]
+      assert Regressors.mode_ranges(config) == %{additive: 0..0, multiplicative: 1..1}
+      assert Regressors.network_names(config) == ["net"]
+
+      assert Regressors.regularization_weights(
+               put_in(config, [:regressors, "net", :regularization], 0.3)
+             ) == %{
+               "regressors_dense" => [0.0],
+               "regressors_multiplicative_dense" => [0.0],
+               "regressor_net_dense_0" => [0.3]
+             }
+
+      assert_raise ArgumentError,
+                   ~r/regressor "net" layers must be a list of positive integers/,
+                   fn ->
+                     Soothsayer.new(%{regressors: %{"net" => %{layers: [0]}}})
+                   end
+    end
+
     test "regressors are a list of names or a map of name to options" do
       from_list = Soothsayer.new(%{regressors: ["temperature"]}).config.regressors
       from_map = Soothsayer.new(%{regressors: %{"temperature" => %{}}}).config.regressors

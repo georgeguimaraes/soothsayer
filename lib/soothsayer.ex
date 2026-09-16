@@ -73,6 +73,7 @@ defmodule Soothsayer do
       },
       regressors: %{},
       lagged_regressors: %{},
+      lagged_regressors_layers: [],
       quantiles: [],
       missing: %{impute: true, impute_linear: 10, impute_rolling: 10, drop_samples: false},
       epochs: :auto,
@@ -109,6 +110,7 @@ defmodule Soothsayer do
     validate_regularization!(config, [:ar, :regularization])
     Frequency.validate!(config.frequency)
     validate_lagged_regressors!(config)
+    validate_lagged_regressors_layers!(config)
     validate_forecast_steps!(config)
     validate_missing!(config)
     validate_events!(config)
@@ -164,6 +166,15 @@ defmodule Soothsayer do
         not (is_integer(value) and value >= 0) do
       raise ArgumentError,
             "events.#{name}.#{key} must be an integer >= 0, got #{inspect(value)}"
+    end
+  end
+
+  defp validate_lagged_regressors_layers!(config) do
+    layers = Map.get(config, :lagged_regressors_layers, [])
+
+    unless is_list(layers) and Enum.all?(layers, &(is_integer(&1) and &1 > 0)) do
+      raise ArgumentError,
+            "lagged_regressors_layers must be a list of positive integers, got #{inspect(layers)}"
     end
   end
 

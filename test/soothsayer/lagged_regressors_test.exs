@@ -141,6 +141,60 @@ defmodule Soothsayer.LaggedRegressorsTest do
       assert Nx.all_close(summed, components.combined, atol: 1.0e-2) |> Nx.to_number() == 1
     end
 
+    test "hidden layers fit a curved lagged effect a linear layer can't" do
+      :rand.seed(:exsss, {3, 1, 4})
+      dates = Date.range(~D[2021-01-01], ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-03-31]) |> Enum.to_list()
+
+      # y depends on the square of yesterday's temperature anomaly
+      curved = fn dates ->
+        temperature = Enum.map(dates, fn _ -> 20 + :rand.normal(0, 4) end)
+        lagged = [hd(temperature) | temperature] |> Enum.take(length(dates))
+
+        y =
+          Enum.map(lagged, fn temp ->
+            100 + 0.5 * (temp - 20) * (temp - 20) + :rand.normal(0, 1)
+          end)
+
+        DataFrame.new(%{"ds" => dates, "y" => y, "temperature" => temperature})
+      end
+
+      training = curved.(dates)
+      holdout = curved.(holdout_dates)
+
+      one_step_error = fn layers ->
+        model =
+          lagged_model(%{
+            lagged_regressors: %{"temperature" => %{lags: 1}},
+            lagged_regressors_layers: layers
+          })
+
+        fitted = Soothsayer.fit(model, training)
+
+        predictions =
+          Soothsayer.predict(fitted, holdout["ds"], history: holdout, regressors: holdout)
+
+        errors = Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs()
+        {Series.mean(Series.fill_missing(errors, 0.0)), fitted}
+      end
+
+      {linear_error, _} = one_step_error.([])
+      {network_error, fitted} = one_step_error.([8])
+
+      assert network_error < linear_error * 0.7
+      assert Nx.shape(fitted.params.data["lagged_regressors_dense_0"]["kernel"]) == {1, 8}
+      assert Nx.shape(fitted.params.data["lagged_regressors_dense"]["kernel"]) == {8, 1}
+
+      assert_raise ArgumentError,
+                   ~r/lagged_regressors_layers must be a list of positive integers/,
+                   fn ->
+                     lagged_model(%{
+                       lagged_regressors: %{"temperature" => %{lags: 1}},
+                       lagged_regressors_layers: [-1]
+                     })
+                   end
+    end
+
     test "forecasting past the training data only needs regressor values up to each block origin" do
       :rand.seed(:exsss, {3, 1, 4})
       dates = Date.range(~D[2022-01-01], ~D[2022-06-30]) |> Enum.to_list()

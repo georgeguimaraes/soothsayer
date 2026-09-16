@@ -14,7 +14,13 @@ defmodule Soothsayer.Regressors do
   `mode: :multiplicative` (its coefficient is a fraction of the trend). The
   input columns are laid out additive regressors first, then multiplicative,
   each group sorted by name, and each mode gets its own linear layer,
-  `regressors_dense` and `regressors_multiplicative_dense`. The training dataframe
+  `regressors_dense` and `regressors_multiplicative_dense`.
+
+  A regressor with `layers: [16, 8]` gets its own small network instead of
+  a coefficient, NeuralProphet's `neural_nets` future regressor model: one
+  hidden dense layer with ReLU per entry, then a linear output with no bias,
+  named `regressor_<name>_dense_<i>` and `regressor_<name>_dense_out`. Its
+  column comes after the linear ones in the input. The training dataframe
   must contain those columns, and so must the dataframe passed as
   `regressors:` to `Soothsayer.predict/3`. The training values are kept on
   the fitted model, so with auto-regression the lag timestamps of a
@@ -67,28 +73,7 @@ defmodule Soothsayer.Regressors do
                 "got #{inspect(name)} => #{inspect(spec)}"
       end
 
-      for key <- Map.keys(spec), key not in @known_keys do
-        raise ArgumentError,
-              "unknown option #{inspect(key)} for regressor #{inspect(name)}. " <>
-                "Known: #{inspect(@known_keys)}"
-      end
-
-      spec = Map.merge(@defaults, spec)
-
-      unless spec.mode in @modes do
-        raise ArgumentError,
-              "regressor #{inspect(name)} mode must be one of #{inspect(@modes)}, " <>
-                "got #{inspect(spec.mode)}"
-      end
-
-      unless is_nil(spec.regularization) or
-               (is_number(spec.regularization) and spec.regularization >= 0) do
-        raise ArgumentError,
-              "regressor #{inspect(name)} regularization must be nil or a number >= 0, " <>
-                "got #{inspect(spec.regularization)}"
-      end
-
-      {name, spec}
+      {name, normalize_spec!(name, spec)}
     end)
   end
 
@@ -98,21 +83,61 @@ defmodule Soothsayer.Regressors do
             "got #{inspect(other)}"
   end
 
+  defp normalize_spec!(name, spec) do
+    for key <- Map.keys(spec), key not in @known_keys do
+      raise ArgumentError,
+            "unknown option #{inspect(key)} for regressor #{inspect(name)}. " <>
+              "Known: #{inspect(@known_keys)}"
+    end
+
+    spec = Map.merge(@defaults, spec)
+
+    unless spec.mode in @modes do
+      raise ArgumentError,
+            "regressor #{inspect(name)} mode must be one of #{inspect(@modes)}, " <>
+              "got #{inspect(spec.mode)}"
+    end
+
+    unless is_nil(spec.regularization) or
+             (is_number(spec.regularization) and spec.regularization >= 0) do
+      raise ArgumentError,
+            "regressor #{inspect(name)} regularization must be nil or a number >= 0, " <>
+              "got #{inspect(spec.regularization)}"
+    end
+
+    unless is_list(spec.layers) and Enum.all?(spec.layers, &(is_integer(&1) and &1 > 0)) do
+      raise ArgumentError,
+            "regressor #{inspect(name)} layers must be a list of positive integers, " <>
+              "got #{inspect(spec.layers)}"
+    end
+
+    spec
+  end
+
   @doc """
   The configured regressor names in the column order of the regressors
-  input: additive regressors first, then multiplicative, each sorted.
+  input: the linear additive ones, the linear multiplicative ones, then the
+  networked ones additive first, each group sorted.
   """
   @spec names(map()) :: list(String.t())
   def names(%{regressors: regressors}) when is_map(regressors) do
-    names_in(regressors, :additive) ++ names_in(regressors, :multiplicative)
+    names_in(regressors, :additive, :linear) ++
+      names_in(regressors, :multiplicative, :linear) ++
+      names_in(regressors, :additive, :network) ++
+      names_in(regressors, :multiplicative, :network)
   end
 
   def names(%{regressors: regressors}) when is_list(regressors), do: Enum.sort(regressors)
   def names(_config), do: []
 
-  defp names_in(regressors, mode) do
-    for {name, spec} <- Enum.sort(regressors), Map.get(spec, :mode, :additive) == mode, do: name
+  defp names_in(regressors, mode, kind) do
+    for {name, spec} <- Enum.sort(regressors),
+        Map.get(spec, :mode, :additive) == mode,
+        kind(spec) == kind,
+        do: name
   end
+
+  defp kind(spec), do: if(Map.get(spec, :layers, []) == [], do: :linear, else: :network)
 
   @doc """
   The column ranges of the regressors input by mode, `nil` for a mode with
@@ -126,13 +151,13 @@ defmodule Soothsayer.Regressors do
 
   """
   @spec mode_ranges(map()) :: %{additive: Range.t() | nil, multiplicative: Range.t() | nil}
-  def mode_ranges(%{regressors: regressors} = config) when is_map(regressors) do
-    additive_count = length(names_in(regressors, :additive))
-    total = length(names(config))
+  def mode_ranges(%{regressors: regressors}) when is_map(regressors) do
+    additive_count = length(names_in(regressors, :additive, :linear))
+    multiplicative_count = length(names_in(regressors, :multiplicative, :linear))
 
     %{
       additive: range_from(0, additive_count),
-      multiplicative: range_from(additive_count, total - additive_count)
+      multiplicative: range_from(additive_count, multiplicative_count)
     }
   end
 
@@ -155,21 +180,39 @@ defmodule Soothsayer.Regressors do
 
   """
   @spec regularization_weights(map()) :: %{String.t() => list(float())}
-  def regularization_weights(%{regressors: regressors}) when is_map(regressors) do
-    [{@layer_name, :additive}, {@multiplicative_layer_name, :multiplicative}]
-    |> Enum.map(fn {layer, mode} ->
-      lambdas =
-        for name <- names_in(regressors, mode) do
-          (Map.get(regressors[name], :regularization) || 0) * 1.0
-        end
+  def regularization_weights(%{regressors: regressors} = config) when is_map(regressors) do
+    linear =
+      for {layer, mode} <- [
+            {@layer_name, :additive},
+            {@multiplicative_layer_name, :multiplicative}
+          ],
+          lambdas = Enum.map(names_in(regressors, mode, :linear), &lambda(regressors[&1])),
+          lambdas != [] do
+        {layer, lambdas}
+      end
 
-      {layer, lambdas}
-    end)
-    |> Enum.reject(fn {_layer, lambdas} -> lambdas == [] end)
-    |> Map.new()
+    # A networked regressor's penalty sits on its first hidden layer, whose
+    # kernel has one row, the regressor's own column.
+    networked =
+      for name <- network_names(config),
+          do: {"regressor_#{name}_dense_0", [lambda(regressors[name])]}
+
+    Map.new(linear ++ networked)
   end
 
   def regularization_weights(_config), do: %{}
+
+  defp lambda(spec), do: (Map.get(spec, :regularization) || 0) * 1.0
+
+  @doc """
+  The names of the regressors with hidden layers, in input column order.
+  """
+  @spec network_names(map()) :: list(String.t())
+  def network_names(%{regressors: regressors}) when is_map(regressors) do
+    names_in(regressors, :additive, :network) ++ names_in(regressors, :multiplicative, :network)
+  end
+
+  def network_names(_config), do: []
 
   # Network Building
 
@@ -208,12 +251,51 @@ defmodule Soothsayer.Regressors do
 
   def build_component(input, config) do
     ranges = mode_ranges(config)
+    names = names(config)
+    regressors = config.regressors
 
-    %{
-      additive: Layers.position_dense_over(input, ranges.additive, @layer_name),
-      multiplicative:
-        Layers.position_dense_over(input, ranges.multiplicative, @multiplicative_layer_name)
-    }
+    Map.new([additive: @layer_name, multiplicative: @multiplicative_layer_name], fn {mode, layer} ->
+      linear = Layers.position_dense_over(input, ranges[mode], layer)
+
+      networks =
+        for name <- network_names(config), Map.get(regressors[name], :mode, :additive) == mode do
+          build_network(
+            input,
+            Enum.find_index(names, &(&1 == name)),
+            name,
+            regressors[name].layers
+          )
+        end
+
+      {mode, sum_nodes([linear | networks])}
+    end)
+  end
+
+  defp build_network(input, column, name, layers) do
+    hidden =
+      input
+      |> Axon.nx(fn tensor -> tensor[[.., .., column..column]] end,
+        name: "regressor_#{name}_column"
+      )
+      |> then(fn node ->
+        layers
+        |> Enum.with_index()
+        |> Enum.reduce(node, fn {units, index}, acc ->
+          Axon.dense(acc, units, activation: :relu, name: "regressor_#{name}_dense_#{index}")
+        end)
+      end)
+
+    hidden
+    |> Axon.dense(1, activation: :linear, use_bias: false, name: "regressor_#{name}_dense_out")
+    |> Axon.nx(&Nx.squeeze(&1, axes: [-1]), name: "regressor_#{name}_positions")
+  end
+
+  defp sum_nodes(nodes) do
+    case Enum.reject(nodes, &is_nil/1) do
+      [] -> nil
+      [only] -> only
+      many -> Axon.add(many)
+    end
   end
 
   # Feature Engineering
@@ -368,10 +450,12 @@ defmodule Soothsayer.Regressors do
 
   ## Returns
 
-    A map from regressor name to coefficient.
+    A map from regressor name to coefficient. A regressor with `layers`
+    has no single coefficient, so it maps to its layers instead, each with
+    `:kernel` and `:bias` like `Soothsayer.AR.get_weights/1`.
 
   """
-  @spec get_effects(Soothsayer.Model.t()) :: %{String.t() => float()}
+  @spec get_effects(Soothsayer.Model.t()) :: %{String.t() => float() | map()}
   def get_effects(%Soothsayer.Model{} = model) do
     names = names(model.config)
 
@@ -391,6 +475,24 @@ defmodule Soothsayer.Regressors do
         end
       end)
 
-    Enum.zip(names, coefficients) |> Map.new()
+    networked = network_names(model.config)
+    linear = Enum.zip(names -- networked, coefficients)
+
+    layers =
+      for name <- networked do
+        prefix = "regressor_#{name}_dense"
+
+        weights =
+          model.params.data
+          |> Enum.filter(fn {layer, _} -> String.starts_with?(layer, prefix) end)
+          |> Map.new(fn {layer, params} ->
+            {layer,
+             Map.reject(%{kernel: params["kernel"], bias: params["bias"]}, &is_nil(elem(&1, 1)))}
+          end)
+
+        {name, weights}
+      end
+
+    Map.new(linear ++ layers)
   end
 end
