@@ -13,16 +13,17 @@ This is useful for capturing:
 The trend is modeled as:
 
 ```
-trend(t) = k * t + m + sum(delta_j * max(0, t - s_j))
+trend(t) = k * t + m + sum(delta_j * f_j(t))
 ```
 
 Where:
 - `k` = base growth rate (learned)
 - `m` = offset (learned)
 - `s_j` = changepoint positions (computed from data)
-- `delta_j` = rate adjustments at each changepoint (learned)
+- `delta_j` = slope adjustments (learned)
+- `f_j` = a hinge that starts at `s_j`
 
-The model learns which changepoints matter and how much the slope changes at each one.
+Without `regularization` the hinge stops growing at the next changepoint, `f_j(t) = min(max(0, t - s_j), s_{j+1} - s_j)`, so each `delta_j` is the slope of one segment relative to `k` and only that segment's data trains it. This is NeuralProphet's segmentwise trend and it lets the slope bend sharply where the data does. With `regularization` set the hinge is the cumulative Prophet one, `f_j(t) = max(0, t - s_j)`, where `delta_j` is the change of slope at `s_j`, the quantity the L1 penalty shrinks toward zero.
 
 For more details on the math, see [NeuralProphet's Trend documentation](https://neuralprophet.com/html/trend.html).
 

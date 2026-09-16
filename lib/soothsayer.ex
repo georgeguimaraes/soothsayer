@@ -940,7 +940,10 @@ defmodule Soothsayer do
     positions = AR.positions(config)
 
     t = Trend.date_to_numeric(timestamps, config.first_timestamp) |> Nx.new_axis(-1)
-    changepoint_features = Trend.build_changepoint_features(t, config.changepoint_positions)
+
+    changepoint_features =
+      Trend.build_changepoint_features(t, config.changepoint_positions, Trend.basis(config))
+
     trend_input = Trend.build_trend_input(t, changepoint_features)
 
     %{"trend" => trend_input}

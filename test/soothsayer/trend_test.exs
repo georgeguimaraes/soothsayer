@@ -185,6 +185,19 @@ defmodule Soothsayer.TrendTest do
       expected = Nx.tensor([[0.0], [0.0], [0.5], [1.5], [2.5]])
       assert Nx.to_flat_list(result) == Nx.to_flat_list(expected)
     end
+
+    test "segmentwise hinges stop at the next changepoint and the last one never does" do
+      t = Nx.tensor([[1.0], [2.0], [3.0], [4.0], [5.0]])
+
+      result = Trend.build_changepoint_features(t, [1.5, 3.0], :segmentwise)
+
+      assert Nx.to_flat_list(result) == [0.0, 0.0, 0.5, 0.0, 1.5, 0.0, 1.5, 1.0, 1.5, 2.0]
+    end
+
+    test "the basis follows trend regularization" do
+      assert Trend.basis(%{trend: %{regularization: nil}}) == :segmentwise
+      assert Trend.basis(%{trend: %{regularization: 0.5}}) == :cumulative
+    end
   end
 
   describe "build_features/2" do

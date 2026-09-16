@@ -6,14 +6,23 @@ defmodule Soothsayer.Trend do
 
   The trend function with changepoints is:
   ```
-  trend(t) = k * t + m + sum(delta_j * max(0, t - s_j))
+  trend(t) = k * t + m + sum(delta_j * f_j(t))
   ```
 
   Where:
   - `k` = base growth rate (learned)
   - `m` = offset (learned)
   - `s_j` = changepoint positions (computed from data, fixed)
-  - `delta_j` = rate adjustments at each changepoint (learned)
+  - `delta_j` = slope adjustments (learned)
+  - `f_j` = the changepoint basis, see `basis/1`
+
+  Without trend regularization the basis is segmentwise, like
+  NeuralProphet's: `f_j(t) = min(max(0, t - s_j), s_{j+1} - s_j)`, a hinge
+  that stops growing at the next changepoint, so `delta_j` is the slope of
+  segment `j` relative to `k` and each segment fits its own data. With
+  regularization the basis is the cumulative Prophet hinge
+  `f_j(t) = max(0, t - s_j)`, where `delta_j` is the change of slope at
+  `s_j`, which is what an L1 penalty on the deltas should shrink.
   """
 
   alias Soothsayer.AR
@@ -160,12 +169,33 @@ defmodule Soothsayer.Trend do
   end
 
   @doc """
-  Builds changepoint feature tensor computing max(0, t - s_j) for each changepoint.
+  The changepoint basis a config trains with: `:segmentwise` without trend
+  regularization, `:cumulative` with it. See the module docs.
+
+  ## Examples
+
+      iex> Soothsayer.Trend.basis(%{trend: %{regularization: nil}})
+      :segmentwise
+
+      iex> Soothsayer.Trend.basis(%{trend: %{regularization: 0.1}})
+      :cumulative
+
+  """
+  @spec basis(map()) :: :segmentwise | :cumulative
+  def basis(%{trend: %{regularization: regularization}}) when not is_nil(regularization),
+    do: :cumulative
+
+  def basis(_config), do: :segmentwise
+
+  @doc """
+  Builds the changepoint feature tensor, one column per changepoint.
 
   ## Parameters
 
     * `t` - Tensor of time values with shape `{n_samples, 1}`.
-    * `changepoint_positions` - List of numeric changepoint positions.
+    * `changepoint_positions` - List of numeric changepoint positions, ascending.
+    * `basis` - `:cumulative` (default) for `max(0, t - s_j)`, or
+      `:segmentwise` to clip each hinge at the next changepoint. See `basis/1`.
 
   ## Returns
 
@@ -177,16 +207,39 @@ defmodule Soothsayer.Trend do
       iex> Soothsayer.Trend.build_changepoint_features(t, [1.5])
       #Nx.Tensor<f32[3][1] [[0.0], [0.5], [1.5]]>
 
-  """
-  @spec build_changepoint_features(Nx.Tensor.t(), list(number())) :: Nx.Tensor.t() | nil
-  def build_changepoint_features(_t, []), do: nil
+      iex> t = Nx.tensor([[1.0], [2.0], [3.0]])
+      iex> Soothsayer.Trend.build_changepoint_features(t, [1.5, 2.5], :segmentwise)
+      #Nx.Tensor<f32[3][2] [[0.0, 0.0], [0.5, 0.0], [1.0, 0.5]]>
 
-  def build_changepoint_features(t, changepoint_positions) do
-    t
-    |> Nx.reshape({:auto, 1})
-    |> Nx.subtract(Nx.tensor([changepoint_positions]))
-    |> Nx.max(0)
+  """
+  @spec build_changepoint_features(Nx.Tensor.t(), list(number()), :cumulative | :segmentwise) ::
+          Nx.Tensor.t() | nil
+  def build_changepoint_features(t, changepoint_positions, basis \\ :cumulative)
+
+  def build_changepoint_features(_t, [], _basis), do: nil
+
+  def build_changepoint_features(t, changepoint_positions, basis) do
+    hinges =
+      t
+      |> Nx.reshape({:auto, 1})
+      |> Nx.subtract(Nx.tensor([changepoint_positions]))
+      |> Nx.max(0)
+
+    case basis do
+      :cumulative -> hinges
+      :segmentwise -> Nx.min(hinges, Nx.tensor([segment_widths(changepoint_positions)]))
+    end
     |> Nx.as_type({:f, 32})
+  end
+
+  # The last segment has no end, so its hinge keeps growing into the future.
+  defp segment_widths(changepoint_positions) do
+    changepoint_positions
+    |> Enum.chunk_every(2, 1, [:infinity])
+    |> Enum.map(fn
+      [_start, :infinity] -> :infinity
+      [start, next] -> next - start
+    end)
   end
 
   @doc """
@@ -287,7 +340,7 @@ defmodule Soothsayer.Trend do
       )
 
     t = date_to_numeric(timestamps, first_timestamp) |> Nx.new_axis(-1)
-    changepoint_features = build_changepoint_features(t, changepoint_positions)
+    changepoint_features = build_changepoint_features(t, changepoint_positions, basis(config))
     tensor = build_trend_input(t, changepoint_features)
 
     metadata = %{
