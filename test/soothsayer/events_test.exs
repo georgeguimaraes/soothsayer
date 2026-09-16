@@ -408,7 +408,7 @@ defmodule Soothsayer.EventsTest do
       config = %{
         events: %{"Christmas Day" => %{steps_before: 0, steps_after: 0}},
         holidays: %{
-          countries: [:us],
+          countries: ["US"],
           steps_before: 0,
           steps_after: 0,
           types: [:public],
