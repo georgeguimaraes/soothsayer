@@ -1,13 +1,13 @@
-# The Basics
+# The basics
 
-This tutorial covers the fundamentals of time series forecasting with Soothsayer. You'll learn how to create a model, fit it to data, and make predictions.
+How to get data in, fit a model, predict and check the result.
 
-## Data Format
+## Data format
 
 Soothsayer expects an Explorer DataFrame with two columns:
 
-- `ds` - timestamps, either a `:date` or a `{:naive_datetime, _}` series, strictly increasing
-- `y` - target values (numeric)
+- `ds`: timestamps, a `:date` or `{:naive_datetime, _}` series, strictly increasing
+- `y`: the values to forecast, numeric
 
 ```elixir
 alias Explorer.DataFrame
@@ -18,7 +18,7 @@ df = DataFrame.new(%{
 })
 ```
 
-Sub-daily data works the same way with naive datetimes. When reading a CSV, tell Explorer the dtype so the column isn't parsed as strings:
+Sub-daily data works the same way with naive datetimes. When reading a CSV, give Explorer the dtype so the column doesn't come in as strings:
 
 ```elixir
 df = DataFrame.from_csv!("readings.csv", dtypes: [{"ds", {:naive_datetime, :microsecond}}])
@@ -28,9 +28,9 @@ The step between rows (the frequency) is inferred at fit from the most common ga
 
 Missing values and missing rows are fine: fit drops or imputes them the way NeuralProphet does and logs what it did. See [Missing Data](missing_data.md).
 
-## Creating a Model
+## Creating a model
 
-Use `Soothsayer.new/1` to create a model with your configuration:
+`Soothsayer.new/1` takes the configuration as a map:
 
 ```elixir
 model = Soothsayer.new(%{
@@ -44,9 +44,9 @@ model = Soothsayer.new(%{
 })
 ```
 
-### Default Configuration
+### Default configuration
 
-If you call `Soothsayer.new()` without arguments, you get sensible defaults:
+`Soothsayer.new()` without arguments uses these defaults:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -72,15 +72,15 @@ If you call `Soothsayer.new()` without arguments, you get sensible defaults:
 | `batch_size` | `nil` | Rows per gradient step, picked from the data size when `nil` |
 | `seed` | `nil` | Integer seed for reproducible fits, random when `nil` |
 
-## Fitting the Model
+## Fitting the model
 
-Use `Soothsayer.fit/2` to train the model on your data:
+`Soothsayer.fit/2` trains the model on your data:
 
 ```elixir
 fitted_model = Soothsayer.fit(model, df)
 ```
 
-Training uses [EXLA](https://hexdocs.pm/exla) by default for fast execution on CPU/GPU. Make sure EXLA is configured:
+Training and prediction are compiled with [EXLA](https://hexdocs.pm/exla). Set it as the Nx default backend too, so the tensors you build outside fit live on the same backend:
 
 ```elixir
 # In config/config.exs
@@ -90,9 +90,9 @@ config :nx, default_backend: EXLA.Backend
 Nx.global_default_backend(EXLA.Backend)
 ```
 
-### GPU Memory Configuration
+### GPU memory configuration
 
-By default, XLA pre-allocates 90% of GPU memory at startup. If you're sharing the GPU with other applications (X windows, other ML processes, etc.) and see `CUDNN_STATUS_INTERNAL_ERROR` or out-of-memory errors, disable preallocation:
+XLA pre-allocates 90% of GPU memory at startup. If the GPU is shared with other processes and you see `CUDNN_STATUS_INTERNAL_ERROR` or out of memory errors, turn preallocation off:
 
 ```elixir
 # In config/config.exs
@@ -100,7 +100,7 @@ config :exla, :clients,
   cuda: [platform: :cuda, preallocate: false]
 ```
 
-Or via environment variable (before starting):
+Or with an environment variable before starting:
 
 ```bash
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
@@ -108,9 +108,9 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 See the [README](https://github.com/georgeguimaraes/soothsayer#gpu-memory-configuration) for more options.
 
-## Making Predictions
+## Making predictions
 
-Use `Soothsayer.predict/2` with an Explorer Series of dates:
+`Soothsayer.predict/2` takes an Explorer Series of dates:
 
 ```elixir
 alias Explorer.Series
@@ -129,11 +129,11 @@ predictions = Soothsayer.predict(fitted_model, future_dates)
 
 The result is a DataFrame with one row per date: `ds` (your series, same dtype), `yhat`, one column per configured quantile (`yhat_10`, `yhat_90`, see [Uncertainty](uncertainty.md)), then `trend` and one column per enabled component. The component columns add up to `yhat`.
 
-## Getting Components
+## Getting components
 
-One of Soothsayer's strengths is interpretability, and the component columns are how you get at it: is the forecast driven by the trend or by seasonality, how much does each pattern contribute, what does auto-regression add. Components that are disabled in the config have no column. When the trend is disabled its column is a flat line at the training mean, so the columns still add up.
+The component columns are how you see what drives a forecast, trend or seasonality, and by how much. Components that are disabled in the config have no column. When the trend is disabled its column is a flat line at the training mean, so the columns still add up.
 
-`Soothsayer.predict_components/2` returns the same numbers as a map of tensors, for when you'd rather stay in Nx:
+`Soothsayer.predict_components/2` returns the same numbers as a map of tensors, for when you'd rather stay in Nx. Disabled components are zeros there:
 
 ```elixir
 components = Soothsayer.predict_components(fitted_model, future_dates)
@@ -149,12 +149,7 @@ components = Soothsayer.predict_components(fitted_model, future_dates)
 # }
 ```
 
-This helps you understand:
-- Is the forecast driven by trend or seasonality?
-- How much does each seasonal pattern contribute?
-- What's the impact of auto-regression?
-
-## Complete Example
+## Complete example
 
 ```elixir
 alias Explorer.DataFrame
@@ -185,9 +180,9 @@ fitted_model = Soothsayer.fit(model, df)
 predictions = Soothsayer.predict(fitted_model, df["ds"])
 ```
 
-## Visualizing Results
+## Visualizing results
 
-If you're using Livebook, you can visualize with VegaLite:
+In Livebook, VegaLite does the job:
 
 ```elixir
 alias VegaLite, as: Vl
@@ -208,11 +203,11 @@ Vl.new(width: 800, height: 400, title: "Actual vs Predicted")
 ])
 ```
 
-See the [Interactive Livebook Tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) for more visualization examples.
+The [Livebook tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) has more plots.
 
-## Evaluating a Configuration
+## Evaluating a configuration
 
-Before trusting a configuration, backtest it. `Soothsayer.backtest/3` holds out the last part of the data (10% by default), fits on the rest, and forecasts `horizon` steps ahead from every held out origin using only what was observed up to it:
+Before trusting a configuration, backtest it. `Soothsayer.backtest/3` holds out the last part of the data (10% by default), fits on the rest, and forecasts `horizon` steps ahead from every held out origin using only what was observed up to it. `horizon` defaults to the model's `ar.forecast_steps`, or 1 without auto-regression:
 
 ```elixir
 result = Soothsayer.backtest(model, df, horizon: 7, validation_fraction: 0.1)
@@ -222,10 +217,10 @@ result.by_step[1].mean_absolute_error   # one day ahead
 result.by_step[7].mean_absolute_error   # a week ahead
 ```
 
-`result.predictions` is a dataframe of every forecast with its origin date, target date, step, actual and predicted value, so you can plot errors by horizon or by season. Events and regressors go in as `events:` and `regressors:` options.
+`result.predictions` is a dataframe of every forecast with columns `origin`, `ds`, `step`, `y` and `yhat`, so you can plot errors by horizon or by season. Events and regressors go in as `events:` and `regressors:` options.
 
-## Next Steps
+## Next steps
 
-- [Trends](trends.md) - Learn about piecewise linear trends with changepoint detection
-- [Seasonality](seasonality.md) - Configure yearly and weekly patterns
-- [Auto-Regression](autoregression.md) - Capture dependencies on recent values
+- [Trends](trends.md): piecewise linear trends with changepoints
+- [Seasonality](seasonality.md): yearly, weekly and daily patterns
+- [Auto-Regression](autoregression.md): dependence on recent values

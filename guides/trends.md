@@ -1,57 +1,44 @@
 # Trends
 
-The trend component captures long-term growth or decline in your data. Soothsayer uses piecewise linear trends with automatic changepoint detection, allowing the trend to change slope at multiple points.
+The trend is the slow part of the series: growth or decline over months and years, with the seasonality and everything else riding on top of it. Soothsayer fits a piecewise linear trend, a straight line that can change slope at a fixed set of changepoints. A product launch, a pricing change or a new market usually shows up as one of those slope changes.
 
-This is useful for capturing:
-- Product launches that accelerate growth
-- Market shifts that slow growth
-- Policy changes that affect trajectory
-- Seasonal baseline shifts
-
-## How It Works
-
-The trend is modeled as:
+## How it works
 
 ```
 trend(t) = k * t + m + sum(delta_j * f_j(t))
 ```
 
-Where:
-- `k` = base growth rate (learned)
-- `m` = offset (learned)
-- `s_j` = changepoint positions (computed from data)
-- `delta_j` = slope adjustments (learned)
-- `f_j` = a hinge that starts at `s_j`
+`k` is the base growth rate and `m` the offset, both learned. The `s_j` are the changepoint positions, picked from the data before training, and each `delta_j` is a learned slope adjustment attached to a hinge `f_j` that starts at `s_j`.
 
-Without `regularization` the hinge stops growing at the next changepoint, `f_j(t) = min(max(0, t - s_j), s_{j+1} - s_j)`, so each `delta_j` is the slope of one segment relative to `k` and only that segment's data trains it. This is NeuralProphet's segmentwise trend and it lets the slope bend sharply where the data does. With `regularization` set the hinge is the cumulative Prophet one, `f_j(t) = max(0, t - s_j)`, where `delta_j` is the change of slope at `s_j`, the quantity the L1 penalty shrinks toward zero.
+The shape of that hinge depends on `regularization`. Without it the hinge stops growing at the next changepoint, `f_j(t) = min(max(0, t - s_j), s_{j+1} - s_j)`, so `delta_j` is the slope of one segment relative to `k` and only that segment's data trains it. This is NeuralProphet's segmentwise trend, and it lets the slope bend sharply where the data does. With `regularization` set, the hinge is the cumulative Prophet one, `f_j(t) = max(0, t - s_j)`, where `delta_j` is the change of slope at `s_j`, which is the quantity an L1 penalty should shrink toward zero. `Soothsayer.Trend.basis/1` tells you which one a config uses.
 
-For more details on the math, see [NeuralProphet's Trend documentation](https://neuralprophet.com/html/trend.html).
+The trend is the only component with an intercept. Seasonality, events and regressors are zero-centered offsets around it, so the trend carries the level of the series.
+
+For the math behind the changepoints, see [NeuralProphet's trend docs](https://neuralprophet.com/html/trend.html).
 
 ## Configuration
 
 ```elixir
 model = Soothsayer.new(%{
   trend: %{
-    enabled: true,           # Enable trend component (default: true)
-    changepoints: 10,      # Number of potential changepoints (default: 10)
-    changepoints_range: 0.8, # Place in first 80% of data (default: 0.8)
-    regularization: nil      # L1 penalty on rate changes (default: nil)
+    enabled: true,           # default: true
+    changepoints: 10,        # potential changepoints, default: 10
+    changepoints_range: 0.8, # place them in the first 80% of the data, default: 0.8
+    regularization: nil      # L1 penalty on slope changes, default: nil
   }
 })
 ```
 
-### Parameters
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `enabled` | `true` | Enable/disable the trend component |
+| `enabled` | `true` | Turn the trend component on or off |
 | `changepoints` | `10` | Number of potential slope changes |
-| `changepoints_range` | `0.8` | Fraction of data where changepoints can occur |
-| `regularization` | `nil` | L1 penalty to encourage sparse changepoints |
+| `changepoints_range` | `0.8` | Fraction of the data where changepoints can sit |
+| `regularization` | `nil` | L1 penalty on slope changes, `nil` for none |
 
-## Simple Linear Trend
+## Linear trend
 
-For data with a consistent growth rate, disable changepoints:
+For a series with one steady growth rate, drop the changepoints:
 
 ```elixir
 model = Soothsayer.new(%{
@@ -59,11 +46,11 @@ model = Soothsayer.new(%{
 })
 ```
 
-This gives you a simple linear trend: `trend(t) = k * t + m`
+That leaves `trend(t) = k * t + m`.
 
-## Piecewise Linear Trend
+## Piecewise linear trend
 
-For data where the growth rate changes over time:
+For a series whose growth rate changes over time:
 
 ```elixir
 model = Soothsayer.new(%{
@@ -71,19 +58,19 @@ model = Soothsayer.new(%{
 })
 ```
 
-The `changepoints_range` parameter controls where changepoints can be placed. Setting it to `0.8` means changepoints are only placed in the first 80% of the data, preventing overfitting at the end of the series.
+Changepoints are spread evenly over the first `changepoints_range` of the training data. Leaving the last 20% without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast.
 
-## Example: Detecting Slope Changes
+## Example: a slope change
 
 ```elixir
 alias Explorer.DataFrame
 
-# Data with a slope change: flat first year, steep second year
+# Flat first year, steep second year
 n_days = 730
 dates = Enum.map(0..(n_days - 1), fn i -> Date.add(~D[2020-01-01], i) end)
 
 y = Enum.map(0..(n_days - 1), fn i ->
-  # Slope changes from 0.1 to 3.0 at day 365
+  # Slope goes from 0.1 to 3.0 at day 365
   trend = if i < 365, do: 100 + 0.1 * i, else: 100 + 0.1 * 365 + 3.0 * (i - 365)
   noise = :rand.normal(0, 10)
   trend + noise
@@ -91,14 +78,14 @@ end)
 
 df = DataFrame.new(%{"ds" => dates, "y" => y})
 
-# Model WITHOUT changepoints (misses the slope change)
+# Without changepoints, one line through both years
 model_linear = Soothsayer.new(%{
   trend: %{changepoints: 0},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
   epochs: 100
 })
 
-# Model WITH changepoints (captures the slope change)
+# With changepoints, the bend at day 365 is fitted
 model_piecewise = Soothsayer.new(%{
   trend: %{changepoints: 10, changepoints_range: 0.8},
   seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
@@ -109,64 +96,48 @@ fitted_linear = Soothsayer.fit(model_linear, df)
 fitted_piecewise = Soothsayer.fit(model_piecewise, df)
 ```
 
-The piecewise model will capture the slope change much better than the simple linear model.
+The trend column of `Soothsayer.predict/3` shows the difference: the linear model averages the two slopes, the piecewise one follows the bend.
 
 ## Regularization
 
-When you're unsure how many changepoints you need, set more than necessary and use regularization to prune unimportant ones:
+When you don't know how many slope changes to expect, set more changepoints than you need and let an L1 penalty zero out the ones that don't earn their keep:
 
 ```elixir
 model = Soothsayer.new(%{
   trend: %{
-    changepoints: 25,      # More than we likely need
-    regularization: 0.1      # L1 penalty pushes small changes toward zero
+    changepoints: 25,
+    regularization: 0.1
   }
 })
 ```
 
-Higher regularization values encourage sparser changepoints (fewer slope changes).
+Setting `regularization` also switches to the cumulative hinge described above, since the penalty only makes sense on slope changes. Higher values mean fewer surviving changes and a smoother trend. There's no universal right value, so start around `0.1` and compare the trend column on a holdout against what you know about the series.
 
-| Regularization | Effect |
-|----------------|--------|
-| `nil` or `0` | No penalty, all changepoints can have any value |
-| `0.01 - 0.1` | Light penalty, subtle changes may be zeroed out |
-| `0.1 - 1.0` | Strong penalty, only significant changes remain |
+## Choosing parameters
 
-## Choosing Parameters
+The default 10 changepoints is a reasonable start. Raise it when you expect many slope changes, lower it or use `changepoints: 0` when the growth rate is steady.
 
-**changepoints:**
-- Start with the default (10)
-- Increase if you expect many slope changes
-- Decrease if you expect a smooth trend
-- Use `changepoints: 0` for simple linear trend
+Keep `changepoints_range` at 0.8 unless slope changes happen late in your data. Raising it lets the model react to a recent change, at the cost of extrapolating a slope fitted on fewer points.
 
-**changepoints_range:**
-- Default (0.8) works well for most cases
-- Decrease if you have a short forecast horizon
-- Increase if slope changes occur late in your data
+Add `regularization` when the trend follows noise instead of the series. Start at `nil`, and if you set it, remember the delta semantics change as described above.
 
-**regularization:**
-- Start with `nil` (no regularization)
-- Add if you see overfitting (trend follows noise too closely)
-- Higher values = smoother trend with fewer changes
+## Network architecture
 
-## Network Architecture
-
-With changepoints enabled, the trend input has shape `{batch_size, positions, 1 + changepoints}`, where `positions` is the number of timestamps in a training sample (one without auto-regression, `lags + forecast_steps` with it, see the [Auto-Regression guide](autoregression.md)):
+With changepoints enabled, the trend input has shape `{batch_size, positions, 1 + changepoints}`, where `positions` is the number of timestamps in a training sample (one without auto-regression, `lags + forecast_steps` with it, see the [auto-regression guide](autoregression.md)):
 
 ```elixir
-# The network receives, per position:
+# Per position:
 # - Column 0: time t, scaled so the training data runs from 0 to 1
-# - Columns 1-n: changepoint features max(0, t - s_j), in the same units
+# - Columns 1-n: the changepoint hinges f_j(t), in the same units
 
 input_shape = {nil, positions, 1 + changepoints}
 ```
 
-The time features are scaled by the training span rather than z-scored, as in NeuralProphet. Z-scoring each changepoint feature on its own would blow up the late ones (they are zero for most of the data) and let the slope of the last segment swing with the last few days, which is exactly the slope that gets extrapolated into the forecast.
+The time features are scaled by the training span rather than z-scored, as in NeuralProphet. Z-scoring each changepoint feature on its own would blow up the late ones (they are zero for most of the data) and let the slope of the last segment swing with the last few days, which is exactly the slope that gets extrapolated.
 
-See the [Interactive Livebook Tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) for network visualization examples.
+The [Livebook tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) plots the network and the fitted trend.
 
-## Next Steps
+## Next steps
 
-- [Seasonality](seasonality.md) - Add yearly and weekly patterns
-- [Auto-Regression](autoregression.md) - Capture dependencies on recent values
+- [Seasonality](seasonality.md) for yearly, weekly and daily patterns
+- [Auto-regression](autoregression.md) for dependencies on recent values

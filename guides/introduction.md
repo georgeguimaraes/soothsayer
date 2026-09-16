@@ -2,32 +2,25 @@
 
 Soothsayer is an Elixir library for time series forecasting, inspired by [Facebook's Prophet](https://facebook.github.io/prophet/) and [NeuralProphet](https://neuralprophet.com/).
 
-## What is Soothsayer?
+## The model
 
-Soothsayer decomposes your time series into interpretable components and uses neural networks to learn the patterns. The model equation is:
+A series is a sum of components, each a small network trained together with the others:
 
 ```
-y(t) = trend(t) + seasonality(t) + ar(t) + events(t)
+y(t) = trend(t) + seasonality(t) + ar(t) + events(t) + regressors(t)
 ```
 
-Where:
-- **trend(t)** captures long-term growth or decline
-- **seasonality(t)** captures repeating patterns (yearly, weekly, daily)
-- **ar(t)** captures dependencies on recent values (auto-regression)
-- **events(t)** captures the impact of special occasions (holidays, promotions)
+- trend(t) is the long-term direction, piecewise linear
+- seasonality(t) is the yearly, weekly and daily cycles
+- ar(t) is what the last few values say about the next one
+- events(t) is holidays and promotions on known dates
+- regressors(t) is other columns you know ahead of time
 
-Each component can be enabled or disabled depending on your data.
+Every component can be turned off, and prediction returns each one separately, so you can see what drives a forecast. The networks are [Axon](https://hexdocs.pm/axon), the data goes through [Explorer](https://hexdocs.pm/explorer) and [Nx](https://hexdocs.pm/nx), and if you've used Prophet or NeuralProphet the configuration will look familiar.
 
-## Why Soothsayer?
+## Compared with NeuralProphet
 
-- **Interpretable**: See what each component contributes to the forecast
-- **Neural network powered**: Uses [Axon](https://hexdocs.pm/axon) for flexible learning
-- **Elixir native**: Built for the BEAM ecosystem with [Nx](https://hexdocs.pm/nx) and [Explorer](https://hexdocs.pm/explorer)
-- **Familiar API**: If you've used Prophet or NeuralProphet, you'll feel at home
-
-## Comparison with NeuralProphet
-
-Soothsayer implements a subset of [NeuralProphet's features](https://neuralprophet.com/contents.html):
+What's here and what isn't, against [NeuralProphet's feature list](https://neuralprophet.com/contents.html):
 
 | Feature | Soothsayer | NeuralProphet |
 |---------|------------|---------------|
@@ -54,7 +47,7 @@ Soothsayer implements a subset of [NeuralProphet's features](https://neuralproph
 | Uncertainty estimation | Yes | Yes |
 | Multiplicative seasonality | Yes | Yes |
 
-## Quick Example
+## Quick example
 
 ```elixir
 alias Explorer.DataFrame
@@ -80,16 +73,19 @@ predictions["yhat"]
 predictions["trend"]
 ```
 
-## Next Steps
+## Next
 
-- [The Basics](basics.md) - Learn the fundamentals with trend and seasonality
-- [Trends](trends.md) - Piecewise linear trends with changepoint detection
-- [Seasonality](seasonality.md) - Yearly, weekly and daily patterns with Fourier terms
-- [Auto-Regression](autoregression.md) - Capture dependencies on recent values
-- [Events](events.md) - Model holidays, promotions, and special occasions
+- [The basics](basics.md), fitting and predicting with trend and seasonality
+- [Trends](trends.md), changepoints and regularization
+- [Seasonality](seasonality.md), Fourier terms, additive and multiplicative
+- [Auto-regression](autoregression.md), lags, multi-step forecasts and the AR network
+- [Events](events.md), holidays, promotions and country holidays
+- [Regressors](regressors.md), future and lagged regressors
+- [Missing data](missing_data.md), what fit does with gaps
+- [Uncertainty](uncertainty.md), prediction intervals from quantiles
 
 ## Resources
 
-- [NeuralProphet Documentation](https://neuralprophet.com/contents.html) - The Python library that inspired Soothsayer
-- [Prophet Documentation](https://facebook.github.io/prophet/) - Facebook's original forecasting library
-- [Interactive Livebook Tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd) - Run the examples yourself
+- [NeuralProphet docs](https://neuralprophet.com/contents.html), the Python library this is a port of
+- [Prophet docs](https://facebook.github.io/prophet/), where the model family started
+- [Livebook tutorial](https://github.com/georgeguimaraes/soothsayer/blob/main/livebook/soothsayer_tutorial.livemd), the examples, runnable

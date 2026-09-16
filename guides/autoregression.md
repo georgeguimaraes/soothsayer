@@ -1,14 +1,8 @@
-# Auto-Regression
+# Auto-regression
 
-Auto-regression (AR) captures dependencies on recent values. Enable this when today's value depends on yesterday's (or the last few days).
+Auto-regression (AR) uses the recent values of the series itself. Turn it on when today's value depends on yesterday's, or on the last few days: sales with carry-over, sensor readings with inertia, anything where a high value tends to be followed by another high value.
 
-This is useful for:
-- Financial data with momentum
-- Sensor readings with inertia
-- Sales with carry-over effects
-- Any data where values persist
-
-## How It Works
+## How it works
 
 The AR component models what the other components leave over. Each lag is stationarized first, by subtracting the trend, seasonality, events and regressors evaluated at that lag's own timestamp, and the AR network works on those residuals:
 
@@ -17,41 +11,37 @@ residual(t-i) = y(t-i) - trend(t-i) - seasonality(t-i) - events(t-i) - regressor
 ar(t) = sum(w_i * residual(t-i))
 ```
 
-Where:
-- `y(t-i)` = value at lag i (1 to lags)
-- `w_i` = learned weight for each lag
+Where `y(t-i)` is the value at lag `i` (1 to `lags`) and `w_i` the learned weight for that lag.
 
 This is what NeuralProphet does too, and it matters more than it looks. If the AR network saw the raw lags it would happily absorb the level and the daily cycle as well, the trend would go flat at the training mean, and multi-step forecasts would drift back to that mean. With residual lags the trend has to carry the level and the seasonalities their cycles, so the components stay interpretable and a forecast a few steps out follows where the series actually is.
 
-For more details, see [NeuralProphet's Auto-Regression documentation](https://neuralprophet.com/html/autoregression.html).
+For the math, see [NeuralProphet's auto-regression documentation](https://neuralprophet.com/html/autoregression.html).
 
 ## Configuration
 
 ```elixir
 model = Soothsayer.new(%{
   ar: %{
-    enabled: true,       # Enable AR component (default: false)
-    lags: 7,           # Number of lagged values to use
-    layers: [],          # Hidden layers for deep AR-Net (default: [])
-    regularization: nil, # L1 penalty on weights (default: nil)
-    forecast_steps: 1    # Steps ahead forecast directly (default: 1)
+    enabled: true,       # default: false
+    lags: 7,             # how many past values to use
+    layers: [],          # hidden layers for a deep AR-Net (default: [])
+    regularization: nil, # L1 penalty on the weights (default: nil)
+    forecast_steps: 1    # steps forecast directly from one lag window (default: 1)
   }
 })
 ```
 
-### Parameters
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `enabled` | `false` | Enable/disable AR component |
-| `lags` | `0` | Number of lagged values to use |
-| `layers` | `[]` | Hidden layer sizes for deep AR-Net |
-| `regularization` | `nil` | L1 penalty to encourage sparsity |
+| `enabled` | `false` | Turn the AR component on |
+| `lags` | `0` | Number of past values fed to the network |
+| `layers` | `[]` | Hidden layer sizes for a deep AR-Net |
+| `regularization` | `nil` | L1 penalty that pushes unused lag weights to zero |
 | `forecast_steps` | `1` | How many steps ahead the AR head forecasts directly, see below |
 
 ## Linear AR
 
-For simple linear dependencies:
+With no hidden layers the component is a weighted sum of the last `lags` values:
 
 ```elixir
 model = Soothsayer.new(%{
@@ -59,40 +49,27 @@ model = Soothsayer.new(%{
 })
 ```
 
-This learns a weighted sum of the last 7 values.
-
 ## Deep AR-Net
 
-For non-linear relationships, add hidden layers:
+Hidden layers with ReLU activation let the component learn non-linear relationships between past and future:
 
 ```elixir
 model = Soothsayer.new(%{
   ar: %{
     enabled: true,
     lags: 7,
-    layers: [32, 16]  # Two hidden layers with ReLU activation
+    layers: [32, 16]
   }
 })
 ```
 
-Use deep AR-Net when:
-- Linear AR doesn't capture the pattern
-- You have enough data to train a deeper model
-- The relationship between past and future is complex
+Reach for it when linear AR leaves a pattern on the table and you have enough data to train the extra weights.
 
 ## Choosing lags
 
-Start with the natural cycle of your data:
+Start with the natural cycle of your data: 7 for daily data with a weekly pattern, 30 for a monthly one, 24 for hourly data with a daily pattern. An autocorrelation plot shows which lags carry information if you want to be more precise.
 
-| Data Frequency | Suggested lags | Reason |
-|----------------|------------------|--------|
-| Daily with weekly pattern | 7 | Captures full week |
-| Daily with monthly pattern | 30 | Captures full month |
-| Hourly with daily pattern | 24 | Captures full day |
-
-You can also examine autocorrelation to see which lags are useful.
-
-## Example: AR(1) Process
+## Example: an AR(1) process
 
 ```elixir
 alias Explorer.DataFrame
@@ -134,11 +111,11 @@ fitted_no_ar = Soothsayer.fit(model_no_ar, df)
 fitted_with_ar = Soothsayer.fit(model_with_ar, df)
 ```
 
-The AR model will track short-term fluctuations much better.
+The AR model tracks the short-term swings, the trend-only model can only draw a line through them.
 
-## Inspecting AR Weights
+## Inspecting AR weights
 
-Use `Soothsayer.get_ar_weights/1` to see which lags are important:
+`Soothsayer.get_ar_weights/1` returns the weights of each layer:
 
 ```elixir
 ar_weights = Soothsayer.get_ar_weights(fitted_with_ar)
@@ -147,16 +124,13 @@ ar_weights = Soothsayer.get_ar_weights(fitted_with_ar)
 kernel = ar_weights["ar_dense_out"].kernel
 # => #Nx.Tensor<f32[7][1]>
 
-# View weights
 weights = Nx.to_flat_list(kernel)
-# => [-0.12, 0.45, 0.08, ...] # Weight for each lag
+# => [-0.12, 0.45, 0.08, ...] # one weight per lag, oldest first
 ```
 
-Higher absolute weight = more important lag.
+The bigger a weight's absolute value, the more that lag drives the forecast.
 
-### Deep AR-Net Weights
-
-For models with hidden layers:
+For a deep AR-Net there is one entry per layer:
 
 ```elixir
 model = Soothsayer.new(%{
@@ -174,38 +148,25 @@ weights = Soothsayer.get_ar_weights(fitted)
 
 ## Regularization
 
-When you're unsure how many lags matter, use regularization:
+When you don't know how many lags matter, give the model more than it needs and let the L1 penalty sort them out:
 
 ```elixir
 model = Soothsayer.new(%{
   ar: %{
     enabled: true,
-    lags: 14,          # More lags than we likely need
-    regularization: 0.1  # L1 penalty
+    lags: 14,
+    regularization: 0.1
   }
 })
 ```
 
-Regularization pushes unimportant lag weights toward zero, effectively selecting which lags matter.
+The penalty pushes the weights of lags that don't help toward zero, so reading the weights afterwards tells you which lags the data supports. `nil` or `0` means no penalty. How strong a value has to be depends on the scale of the residuals, so treat the `0.1` above as a starting point and look at the weights.
 
-| Regularization | Effect |
-|----------------|--------|
-| `nil` or `0` | No penalty, all lags can have any weight |
-| `0.01 - 0.1` | Light penalty, minor lags zeroed |
-| `0.1 - 1.0` | Strong penalty, only dominant lags remain |
+## What the training data has to cover
 
-## Data Considerations
+The first `lags` observations only seed the lag windows, so training targets start at observation `lags + 1`. More lags means fewer training samples from the same data. At predict, the lags come from the training data for dates inside it, and from the model's own predictions for dates past the end, see below.
 
-**Training Data:**
-- First `lags` observations are used to seed the AR model
-- Training targets start at observation `lags + 1`
-- More lags = less effective training data
-
-**Prediction:**
-- Predictions use observed values from training data as context
-- For multi-step forecasting, the model uses its own predictions as inputs, see below
-
-## Forecasting Into the Future
+## Forecasting into the future
 
 Each AR prediction needs the `lags` values ending at its origin. For dates inside the training data the origin is the day before and the lags are real observations. For dates after the last observation, Soothsayer forecasts in blocks of `forecast_steps`: the first block directly from the last observation, the next block from the end of the first block using its predictions as lags, and so on up to the latest date you asked for.
 
@@ -255,7 +216,7 @@ Every requested timestamp has to sit on that grid. An hourly model can forecast 
 
 When regressors are configured, the regressors dataframe must cover every timestamp in every block up to the latest requested one, since those get predicted too. It doesn't have to cover the rest of the last block past that timestamp: a regressor value only affects its own timestamp, so the steps nobody asked for are filled with the training mean. Values from the training period are remembered by the model, which is how the lags of an early forecast reach back into it.
 
-## Network Architecture
+## Network architecture
 
 Every sample the network sees is one forecast origin laid out as `lags + forecast_steps` positions: the lag timestamps, oldest first, then the target timestamps. The time-based components (trend, seasonality, events, regressors) take `{batch, positions, features}` inputs and produce one value per position through a single shared linear layer. The AR branch takes the raw lags, `{batch, lags}`, subtracts the other components at the lag positions, and outputs `{batch, forecast_steps}`:
 
@@ -271,9 +232,9 @@ trend_input_shape = {nil, lags + forecast_steps, 1 + changepoints}
 
 The component outputs are their values at the target positions, so they still add up to the combined forecast.
 
-## Next Steps
+## Related guides
 
-- [Events](events.md) - Holidays and special occasions
-- [Trends](trends.md) - Piecewise linear trends with changepoints
-- [Seasonality](seasonality.md) - Yearly and weekly patterns
-- [The Basics](basics.md) - Fundamental concepts
+- [Events](events.md) for holidays and one-off dates
+- [Trends](trends.md) for piecewise linear trends with changepoints
+- [Seasonality](seasonality.md) for yearly and weekly patterns
+- [Missing Data](missing_data.md) for how gaps are filled before the lags are built

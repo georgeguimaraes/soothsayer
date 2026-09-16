@@ -4,7 +4,7 @@ A future regressor is an external variable that helps explain your series and wh
 
 This is different from auto-regression, which uses the series' own past. Regressors bring in outside information the date alone can't provide.
 
-## How It Works
+## How it works
 
 Each regressor is one input column feeding a linear layer, added to the forecast alongside trend, seasonality and events:
 
@@ -57,7 +57,7 @@ Soothsayer raises if a date has no regressor row rather than filling in zeros, s
 
 When auto-regression is also enabled, the regressors dataframe must cover the days between the last observation and your forecast dates too. Those days get predicted on the way, see the [Auto-Regression guide](autoregression.md). It doesn't need to repeat the training period, the model remembers those values, and it doesn't need the days of the last forecast block past your latest date, which are filled with the training mean since they only affect their own day.
 
-## Inspecting Coefficients
+## Inspecting coefficients
 
 ```elixir
 Soothsayer.get_regressor_effects(fitted)
@@ -66,13 +66,13 @@ Soothsayer.get_regressor_effects(fitted)
 
 Positive means the regressor pushes the forecast up. The `regressors` column of `Soothsayer.predict/3` (the `:regressors` key of `Soothsayer.predict_components/3`) holds the combined regressor contribution per date in the units of `y`.
 
-## Example: Energy Price and Temperature
+## Example: energy price and temperature
 
-The benchmark suite fits NeuralProphet's daily energy price dataset with 14 auto-regressive lags and temperature as a future regressor:
+The benchmark suite fits NeuralProphet's daily energy price dataset with 14 auto-regressive lags, 7 direct forecast steps and temperature as a future regressor:
 
 ```elixir
 model = Soothsayer.new(%{
-  ar: %{enabled: true, lags: 14},
+  ar: %{enabled: true, lags: 14, forecast_steps: 7},
   trend: %{changepoints: 0},
   regressors: ["temperature"]
 })
@@ -85,7 +85,7 @@ Soothsayer.predict(fitted, validation["ds"],
 )
 ```
 
-## Lagged Regressors
+## Lagged regressors
 
 Sometimes it's the regressor's past that matters: yesterday's temperature for today's energy price, last week's ad spend for this week's sales. Lagged regressors feed the last `lags` values of a column into the forecast, the way auto-regression feeds the target's own past:
 
@@ -111,13 +111,12 @@ Soothsayer.predict(fitted, Series.from_list(future_dates), regressors: newer)
 
 Soothsayer raises naming the first missing date rather than filling in zeros. The `lagged_regressors` column of `Soothsayer.predict/3` holds their combined contribution.
 
-## Not Yet Supported
+## Not yet supported
 
-- **Hidden layers for lagged regressors** (NeuralProphet's `lagged_reg_layers`). Lagged regressors are linear.
-- **Multiplicative regressors** that scale with the trend. Regressors are always additive today.
+Lagged regressors are linear, there's no equivalent of NeuralProphet's `lagged_reg_layers`. And regressors are always additive, there's no multiplicative mode that scales them with the trend.
 
-## Next Steps
+## Related guides
 
-- [Events](events.md) - One-off and recurring dates
-- [Auto-Regression](autoregression.md) - Using the series' own past
-- [The Basics](basics.md) - Fundamental concepts
+- [Events](events.md) for one-off and recurring dates
+- [Auto-regression](autoregression.md) for using the series' own past
+- [The Basics](basics.md) for the fit and predict flow

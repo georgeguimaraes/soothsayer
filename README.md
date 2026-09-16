@@ -4,7 +4,7 @@
 
 Soothsayer is an Elixir library for time series forecasting, inspired by Facebook's Prophet and NeuralProphet. It decomposes your time series into interpretable components (trend, seasonality, auto-regression, events) and uses neural networks to learn the patterns.
 
-**Warning:** Soothsayer is currently in alpha stage. The API is unstable and may change at any moment without prior notice. Use with caution in production environments.
+Soothsayer is alpha. The API changes without notice, so pin the version.
 
 ## Installation
 
@@ -26,7 +26,7 @@ Soothsayer runs on Nx 1.0, but the current Axon release still declares `nx ~> 0.
 {:nx, "~> 1.0", override: true}
 ```
 
-## Quick Start
+## Quick start
 
 ```elixir
 alias Explorer.DataFrame
@@ -83,26 +83,24 @@ Click the "Run in Livebook" badge above to try the interactive tutorial, or chec
 Soothsayer models time series as a sum of components:
 
 ```
-y(t) = trend(t) + seasonality(t) + ar(t) + events(t)
+y(t) = trend(t) + seasonality(t) + ar(t) + events(t) + regressors(t)
 ```
 
 Each component can be enabled or disabled depending on your data.
 
 ### Trend
 
-Captures long-term growth or decline in your data. Enable this when your data has a general upward or downward direction over time.
+The long-term direction of the series, on by default:
 
 ```elixir
 Soothsayer.new(%{
-  trend: %{enabled: true}  # this is the default
+  trend: %{enabled: true}
 })
 ```
 
-Good for: sales growth, user adoption, gradual temperature changes.
-
 #### Changepoints
 
-By default, Soothsayer uses piecewise linear trends with automatic changepoint detection. This allows the trend to change slope at multiple points, capturing shifts in growth rate (e.g., a product launch, market change, or policy update).
+The trend is piecewise linear. It can change slope at up to `changepoints` points spread over the first `changepoints_range` of the data, and each segment learns its own slope, so a product launch or a market shift shows up as a bend.
 
 ```elixir
 Soothsayer.new(%{
@@ -113,22 +111,22 @@ Soothsayer.new(%{
 })
 ```
 
-The model learns which changepoints matter and how much the slope changes at each one. Setting `changepoints: 0` disables changepoints and uses a simple linear trend.
+`changepoints: 0` gives a plain linear trend.
 
-**Trend regularization** can prevent overfitting when you have many changepoints:
+Trend regularization is an L1 penalty on the slope changes, for when you have many changepoints:
 
 ```elixir
 trend: %{
   changepoints: 25,
-  regularization: 0.1  # L1 penalty pushes small slope changes toward zero
+  regularization: 0.1
 }
 ```
 
-This is useful when you're not sure how many changepoints you need. Set more than you think necessary and let regularization prune the unimportant ones.
+Set more changepoints than you think you need and let the penalty zero out the ones that don't matter.
 
 ### Seasonality
 
-Captures repeating patterns at fixed intervals. Soothsayer supports yearly, weekly and daily seasonality using Fourier terms.
+Repeating patterns, modelled with Fourier terms.
 
 ```elixir
 Soothsayer.new(%{
@@ -140,19 +138,15 @@ Soothsayer.new(%{
 })
 ```
 
-**Yearly seasonality** captures patterns that repeat every year (holiday shopping, summer peaks, etc). More `fourier_terms` means more flexibility to fit complex seasonal shapes, but also more risk of overfitting.
+More `fourier_terms` fit sharper shapes and overfit more easily. Yearly patterns (holiday shopping, summer peaks) usually need more terms than weekly ones (weekend dips). Daily seasonality is for sub-daily data. `enabled: :auto` turns it on when rows are closer than a day apart and span at least two days, NeuralProphet's rule, and yearly and weekly accept `:auto` too.
 
-**Weekly seasonality** captures patterns that repeat every week (weekend dips, Monday spikes, etc). Usually needs fewer fourier terms than yearly.
+| fourier_terms | Use when |
+|---------------|----------|
+| 3 | smooth patterns (default for weekly) |
+| 6 | most cases (default for yearly) |
+| 10+ | sharp peaks |
 
-**Daily seasonality** captures patterns within the day (overnight lows, the afternoon peak) and only makes sense for sub-daily data. `enabled: :auto` turns it on when the rows are closer than a day apart and span at least two days, which is NeuralProphet's rule; yearly and weekly accept `:auto` too.
-
-| fourier_terms | Flexibility | Use when |
-|---------------|-------------|----------|
-| 3 | Low | Simple, smooth seasonal patterns |
-| 6 | Medium | Most cases (default for yearly) |
-| 10+ | High | Complex patterns with sharp peaks |
-
-**Multiplicative seasonality:** by default the seasonal effect is added to the trend. If your seasonal swings grow with the level of the series (airline passengers, retail sales), make them a fraction of the trend instead:
+By default the seasonal effect is added to the trend. If the swings grow with the level of the series (airline passengers, retail sales), make them a fraction of the trend instead:
 
 ```elixir
 Soothsayer.new(%{
@@ -160,9 +154,9 @@ Soothsayer.new(%{
 })
 ```
 
-### Auto-Regression (AR)
+### Auto-regression
 
-Captures dependencies on recent values. Enable this when today's value depends on yesterday's (or the last few days). This is common in financial data, sensor readings, and anything with momentum.
+For series where today depends on the last few values, like sensor readings or anything with momentum.
 
 ```elixir
 Soothsayer.new(%{
@@ -176,9 +170,9 @@ Soothsayer.new(%{
 
 The AR network sees the lags minus the trend, seasonality, events and regressors at each lag's timestamp, as NeuralProphet does, so it models what those components leave over instead of absorbing the level and the cycles itself.
 
-**Choosing `lags`:** Start with the natural cycle of your data. For daily data with weekly patterns, try 7. For data with monthly patterns, try 30. You can also look at autocorrelation plots to see how many lags are actually useful.
+Start `lags` at the natural cycle of the data: 7 for daily data with a weekly pattern, 30 for monthly patterns. An autocorrelation plot tells you how many lags carry signal.
 
-**Forecasting ahead:** dates inside the training data use the observed values as lags. Dates past the last observation are forecast in blocks of `forecast_steps` directly from the last real values, then the next block from those predictions, and so on. With the default `forecast_steps: 1` that is one day at a time with errors compounding; set `forecast_steps: 7` to learn a separate weight vector for each of the next 7 days, NeuralProphet's `n_forecasts`. If you have observations newer than the training data, pass them as `history:` to seed the lags without refitting:
+Dates inside the training data use the observed values as lags. Dates past the last observation are forecast in blocks of `forecast_steps` directly from the last real values, then the next block from those predictions, and so on. With the default `forecast_steps: 1` that is one day at a time with errors compounding; set `forecast_steps: 7` to learn a separate weight vector for each of the next 7 days, NeuralProphet's `n_forecasts`. If you have observations newer than the training data, pass them as `history:` to seed the lags without refitting:
 
 ```elixir
 Soothsayer.predict(fitted_model, future_dates, history: recent_df)  # recent_df has "ds" and "y"
@@ -188,7 +182,7 @@ See the [Auto-Regression guide](guides/autoregression.md) for details.
 
 #### Deep AR-Net
 
-For non-linear autoregressive patterns, you can add hidden layers:
+Hidden layers make the AR part a small network instead of a linear map:
 
 ```elixir
 ar: %{
@@ -198,11 +192,11 @@ ar: %{
 }
 ```
 
-Use this when the relationship between past and future values is complex. For simple linear relationships, leave `layers` empty (the default).
+Leave `layers` empty (the default) for linear AR.
 
 #### Regularization
 
-L1 regularization pushes AR weights toward zero, which prevents overfitting when you have many lags:
+An L1 penalty on the AR weights, for when you use many lags:
 
 ```elixir
 ar: %{
@@ -212,11 +206,11 @@ ar: %{
 }
 ```
 
-This is useful when you're not sure how many lags to use. Set a higher `lags` than you think you need and let regularization prevent the model from overfitting to noise in distant lags.
+Set more lags than you think you need and let the penalty quiet the distant ones.
 
 ### Events
 
-Captures the impact of special occasions (holidays, promotions, etc.) that affect your time series. Events are modeled as additive effects that spike on specific dates.
+Holidays, promotions, anything that lands on known dates. Each event adds a learned amount on its dates, and on the steps around them if you give it a window.
 
 ```elixir
 alias Explorer.DataFrame
@@ -246,18 +240,11 @@ future_events = DataFrame.new(%{
 predictions = Soothsayer.predict(fitted_model, future_dates, events: future_events)
 ```
 
-#### Event Windows
+#### Event windows
 
-Windows allow events to affect surrounding days, not just the event date itself:
+`steps_before` and `steps_after` extend the effect around the event date, in steps of the data's frequency: `steps_before: 2` starts two days early on daily data and two hours early on hourly data. Both default to `0`, so `%{}` is the event date alone, and `%{steps_before: 1, steps_after: 1}` learns three coefficients, one for the day before, the day itself and the day after.
 
-- **`steps_before`**: Steps before the event the effect covers. `2` means it starts 2 days before on daily data, 2 hours before on hourly data.
-- **`steps_after`**: Steps after the event the effect covers. `1` means it extends 1 step after.
-
-Both default to `0`, so `%{}` means the event date alone.
-
-Example: `%{steps_before: 1, steps_after: 1}` creates effects for the day before, the event day, and the day after (3 separate learned coefficients).
-
-#### Country Holidays and Recurring Events
+#### Country holidays and recurring events
 
 Every holiday of a country becomes an event of its own, dates generated for the years in your data and the years you forecast. The dates come from [dayoff](https://hex.pm/packages/dayoff), 200+ countries with their states and regions, no setup needed:
 
@@ -273,18 +260,17 @@ Soothsayer.get_event_effects(fitted_model)
 
 An event that falls on the same month and day every year can be given once with `recurring: :yearly`, and the occurrences given at fit are remembered, so predicting inside the training period or into future years needs no events dataframe. See the [Events guide](guides/events.md).
 
-#### Getting Event Effects
+#### Event effects
 
-After training, you can extract the learned impact of each event:
+After fit, the learned amount for each event and offset:
 
 ```elixir
 effects = Soothsayer.get_event_effects(fitted_model)
 # => %{"black_friday_-1" => 12.5, "black_friday_0" => 45.2, "black_friday_+1" => 8.3, ...}
 ```
 
-This shows how much each event (at each window position) adds to the forecast.
 
-### Training Parameters
+### Training parameters
 
 ```elixir
 Soothsayer.new(%{
@@ -304,9 +290,9 @@ The defaults follow NeuralProphet. Training runs in shuffled minibatches, so one
 
 With `learning_rate: :auto`, Soothsayer runs a learning rate range test before training: about a hundred steps with the rate climbing from `1.0e-6` to `10`, watching the training loss, and picking the rate where the loss falls fastest. That rate is the peak of the one-cycle schedule, which warms up from a tenth of it, peaks at 30% of training, and cools down to a hundredth by the end. The values actually used are recorded on the fitted model's config.
 
-If your model is underfitting (predictions are too smooth), try more epochs or a fixed higher learning rate. If it's overfitting (fits training data but not new data), try fewer epochs or more regularization.
+Too smooth a fit wants more epochs or a fixed higher learning rate. A fit that only works on the training data wants fewer epochs or more regularization.
 
-### Future Regressors
+### Future regressors
 
 External variables you know ahead of time, like a temperature forecast or planned marketing spend. Name the columns, include them in the training data, and pass their future values when predicting:
 
@@ -334,7 +320,7 @@ Soothsayer.new(%{
 
 See the [Regressors guide](guides/regressors.md).
 
-### Missing Data
+### Missing data
 
 Gaps in the data are handled at fit the way NeuralProphet does. Without auto-regression the rows with a missing `y` (nil or NaN) are dropped. With auto-regression the data is put on the frequency grid, trailing gaps are dropped and the rest are imputed: linearly up to 10 values from each side of a gap, then with a rolling mean over 10 more. Whatever is still missing raises, unless you let fit skip the training samples that touch it:
 
@@ -363,7 +349,7 @@ predictions["yhat_90"]  # upper line
 
 Each quantile is a linear head over the same inputs as the components, trained with the pinball loss, so intervals widen where the series is noisier. See the [Uncertainty guide](guides/uncertainty.md).
 
-### Evaluating a Configuration
+### Evaluating a configuration
 
 `Soothsayer.backtest/3` holds out the last 10% of your data, fits on the rest, and forecasts from every held out origin the way you would in production, using only what was observed up to that point:
 
@@ -378,11 +364,9 @@ result.model                # the fitted model
 
 This is the protocol NeuralProphet uses for its validation metrics, and what the benchmark suite runs.
 
-## Using EXLA for Faster Training
+## EXLA
 
-Soothsayer uses EXLA for training by default, which compiles to XLA for faster execution on CPU/GPU.
-
-Make sure EXLA is configured as your Nx backend in `config/config.exs`:
+Training is compiled with EXLA. Set it as the Nx backend too, so the tensor work around it doesn't fall back to the pure Elixir backend. In `config/config.exs`:
 
 ```elixir
 config :nx, default_backend: EXLA.Backend
@@ -394,11 +378,9 @@ Or set it at runtime:
 Nx.global_default_backend(EXLA.Backend)
 ```
 
-### GPU Memory Configuration
+### GPU memory
 
-By default, XLA pre-allocates 90% of GPU memory at startup for performance. This can cause issues if you're sharing the GPU with other applications (like X windows, other ML processes, or running multiple notebooks).
-
-If you see errors like `CUDNN_STATUS_INTERNAL_ERROR` or out-of-memory errors when starting, configure EXLA to disable preallocation or limit memory usage in `config/config.exs`:
+XLA grabs 90% of GPU memory at startup. If something else shares the GPU and you see `CUDNN_STATUS_INTERNAL_ERROR` or out-of-memory errors, turn preallocation off or cap it in `config/config.exs`:
 
 ```elixir
 # Disable preallocation (allocates on-demand)
@@ -410,21 +392,16 @@ config :exla, :clients,
   cuda: [platform: :cuda, memory_fraction: 0.5]
 ```
 
-Alternatively, set environment variables before starting your application:
+Or through environment variables:
 
 ```bash
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 # Or: export XLA_PYTHON_CLIENT_MEM_FRACTION=0.5
 ```
 
-| Option | Effect |
-|--------|--------|
-| `preallocate: false` | Allocates memory on-demand instead of upfront |
-| `memory_fraction: 0.5` | Pre-allocates only 50% of GPU memory |
+## Full configuration example
 
-## Full Configuration Example
-
-Here's a model configured for daily sales data with yearly seasonality, short-term momentum, and holiday effects:
+A model for daily sales with yearly seasonality, a week of momentum and two events:
 
 ```elixir
 model = Soothsayer.new(%{
@@ -448,7 +425,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-## Benchmarks Against NeuralProphet
+## Benchmarks against NeuralProphet
 
 The test suite includes a benchmark layer that fits Soothsayer on the datasets NeuralProphet uses in its own model performance tests, with the same 90/10 split, and prints validation metrics next to the numbers NeuralProphet's CI publishes. It's excluded from the default run:
 
@@ -456,34 +433,32 @@ The test suite includes a benchmark layer that fits Soothsayer on the datasets N
 mix test --only benchmark
 ```
 
-Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over six seeds:
+Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over five seeds:
 
 | Dataset | Metric | NeuralProphet | Soothsayer | Range over seeds | Notes |
 |---------|--------|---------------|------------|------------------|-------|
-| Peyton Manning (daily) | MAE | 0.350 | 0.299 | 0.298 to 0.311 | identical configuration |
-| Peyton Manning (daily) | RMSE | 0.501 | 0.480 | 0.480 to 0.483 | identical configuration |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.38 | 5.37 to 5.42 | identical configuration and metric (average over horizons 1 to 7) |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.72 | 6.70 to 6.77 | same |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.500 | 0.49 to 0.55 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.728 | 0.72 to 0.76 | same |
-| Air passengers (monthly, multiplicative) | MAE | 30.1 | 27.1 | 24.8 to 27.1 | identical configuration, 130 training rows so the seed matters |
-| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 29.0 | 26.7 to 29.0 | same caveat |
+| Peyton Manning (daily) | MAE | 0.350 | 0.298 | 0.298 to 0.299 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.501 | 0.493 | 0.493 to 0.495 | identical configuration |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.39 | 5.37 to 5.42 | identical configuration and metric (average over horizons 1 to 7) |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.73 | 6.70 to 6.77 | same |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.482 | 0.480 to 0.484 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.718 | 0.710 to 0.718 | same |
+| Air passengers (monthly, multiplicative) | MAE | 30.1 | 25.1 | 22.4 to 25.9 | identical configuration, 130 training rows so the seed matters |
+| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 27.0 | 24.5 to 27.9 | same caveat |
 
 The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, MIT licensed by Facebook) and the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, see the NOTICE file there.
 
-## Features Not Yet Implemented
+## Not implemented yet
 
-The following NeuralProphet features are on the roadmap:
+From NeuralProphet, still missing here:
 
-- Multiplicative Events (events that scale with trend)
-- Event Regularization
-- Conformal Prediction (calibrating intervals on a holdout set)
+- multiplicative events (events that scale with the trend)
+- event regularization
+- conformal prediction (calibrating the intervals on a holdout set)
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated releases. See the [release documentation](https://github.com/georgeguimaraes/soothsayer/blob/main/.github/RELEASE.md) for details.
+Pull requests are welcome. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) because releases are cut from them, see [RELEASE.md](https://github.com/georgeguimaraes/soothsayer/blob/main/.github/RELEASE.md).
 
 ## License
 
