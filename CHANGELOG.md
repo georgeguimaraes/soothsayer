@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/georgeguimaraes/soothsayer/compare/v1.0.0...v1.0.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* nx and exla as a version range instead of an override ([ffc7688](https://github.com/georgeguimaraes/soothsayer/commit/ffc76880811cd2a93c733f7d8cbdc44cf5b6d80d))
+
 ## [1.0.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.3...v1.0.0) (2026-09-16)
 
 
