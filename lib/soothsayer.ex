@@ -48,6 +48,7 @@ defmodule Soothsayer do
         enabled: true,
         changepoints: 10,
         changepoints_range: 0.8,
+        growth: :linear,
         regularization: nil
       },
       seasonality: %{
@@ -104,6 +105,7 @@ defmodule Soothsayer do
     validate_seasonality_enabled!(config)
     validate_regularization!(config, [:seasonality, :regularization])
     validate_regularization!(config, [:trend, :regularization])
+    validate_growth!(config)
     validate_regularization!(config, [:ar, :regularization])
     Frequency.validate!(config.frequency)
     validate_lagged_regressors!(config)
@@ -162,6 +164,14 @@ defmodule Soothsayer do
         not (is_integer(value) and value >= 0) do
       raise ArgumentError,
             "events.#{name}.#{key} must be an integer >= 0, got #{inspect(value)}"
+    end
+  end
+
+  defp validate_growth!(%{trend: %{growth: growth}}) do
+    unless growth in [:linear, :discontinuous] do
+      raise ArgumentError,
+            "trend.growth must be :linear or :discontinuous, got #{inspect(growth)}. " <>
+              "NeuralProphet's growth \"off\" is trend: %{enabled: false}."
     end
   end
 
@@ -418,7 +428,7 @@ defmodule Soothsayer do
       |> Map.new(fn {key, features} -> {key, Nx.take(features, position_indices, axis: 0)} end)
       |> Map.merge(ar_inputs)
 
-    {x_normalized, x_norm} = normalize_inputs(x)
+    {x_normalized, x_norm} = normalize_inputs(x, config)
 
     # The network is rebuilt now that the y normalization is known, since
     # multiplicative seasonality needs the series level as a constant.
@@ -982,7 +992,12 @@ defmodule Soothsayer do
     t = Trend.date_to_numeric(timestamps, config.first_timestamp) |> Nx.new_axis(-1)
 
     changepoint_features =
-      Trend.build_changepoint_features(t, config.changepoint_positions, Trend.basis(config))
+      Trend.build_changepoint_features(
+        t,
+        config.changepoint_positions,
+        Trend.basis(config),
+        Trend.growth(config)
+      )
 
     trend_input = Trend.build_trend_input(t, changepoint_features)
 
@@ -1120,13 +1135,13 @@ defmodule Soothsayer do
   # components subtracted from them predict in, so they must stay there.
   @unnormalized_inputs ["ar"]
 
-  defp normalize_inputs(x) do
+  defp normalize_inputs(x, config) do
     Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->
-      normalize_single_input(key, tensor, acc)
+      normalize_single_input(key, tensor, acc, config)
     end)
   end
 
-  defp normalize_single_input(key, tensor, {normalized, norm_params})
+  defp normalize_single_input(key, tensor, {normalized, norm_params}, _config)
        when key in @unnormalized_inputs do
     {Map.put(normalized, key, tensor), norm_params}
   end
@@ -1137,15 +1152,24 @@ defmodule Soothsayer do
   # hinge on its own blows up the late ones (few nonzero values, tiny
   # standard deviation), which lets the slope of the last segment swing
   # with the last few days of data and then extrapolate that swing.
-  defp normalize_single_input("trend" = key, tensor, {normalized, norm_params}) do
+  defp normalize_single_input("trend" = key, tensor, {normalized, norm_params}, config) do
     features = Nx.axis_size(tensor, 2)
+    time_columns = Trend.time_columns(config)
     span = tensor[[.., .., 0]] |> Nx.reduce_max()
-    norm_param = %{mean: Nx.broadcast(0.0, {features}), std: Nx.broadcast(span, {features})}
 
-    {Map.put(normalized, key, Nx.divide(tensor, span)), Map.put(norm_params, key, norm_param)}
+    # Only the time columns are in days; the intercept columns of
+    # discontinuous growth are 0 or 1 and stay that way.
+    std =
+      List.duplicate(span, time_columns) ++ List.duplicate(1.0, features - time_columns)
+
+    std = Nx.tensor(Enum.map(std, &Nx.to_number/1), type: {:f, 32})
+
+    norm_param = %{mean: Nx.broadcast(0.0, {features}), std: std}
+
+    {Map.put(normalized, key, Nx.divide(tensor, std)), Map.put(norm_params, key, norm_param)}
   end
 
-  defp normalize_single_input(key, tensor, {normalized, norm_params}) do
+  defp normalize_single_input(key, tensor, {normalized, norm_params}, _config) do
     {normalized_tensor, mean, std} = normalize(tensor)
     norm_param = %{mean: mean, std: std}
 

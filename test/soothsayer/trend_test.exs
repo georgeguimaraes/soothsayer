@@ -194,6 +194,35 @@ defmodule Soothsayer.TrendTest do
       assert Nx.to_flat_list(result) == [0.0, 0.0, 0.5, 0.0, 1.5, 0.0, 1.5, 1.0, 1.5, 2.0]
     end
 
+    test "discontinuous growth appends one intercept column per changepoint" do
+      t = Nx.tensor([[1.0], [2.0], [3.0], [4.0], [5.0]])
+
+      segmentwise = Trend.build_changepoint_features(t, [1.5, 3.0], :segmentwise, :discontinuous)
+      assert Nx.shape(segmentwise) == {5, 4}
+      # ramps live inside their segment, indicators are one-hot per segment
+      assert Nx.to_list(segmentwise) == [
+               [0.0, 0.0, 0.0, 0.0],
+               [0.5, 0.0, 1.0, 0.0],
+               [0.0, 0.0, 0.0, 1.0],
+               [0.0, 1.0, 0.0, 1.0],
+               [0.0, 2.0, 0.0, 1.0]
+             ]
+
+      cumulative = Trend.build_changepoint_features(t, [1.5, 3.0], :cumulative, :discontinuous)
+      # hinges keep growing, indicators are steps
+      assert Nx.to_list(cumulative) == [
+               [0.0, 0.0, 0.0, 0.0],
+               [0.5, 0.0, 1.0, 0.0],
+               [1.5, 0.0, 1.0, 1.0],
+               [2.5, 1.0, 1.0, 1.0],
+               [3.5, 2.0, 1.0, 1.0]
+             ]
+
+      assert Trend.feature_count(%{trend: %{changepoints: 2, growth: :discontinuous}}) == 5
+      assert Trend.feature_count(%{trend: %{changepoints: 0, growth: :discontinuous}}) == 1
+      assert Trend.time_columns(%{trend: %{changepoints: 2, growth: :discontinuous}}) == 3
+    end
+
     test "the basis follows trend regularization" do
       assert Trend.basis(%{trend: %{regularization: nil}}) == :segmentwise
       assert Trend.basis(%{trend: %{regularization: 0.5}}) == :cumulative

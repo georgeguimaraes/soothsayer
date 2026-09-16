@@ -23,6 +23,17 @@ defmodule Soothsayer.Trend do
   regularization the basis is the cumulative Prophet hinge
   `f_j(t) = max(0, t - s_j)`, where `delta_j` is the change of slope at
   `s_j`, which is what an L1 penalty on the deltas should shrink.
+
+  With `growth: :discontinuous` the trend may also jump at each changepoint,
+  NeuralProphet's discontinuous growth: one more learned intercept per
+  segment after the first, as extra input columns after the slope columns.
+  Under the segmentwise basis those are one-hot segment indicators and the
+  slope columns become ramps that live only inside their segment, so each
+  segment's slope and level are trained by its own data. Under the
+  cumulative basis they are steps `1[t >= s_j]` next to the cumulative
+  hinges, so the L1 penalty means few jumps. `growth: :linear` (the default)
+  keeps the trend continuous. NeuralProphet's `growth: "off"` is
+  `trend: %{enabled: false}` here.
   """
 
   alias Soothsayer.AR
@@ -42,15 +53,52 @@ defmodule Soothsayer.Trend do
 
   ## Returns
 
-    An Axon input node with shape `{nil, positions, 1 + changepoints}`,
-    where `positions` is the number of timestamps in a sample, see
-    `Soothsayer.AR.positions/1`.
+    An Axon input node with shape `{nil, positions, features}`, where
+    `positions` is the number of timestamps in a sample, see
+    `Soothsayer.AR.positions/1`, and `features` is `feature_count/1`.
 
   """
   @spec build_input(map()) :: Axon.t()
   def build_input(config) do
+    Axon.input("trend", shape: {nil, AR.positions(config), feature_count(config)})
+  end
+
+  @doc """
+  The growth of a config's trend, `:linear` unless it says `:discontinuous`.
+  """
+  @spec growth(map()) :: :linear | :discontinuous
+  def growth(config), do: get_in(config, [:trend, :growth]) || :linear
+
+  @doc """
+  How many leading trend input columns are measured in time: `t` and one
+  slope column per changepoint. Fit scales those by the training span. The
+  intercept columns of discontinuous growth come after them and stay as
+  they are.
+  """
+  @spec time_columns(map()) :: pos_integer()
+  def time_columns(config), do: 1 + (get_in(config, [:trend, :changepoints]) || 0)
+
+  @doc """
+  The width of the trend input: `time_columns/1` plus one intercept column
+  per changepoint with discontinuous growth.
+
+  ## Examples
+
+      iex> Soothsayer.Trend.feature_count(%{trend: %{changepoints: 10}})
+      11
+
+      iex> Soothsayer.Trend.feature_count(%{trend: %{changepoints: 10, growth: :discontinuous}})
+      21
+
+  """
+  @spec feature_count(map()) :: pos_integer()
+  def feature_count(config) do
     changepoints = get_in(config, [:trend, :changepoints]) || 0
-    Axon.input("trend", shape: {nil, AR.positions(config), 1 + changepoints})
+
+    case growth(config) do
+      :discontinuous -> time_columns(config) + changepoints
+      :linear -> time_columns(config)
+    end
   end
 
   @doc """
@@ -83,7 +131,10 @@ defmodule Soothsayer.Trend do
 
   ## Returns
 
-    A map with `:kernel` and `:bias` tensors.
+    A map with `:kernel` and `:bias` tensors. The kernel has one row per
+    trend input column: `t`, then one slope adjustment per changepoint,
+    then, with `growth: :discontinuous`, one intercept per changepoint. The
+    bias is the offset `m`.
 
   """
   @spec get_weights(Soothsayer.Model.t()) :: %{kernel: Nx.Tensor.t(), bias: Nx.Tensor.t()}
@@ -196,10 +247,15 @@ defmodule Soothsayer.Trend do
     * `changepoint_positions` - List of numeric changepoint positions, ascending.
     * `basis` - `:cumulative` (default) for `max(0, t - s_j)`, or
       `:segmentwise` to clip each hinge at the next changepoint. See `basis/1`.
+    * `growth` - `:linear` (default), or `:discontinuous` to append one
+      intercept column per changepoint: one-hot segment indicators with
+      ramps for slopes under `:segmentwise`, steps `1[t >= s_j]` under
+      `:cumulative`. See the module docs.
 
   ## Returns
 
-    A tensor of shape `{n_samples, changepoints}` with changepoint features.
+    A tensor of shape `{n_samples, changepoints}` with changepoint features,
+    `{n_samples, 2 * changepoints}` with discontinuous growth.
 
   ## Examples
 
@@ -211,25 +267,54 @@ defmodule Soothsayer.Trend do
       iex> Soothsayer.Trend.build_changepoint_features(t, [1.5, 2.5], :segmentwise)
       #Nx.Tensor<f32[3][2] [[0.0, 0.0], [0.5, 0.0], [1.0, 0.5]]>
 
+      iex> t = Nx.tensor([[1.0], [2.0], [3.0]])
+      iex> Soothsayer.Trend.build_changepoint_features(t, [1.5, 2.5], :segmentwise, :discontinuous) |> Nx.to_list()
+      [[0.0, 0.0, 0.0, 0.0], [0.5, 0.0, 1.0, 0.0], [0.0, 0.5, 0.0, 1.0]]
+
   """
-  @spec build_changepoint_features(Nx.Tensor.t(), list(number()), :cumulative | :segmentwise) ::
-          Nx.Tensor.t() | nil
-  def build_changepoint_features(t, changepoint_positions, basis \\ :cumulative)
+  @spec build_changepoint_features(
+          Nx.Tensor.t(),
+          list(number()),
+          :cumulative | :segmentwise,
+          :linear | :discontinuous
+        ) :: Nx.Tensor.t() | nil
+  def build_changepoint_features(
+        t,
+        changepoint_positions,
+        basis \\ :cumulative,
+        growth \\ :linear
+      )
 
-  def build_changepoint_features(_t, [], _basis), do: nil
+  def build_changepoint_features(_t, [], _basis, _growth), do: nil
 
-  def build_changepoint_features(t, changepoint_positions, basis) do
-    hinges =
-      t
-      |> Nx.reshape({:auto, 1})
-      |> Nx.subtract(Nx.tensor([changepoint_positions]))
-      |> Nx.max(0)
+  def build_changepoint_features(t, changepoint_positions, basis, growth) do
+    t = Nx.reshape(t, {:auto, 1})
+    starts = Nx.tensor([changepoint_positions])
+    widths = Nx.tensor([segment_widths(changepoint_positions)])
+    hinges = t |> Nx.subtract(starts) |> Nx.max(0)
 
-    case basis do
-      :cumulative -> hinges
-      :segmentwise -> Nx.min(hinges, Nx.tensor([segment_widths(changepoint_positions)]))
-    end
-    |> Nx.as_type({:f, 32})
+    in_segment =
+      Nx.logical_and(Nx.greater_equal(t, starts), Nx.less(t, Nx.add(starts, widths)))
+      |> Nx.as_type({:f, 32})
+
+    slopes =
+      case {basis, growth} do
+        {:cumulative, _growth} -> hinges
+        {:segmentwise, :linear} -> Nx.min(hinges, widths)
+        {:segmentwise, :discontinuous} -> Nx.multiply(hinges, in_segment)
+      end
+
+    intercepts =
+      case {basis, growth} do
+        {_basis, :linear} -> nil
+        {:cumulative, :discontinuous} -> Nx.greater_equal(t, starts)
+        {:segmentwise, :discontinuous} -> in_segment
+      end
+
+    [slopes, intercepts]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&Nx.as_type(&1, {:f, 32}))
+    |> Nx.concatenate(axis: 1)
   end
 
   # The last segment has no end, so its hinge keeps growing into the future.
@@ -340,7 +425,10 @@ defmodule Soothsayer.Trend do
       )
 
     t = date_to_numeric(timestamps, first_timestamp) |> Nx.new_axis(-1)
-    changepoint_features = build_changepoint_features(t, changepoint_positions, basis(config))
+
+    changepoint_features =
+      build_changepoint_features(t, changepoint_positions, basis(config), growth(config))
+
     tensor = build_trend_input(t, changepoint_features)
 
     metadata = %{

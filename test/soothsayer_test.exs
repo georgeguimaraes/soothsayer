@@ -805,6 +805,61 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "discontinuous growth" do
+    test "a level jump lands on the intercept of the segment it starts, not on the slopes" do
+      :rand.seed(:exsss, {6, 6, 6})
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+
+      # 10 changepoints over the first 80% of 1096 days sit every 87.7 days,
+      # the sixth at day 526, where the level jumps by 40.
+      y =
+        Enum.map(dates, fn date ->
+          days = Date.diff(date, start_date)
+          jump = if days >= 526, do: 40.0, else: 0.0
+          100 + 0.02 * days + jump + :rand.normal(0, 1)
+        end)
+
+      df = DataFrame.new(%{"ds" => dates, "y" => y})
+
+      in_sample_rmse = fn growth ->
+        model =
+          Soothsayer.new(%{
+            trend: %{changepoints: 10, growth: growth},
+            seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+            epochs: 40,
+            seed: 3
+          })
+
+        fitted = Soothsayer.fit(model, df)
+        predictions = Soothsayer.predict(fitted, df["ds"])
+        errors = Series.subtract(predictions["yhat"], df["y"])
+        rmse = errors |> Series.pow(2) |> Series.mean() |> :math.sqrt()
+        {rmse, fitted}
+      end
+
+      {linear_rmse, _} = in_sample_rmse.(:linear)
+      {discontinuous_rmse, fitted} = in_sample_rmse.(:discontinuous)
+
+      assert discontinuous_rmse < linear_rmse * 0.7
+
+      # Segmentwise intercepts are one-hot, so every segment after the jump
+      # carries the new level on its own and the ones before stay near zero.
+      kernel = Soothsayer.Trend.get_weights(fitted).kernel |> Nx.flatten()
+      intercepts = kernel[11..20] |> Nx.abs()
+      before = intercepts[0..4] |> Nx.mean() |> Nx.to_number()
+      after_jump = intercepts[5..9] |> Nx.mean() |> Nx.to_number()
+      assert before < 0.25 * after_jump
+      assert "trend" in DataFrame.names(Soothsayer.predict(fitted, df["ds"]))
+    end
+
+    test "rejects an unknown growth" do
+      assert_raise ArgumentError, ~r/trend.growth must be :linear or :discontinuous/, fn ->
+        Soothsayer.new(%{trend: %{growth: :off}})
+      end
+    end
+  end
+
   describe "custom and conditional seasonalities" do
     defp cycle_frame(dates, start_date, period, summer_only?) do
       y =
