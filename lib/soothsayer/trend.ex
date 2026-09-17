@@ -64,10 +64,56 @@ defmodule Soothsayer.Trend do
   end
 
   @doc """
-  The growth of a config's trend, `:linear` unless it says `:discontinuous`.
+  The growth of a config's trend: `:linear` (the default), `:discontinuous`
+  or `:logistic`.
   """
-  @spec growth(map()) :: :linear | :discontinuous
+  @spec growth(map()) :: :linear | :discontinuous | :logistic
   def growth(config), do: get_in(config, [:trend, :growth]) || :linear
+
+  # The shape of the changepoint features: only discontinuous growth adds
+  # intercept columns, logistic growth bends the same piecewise line.
+  defp feature_growth(config) do
+    if growth(config) == :discontinuous, do: :discontinuous, else: :linear
+  end
+
+  @doc """
+  The columns a logistic trend reads its capacity from: `"cap"`, and
+  `"floor"` when the training data had one (`config.trend.uses_floor`, set
+  at fit). Empty for the other growths.
+  """
+  @spec capacity_columns(map()) :: list(String.t())
+  def capacity_columns(config) do
+    case growth(config) do
+      :logistic -> ["cap"] ++ if(get_in(config, [:trend, :uses_floor]), do: ["floor"], else: [])
+      _growth -> []
+    end
+  end
+
+  @doc """
+  Squashes the trend between its floor and cap with logistic growth,
+  Prophet's saturating trend: `floor + (cap - floor) * sigmoid(trend)`,
+  where the piecewise linear trend the network learns is the logistic's
+  exponent, so a changepoint bends the approach to the ceiling. The
+  `"capacity"` input holds `cap` and `floor` per position, in normalized
+  y units. Other growths return the trend untouched.
+  """
+  @spec saturate(Axon.t(), map()) :: Axon.t()
+  def saturate(trend, config) do
+    case growth(config) do
+      :logistic ->
+        capacity = Axon.input("capacity", shape: {nil, AR.positions(config), 2})
+        Axon.layer(&saturate_op/3, [trend, capacity], name: "trend_saturated", op_name: :saturate)
+
+      _growth ->
+        trend
+    end
+  end
+
+  defp saturate_op(trend, capacity, _opts) do
+    cap = capacity[[.., .., 0]]
+    floor = capacity[[.., .., 1]]
+    Nx.add(floor, Nx.multiply(Nx.subtract(cap, floor), Nx.sigmoid(trend)))
+  end
 
   @doc """
   How many leading trend input columns are measured in time: `t` and one
@@ -115,7 +161,7 @@ defmodule Soothsayer.Trend do
   """
   @spec feature_count(map()) :: pos_integer()
   def feature_count(config) do
-    case growth(config) do
+    case feature_growth(config) do
       :discontinuous -> time_columns(config) + count(config)
       :linear -> time_columns(config)
     end
@@ -477,7 +523,7 @@ defmodule Soothsayer.Trend do
     t = date_to_numeric(timestamps, first_timestamp) |> Nx.new_axis(-1)
 
     changepoint_features =
-      build_changepoint_features(t, changepoint_positions, basis(config), growth(config))
+      build_changepoint_features(t, changepoint_positions, basis(config), feature_growth(config))
 
     {build_trend_input(t, changepoint_features), metadata}
   end

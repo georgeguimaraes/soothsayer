@@ -229,11 +229,15 @@ defmodule Soothsayer do
           "trend.changepoints must be a count or a non-empty list of dates, got #{inspect(other)}"
   end
 
-  defp validate_growth!(%{trend: %{growth: growth}}) do
-    unless growth in [:linear, :discontinuous] do
+  defp validate_growth!(%{trend: %{growth: growth, enabled: enabled}}) do
+    unless growth in [:linear, :discontinuous, :logistic] do
       raise ArgumentError,
-            "trend.growth must be :linear or :discontinuous, got #{inspect(growth)}. " <>
+            "trend.growth must be :linear, :discontinuous or :logistic, got #{inspect(growth)}. " <>
               "NeuralProphet's growth \"off\" is trend: %{enabled: false}."
+    end
+
+    if growth == :logistic and not enabled do
+      raise ArgumentError, "trend.growth :logistic needs the trend enabled"
     end
   end
 
@@ -413,6 +417,7 @@ defmodule Soothsayer do
   def fit(%Model{} = model, %DataFrame{} = data, opts \\ []) do
     events_df = Keyword.get(opts, :events)
     validate_training_data!(data)
+    model = put_capacity_config(model, data)
     Regressors.validate_columns!(data, Regressors.names(model.config))
     Seasonality.validate_condition_columns!(data, model.config)
     Regressors.validate_columns!(data, LaggedRegressors.names(model.config))
@@ -603,6 +608,7 @@ defmodule Soothsayer do
 
     x =
       %{"trend" => trend_input(timestamps, config)}
+      |> put_capacity_input(config, timestamps, data, %{mean: y_mean, std: y_std})
       |> Map.merge(seasonality_inputs(timestamps, config, series.conditions))
       |> put_events_input(model, timestamps, events)
       |> put_training_regressors_input(model, timestamps, data)
@@ -627,7 +633,8 @@ defmodule Soothsayer do
       event_dates: Events.frame_dates(series_events),
       regressors:
         Map.new(
-          Regressors.names(config) ++ Seasonality.condition_columns(config),
+          Regressors.names(config) ++
+            Seasonality.condition_columns(config) ++ Trend.capacity_columns(config),
           &{&1, Regressors.values_by_timestamp(data, &1)}
         ),
       lagged_regressors:
@@ -668,10 +675,81 @@ defmodule Soothsayer do
         t,
         config.changepoint_positions,
         Trend.basis(config),
-        Trend.growth(config)
+        if(Trend.growth(config) == :discontinuous, do: :discontinuous, else: :linear)
       )
 
     Trend.build_trend_input(t, changepoint_features)
+  end
+
+  # Logistic growth reads its ceiling, and floor, from the frame: they must
+  # be there at fit, and whether a floor was given is remembered so predict
+  # asks for the same columns.
+  defp put_capacity_config(%Model{config: %{trend: %{growth: :logistic}}} = model, data) do
+    columns = DataFrame.names(data)
+
+    unless "cap" in columns do
+      raise ArgumentError,
+            "trend.growth :logistic needs a \"cap\" column with the ceiling of the series. " <>
+              "Available columns: #{inspect(columns)}"
+    end
+
+    uses_floor = "floor" in columns
+
+    floor =
+      if uses_floor,
+        do: Series.to_list(data["floor"]),
+        else: List.duplicate(0.0, DataFrame.n_rows(data))
+
+    for {cap, floor} <- Enum.zip(Series.to_list(data["cap"]), floor),
+        is_number(cap) and is_number(floor) and cap <= floor do
+      raise ArgumentError, "Every cap must be above its floor, got cap #{cap} and floor #{floor}"
+    end
+
+    put_in(model.config[:trend][:uses_floor], uses_floor)
+  end
+
+  defp put_capacity_config(model, _data), do: model
+
+  # The {rows, 2} cap and floor per timestamp in normalized y units, the
+  # space the trend lives in. Only with logistic growth.
+  defp put_capacity_input(x, config, timestamps, source, normalization) do
+    case Trend.capacity_columns(config) do
+      [] ->
+        x
+
+      columns ->
+        raw =
+          case source do
+            %DataFrame{} = data ->
+              Regressors.build_features(timestamps, data, columns)
+
+            {known, required} ->
+              Regressors.build_features(timestamps, known, columns,
+                required: required,
+                fill: capacity_fill(known, columns)
+              )
+          end
+
+        Map.put(x, "capacity", normalize_capacity(raw, normalization))
+    end
+  end
+
+  defp capacity_fill(known, columns) do
+    Enum.map(columns, fn column ->
+      values = Map.values(known[column])
+      Enum.sum(values) / max(length(values), 1)
+    end)
+  end
+
+  # Cap first, then floor, zero when the data had no floor column
+  defp normalize_capacity(raw, %{mean: mean, std: std}) do
+    with_floor =
+      case Nx.axis_size(raw, 1) do
+        1 -> Nx.concatenate([raw, Nx.broadcast(0.0, {Nx.axis_size(raw, 0), 1})], axis: 1)
+        2 -> raw
+      end
+
+    Nx.divide(Nx.subtract(with_floor, mean), std)
   end
 
   @doc false
@@ -1070,9 +1148,12 @@ defmodule Soothsayer do
         Regressors.known_values(
           entry,
           regressors_df,
-          Regressors.names(model.config) ++ Seasonality.condition_columns(model.config)
+          Regressors.names(model.config) ++
+            Seasonality.condition_columns(model.config) ++
+            Trend.capacity_columns(model.config)
         ),
-      lagged_regressors: LaggedRegressors.known_values(entry, regressors_df, model.config)
+      lagged_regressors: LaggedRegressors.known_values(entry, regressors_df, model.config),
+      normalization: entry.normalization
     }
 
     {x_input, step_numbers, steps_ahead} =
@@ -1121,7 +1202,7 @@ defmodule Soothsayer do
         required = MapSet.new(prediction_timestamps)
 
         inputs =
-          build_time_inputs(model, samples, required, events_df, regressor_values.regressors)
+          build_time_inputs(model, samples, required, events_df, regressor_values)
 
         ones = List.duplicate(1, length(prediction_timestamps))
         {inputs, ones, ones}
@@ -1312,7 +1393,7 @@ defmodule Soothsayer do
       |> MapSet.new(&Timestamp.to_naive_datetime/1)
 
     model
-    |> build_time_inputs(samples, required, events_df, regressor_values.regressors)
+    |> build_time_inputs(samples, required, events_df, regressor_values)
     |> Map.merge(lag_inputs(model, known_values, regressor_values.lagged_regressors, origins))
   end
 
@@ -1337,17 +1418,18 @@ defmodule Soothsayer do
   defp validate_regressors_option!(%Model{} = model, regressors_df) do
     names = Regressors.names(model.config)
     conditions = Seasonality.condition_columns(model.config)
+    capacity = Trend.capacity_columns(model.config)
     validate_series_column!(model, regressors_df, "regressors")
 
-    case {names ++ conditions, regressors_df} do
+    case {names ++ conditions ++ capacity, regressors_df} do
       {[], _frame} ->
         :ok
 
       {_columns, nil} ->
         raise ArgumentError,
-              "This model was fitted with regressors #{inspect(names)} and seasonality " <>
-                "conditions #{inspect(conditions)}. Pass regressors: a dataframe with " <>
-                "\"ds\" and those columns to predict."
+              "This model was fitted with regressors #{inspect(names)}, seasonality " <>
+                "conditions #{inspect(conditions)} and capacity columns #{inspect(capacity)}. " <>
+                "Pass regressors: a dataframe with \"ds\" and those columns to predict."
 
       {columns, %DataFrame{} = frame} ->
         Regressors.validate_columns!(frame, columns)
@@ -1358,22 +1440,30 @@ defmodule Soothsayer do
   # seasonality, events and regressors) for a list of samples, each a list
   # of `positions` timestamps, as {samples, positions, features} tensors.
   # AR is added separately since it depends on previous values.
-  defp build_time_inputs(model, samples, required_timestamps, events_df, regressor_values) do
+  # `values` is the map of regressor, lagged regressor and capacity values
+  # by timestamp with the series' y normalization, see series_components/6.
+  defp build_time_inputs(model, samples, required_timestamps, events_df, values) do
     config = model.config
     timestamps = List.flatten(samples)
     positions = AR.positions(config)
 
     %{"trend" => trend_input(timestamps, config)}
+    |> put_capacity_input(
+      config,
+      timestamps,
+      {values.regressors, required_timestamps},
+      values.normalization
+    )
     |> Map.merge(
       seasonality_inputs(
         timestamps,
         config,
-        Map.take(regressor_values, Seasonality.condition_columns(config)),
+        Map.take(values.regressors, Seasonality.condition_columns(config)),
         required: required_timestamps
       )
     )
     |> put_events_input(model, timestamps, events_df)
-    |> put_regressors_input(model, timestamps, regressor_values, required_timestamps)
+    |> put_regressors_input(model, timestamps, values.regressors, required_timestamps)
     |> Map.new(fn {key, features} ->
       {key, Nx.reshape(features, {length(samples), positions, :auto})}
     end)
@@ -1522,7 +1612,7 @@ defmodule Soothsayer do
   # components subtracted from them predict in, so they must stay there.
   # The sample weights are loss weights, not features, and the series
   # one-hot and level must reach the network as they are.
-  @unnormalized_inputs ["ar", "sample_weight", "series", "series_level"]
+  @unnormalized_inputs ["ar", "sample_weight", "series", "series_level", "capacity"]
 
   defp normalize_inputs(x, config) do
     Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->

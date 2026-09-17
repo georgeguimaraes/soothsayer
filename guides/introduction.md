@@ -48,6 +48,7 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 | Custom seasonal periods | Yes | Yes |
 | Conditional seasonality | Yes | Yes |
 | Discontinuous growth | Yes | Yes |
+| Saturating (logistic) growth with a cap and floor | Yes | No |
 | Networks on future regressors | Yes | Yes |
 | Networks on lagged regressors | Yes | Yes |
 | Recurring events | Yes | No |

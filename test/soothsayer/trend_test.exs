@@ -166,6 +166,46 @@ defmodule Soothsayer.TrendTest do
     end
   end
 
+  describe "logistic growth" do
+    test "capacity columns follow the growth and the floor the training data had" do
+      assert Trend.capacity_columns(%{trend: %{growth: :linear}}) == []
+      assert Trend.capacity_columns(%{trend: %{growth: :logistic}}) == ["cap"]
+
+      assert Trend.capacity_columns(%{trend: %{growth: :logistic, uses_floor: true}}) == [
+               "cap",
+               "floor"
+             ]
+    end
+
+    test "saturate squashes the trend between floor and cap" do
+      config = %{
+        trend: %{growth: :logistic, enabled: true, changepoints: 0},
+        ar: %{enabled: false}
+      }
+
+      input = Trend.build_input(config)
+      trend = Trend.build_component(input, config)
+
+      {init_fn, predict_fn} =
+        trend |> Trend.saturate(config) |> then(&Axon.container(%{trend: &1})) |> Axon.build()
+
+      x = %{
+        "trend" => Nx.tensor([[[0.0]], [[100.0]], [[-100.0]]]),
+        "capacity" => Nx.tensor([[[2.0, -1.0]], [[2.0, -1.0]], [[2.0, -1.0]]])
+      }
+
+      params = init_fn.(x, Axon.ModelState.empty())
+      params = put_in(params.data["trend_dense"]["bias"], Nx.tensor([0.0]))
+      params = put_in(params.data["trend_dense"]["kernel"], Nx.tensor([[1.0]]))
+
+      out = predict_fn.(params, x).trend |> Nx.to_flat_list()
+      # sigmoid(0) = 0.5 of the way from -1 to 2, then the cap and the floor
+      assert_in_delta Enum.at(out, 0), 0.5, 1.0e-6
+      assert_in_delta Enum.at(out, 1), 2.0, 1.0e-6
+      assert_in_delta Enum.at(out, 2), -1.0, 1.0e-6
+    end
+  end
+
   describe "changepoint_metadata/2 with dates" do
     test "puts the changepoints at the dates, in days from the first timestamp" do
       dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)

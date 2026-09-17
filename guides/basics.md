@@ -53,7 +53,7 @@ model = Soothsayer.new(%{
 | `trend.enabled` | `true` | Enable trend component |
 | `trend.changepoints` | `10` | Number of potential changepoints, or a list of dates to bend at |
 | `trend.changepoints_range` | `0.8` | Place changepoints in first 80% of data |
-| `trend.growth` | `:linear` | `:discontinuous` lets the trend jump at changepoints, see [Trends](trends.md) |
+| `trend.growth` | `:linear` | `:discontinuous` lets the trend jump at changepoints, `:logistic` saturates at a `cap` column, see [Trends](trends.md) |
 | `trend.regularization` | `nil` | L1 penalty on the slope changes |
 | `seasonality.mode` | `:additive` | `:additive` or `:multiplicative` seasonality |
 | `seasonality.regularization` | `nil` | L1 penalty on every seasonal coefficient |

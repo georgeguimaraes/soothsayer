@@ -26,7 +26,7 @@ model = Soothsayer.new(%{
     enabled: true,           # default: true
     changepoints: 10,        # potential changepoints, default: 10, or a list of dates
     changepoints_range: 0.8, # place them in the first 80% of the data, default: 0.8
-    growth: :linear,         # or :discontinuous to let the level jump at changepoints
+    growth: :linear,         # :discontinuous jumps at changepoints, :logistic saturates at a cap column
     regularization: nil      # L1 penalty on slope changes, default: nil
   }
 })
@@ -37,7 +37,7 @@ model = Soothsayer.new(%{
 | `enabled` | `true` | Turn the trend component on or off |
 | `changepoints` | `10` | Number of potential slope changes |
 | `changepoints_range` | `0.8` | Fraction of the data where changepoints can sit |
-| `growth` | `:linear` | `:linear` for a continuous trend, `:discontinuous` to allow jumps at changepoints |
+| `growth` | `:linear` | `:linear` for a continuous trend, `:discontinuous` to allow jumps at changepoints, `:logistic` to saturate at a `cap` column |
 | `regularization` | `nil` | L1 penalty on slope changes (and jumps), `nil` for none |
 
 NeuralProphet's `growth: "off"` is `trend: %{enabled: false}` here: a flat line at the training mean.
@@ -133,6 +133,26 @@ This is NeuralProphet's discontinuous growth. Each segment after the first gets 
 The jump is only allowed where a changepoint sits, so a step between two changepoints lands on the nearest one. Raise `changepoints` if the steps in your series are close together.
 
 `Soothsayer.Trend.get_weights/1` returns the kernel with one row per input column: `t`, then the `changepoints` slope adjustments, then the `changepoints` intercepts. With `growth: :linear` the intercept rows aren't there. A model with a local trend over [several series](series.md) returns one such map per series id.
+
+## Saturating growth
+
+Some series can't grow forever: market share, subscribers in a region, anything with a ceiling. `growth: :logistic` is Prophet's saturating trend: the piecewise linear trend the network learns becomes the exponent of a logistic curve, and the curve approaches a capacity you give per row in a `cap` column, with an optional `floor`:
+
+```elixir
+df = DataFrame.new(%{
+  "ds" => dates,
+  "y" => subscribers,
+  "cap" => List.duplicate(50_000, length(dates))
+})
+
+model = Soothsayer.new(%{trend: %{growth: :logistic}})
+fitted = Soothsayer.fit(model, df)
+
+future = DataFrame.new(%{"ds" => future_dates, "cap" => List.duplicate(50_000, length(future_dates))})
+Soothsayer.predict(fitted, future["ds"], regressors: future)
+```
+
+The trend is `floor + (cap - floor) * sigmoid(trend)`, so changepoints bend how fast the series approaches the ceiling rather than the slope itself, and the capacity can change over time since it is a column, not a number. `cap` must be present at fit and, through `regressors:`, for every predicted date; a `floor` given at fit is required at predict too, and every cap has to sit above its floor. On an S-shaped series a linear trend keeps climbing past the ceiling where the logistic one levels off. Logistic growth has no discontinuous variant, and NeuralProphet does not offer it at all.
 
 ## Regularization
 

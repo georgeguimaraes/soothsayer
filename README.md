@@ -122,7 +122,7 @@ trend: %{
 
 Set more changepoints than you think you need and let the penalty zero out the ones that don't matter.
 
-By default the trend is continuous. `growth: :discontinuous` lets it jump at each changepoint too, one learned intercept per segment, for series with a level shift that no slope change explains. NeuralProphet's `growth: "off"` is `trend: %{enabled: false}` here.
+By default the trend is continuous. `growth: :discontinuous` lets it jump at each changepoint too, one learned intercept per segment, for series with a level shift that no slope change explains. `growth: :logistic` is Prophet's saturating trend: give the ceiling per row in a `cap` column (and optionally a `floor`) and the trend approaches it instead of climbing past. NeuralProphet's `growth: "off"` is `trend: %{enabled: false}` here.
 
 ### Seasonality
 

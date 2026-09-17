@@ -854,9 +854,109 @@ defmodule SoothsayerTest do
     end
 
     test "rejects an unknown growth" do
-      assert_raise ArgumentError, ~r/trend.growth must be :linear or :discontinuous/, fn ->
-        Soothsayer.new(%{trend: %{growth: :off}})
+      assert_raise ArgumentError,
+                   ~r/trend.growth must be :linear, :discontinuous or :logistic/,
+                   fn ->
+                     Soothsayer.new(%{trend: %{growth: :off}})
+                   end
+    end
+  end
+
+  describe "logistic growth" do
+    # An S curve approaching 1000: linear growth keeps climbing past it,
+    # logistic growth levels off at the cap
+    defp saturating_frame(dates, start_date, cap, seed) do
+      :rand.seed(:exsss, {seed, seed, seed})
+
+      y =
+        Enum.map(dates, fn date ->
+          cap / (1 + :math.exp(-0.008 * (Date.diff(date, start_date) - 500))) +
+            :rand.normal(0, 10)
+        end)
+
+      DataFrame.new(%{"ds" => dates, "y" => y, "cap" => List.duplicate(cap, length(dates))})
+    end
+
+    defp saturating_model(trend, epochs \\ 60) do
+      Soothsayer.new(%{
+        trend: trend,
+        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+        epochs: epochs,
+        seed: 1
+      })
+    end
+
+    test "levels off at the cap where a linear trend keeps climbing" do
+      start_date = ~D[2020-01-01]
+
+      training =
+        saturating_frame(
+          Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list(),
+          start_date,
+          1000.0,
+          1
+        )
+
+      holdout =
+        saturating_frame(
+          Date.range(~D[2023-01-01], ~D[2023-12-31]) |> Enum.to_list(),
+          start_date,
+          1000.0,
+          2
+        )
+
+      errors =
+        for trend <- [%{}, %{growth: :logistic}] do
+          fitted = Soothsayer.fit(saturating_model(trend), training)
+          predictions = Soothsayer.predict(fitted, holdout["ds"], regressors: holdout)
+
+          {Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs() |> Series.mean(),
+           Series.max(predictions["yhat"])}
+        end
+
+      [{linear_error, linear_max}, {logistic_error, logistic_max}] = errors
+      assert logistic_error < linear_error * 0.5
+      assert logistic_max < 1010.0
+      assert linear_max > 1050.0
+    end
+
+    test "needs cap at fit and at predict, a floor when the data had one, and cap above floor" do
+      dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()
+      frame = saturating_frame(dates, ~D[2022-01-01], 100.0, 3)
+
+      assert_raise ArgumentError, ~r/needs a "cap" column/, fn ->
+        Soothsayer.fit(
+          saturating_model(%{growth: :logistic, changepoints: 0}),
+          DataFrame.select(frame, ["ds", "y"])
+        )
       end
+
+      assert_raise ArgumentError, ~r/cap must be above its floor/, fn ->
+        floored = DataFrame.put(frame, "floor", Series.from_list(List.duplicate(100.0, 365)))
+        Soothsayer.fit(saturating_model(%{growth: :logistic, changepoints: 0}), floored)
+      end
+
+      floored = DataFrame.put(frame, "floor", Series.from_list(List.duplicate(-5.0, 365)))
+
+      fitted = Soothsayer.fit(saturating_model(%{growth: :logistic, changepoints: 0}, 1), floored)
+      assert fitted.config.trend.uses_floor
+
+      assert Soothsayer.series_entry(fitted, nil).regressors["floor"][~N[2022-06-01 00:00:00]] ==
+               -5.0
+
+      future = DataFrame.new(%{"ds" => [~D[2023-01-01]], "cap" => [100.0]})
+
+      assert_raise ArgumentError, ~r/capacity columns \["cap", "floor"\]/, fn ->
+        Soothsayer.predict(fitted, future["ds"])
+      end
+
+      assert_raise ArgumentError, ~r/Regressor column "floor" not found/, fn ->
+        Soothsayer.predict(fitted, future["ds"], regressors: future)
+      end
+
+      with_floor = DataFrame.put(future, "floor", Series.from_list([-5.0]))
+      predictions = Soothsayer.predict(fitted, future["ds"], regressors: with_floor)
+      assert Series.first(predictions["yhat"]) |> is_float()
     end
   end
 

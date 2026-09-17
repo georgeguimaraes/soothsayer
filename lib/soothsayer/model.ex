@@ -152,7 +152,7 @@ defmodule Soothsayer.Model do
 
     # Trend
     trend_input = Trend.build_input(config)
-    trend = Trend.build_component(trend_input, config, series_one_hot)
+    trend = trend_input |> Trend.build_component(config, series_one_hot) |> Trend.saturate(config)
 
     # Everything multiplicative is scaled by the trend through this one node.
     scale = multiplicative_scale(trend, series_inputs, config)

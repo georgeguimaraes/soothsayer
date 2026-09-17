@@ -27,6 +27,7 @@ defmodule Soothsayer.MissingData do
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
   alias Soothsayer.Timestamp
+  alias Soothsayer.Trend
 
   @type missing_positions :: %{String.t() => MapSet.t(non_neg_integer())}
 
@@ -48,7 +49,9 @@ defmodule Soothsayer.MissingData do
     columns =
       Enum.uniq(
         ["y" | Regressors.names(config)] ++
-          LaggedRegressors.names(config) ++ Seasonality.condition_columns(config)
+          LaggedRegressors.names(config) ++
+          Seasonality.condition_columns(config) ++
+          Trend.capacity_columns(config)
       )
 
     timestamps = Series.to_list(data["ds"])
