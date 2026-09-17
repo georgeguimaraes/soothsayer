@@ -504,26 +504,26 @@ The test suite includes a benchmark layer that fits Soothsayer on the datasets N
 mix test --only benchmark
 ```
 
-Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over six seeds:
+Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over six seeds. Prophet 1.4.0 is fitted on the same training rows with the same seasonality settings; it has no auto-regression, so on the two lagged series it forecasts from time alone:
 
-| Dataset | Metric | NeuralProphet | Soothsayer | Range over seeds | Notes |
-|---------|--------|---------------|------------|------------------|-------|
-| Peyton Manning (daily) | MAE | 0.350 | 0.350 | 0.348 to 0.352 | identical configuration |
-| Peyton Manning (daily) | RMSE | 0.501 | 0.502 | 0.500 to 0.502 | identical configuration |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.42 | 5.40 to 5.46 | identical configuration and metric (average over horizons 1 to 7) |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.75 | 6.72 to 6.81 | same |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.467 | 0.464 to 0.515 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.689 | 0.688 to 0.719 | same |
-| Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.2 | 20.3 to 26.1 | identical configuration, 130 training rows so the seed matters |
-| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 24.8 | 22.1 to 27.6 | same caveat |
-| R page views with outliers (daily) | MAE | 0.227 | 0.225 | 0.225 to 0.226 | identical configuration; NeuralProphet measured locally on the same split |
-| R page views with outliers (daily) | RMSE | 0.322 | 0.321 | 0.320 to 0.321 | same |
-| US births (daily, US holidays) | MAE | 447 | 438 | 438 to 442 | identical configuration; NeuralProphet measured locally |
-| US births (daily, US holidays) | RMSE | 532 | 520 | 520 to 525 | same |
-| Pedestrians at two locations (hourly, one model over both series) | MAE | 307 | 303 | 296 to 305 | NeuralProphet's ID column and local normalization, its metrics converted to absolute units |
-| Pedestrians at two locations (hourly, one model over both series) | RMSE | 392 | 386 | 380 to 388 | same |
+| Dataset | Metric | Prophet | NeuralProphet | Soothsayer | Range over seeds | Notes |
+|---------|--------|---------|---------------|------------|------------------|-------|
+| Peyton Manning (daily) | MAE | 0.292 | 0.350 | 0.350 | 0.348 to 0.352 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.477 | 0.501 | 0.502 | 0.500 to 0.502 | identical configuration |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 9.64 | 5.40 | 5.42 | 5.40 to 5.46 | identical configuration and metric (average over horizons 1 to 7); Prophet with temperature as a regressor, no lags |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 11.45 | 6.71 | 6.75 | 6.72 to 6.81 | same |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 5.63 | 0.573 | 0.467 | 0.464 to 0.515 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit; Prophet without lags |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 6.90 | 0.847 | 0.689 | 0.688 to 0.719 | same |
+| Air passengers (monthly, multiplicative) | MAE | 24.2 | 30.1 | 23.2 | 20.3 to 26.1 | identical configuration, 130 training rows so the seed matters |
+| Air passengers (monthly, multiplicative) | RMSE | 27.8 | 31.1 | 24.8 | 22.1 to 27.6 | same caveat |
+| R page views with outliers (daily) | MAE | 0.270 | 0.227 | 0.225 | 0.225 to 0.226 | identical configuration; NeuralProphet measured locally on the same split |
+| R page views with outliers (daily) | RMSE | 0.382 | 0.322 | 0.321 | 0.320 to 0.321 | same |
+| US births (daily, US holidays) | MAE | 434 | 447 | 438 | 438 to 442 | identical configuration; NeuralProphet measured locally |
+| US births (daily, US holidays) | RMSE | 515 | 532 | 520 | 520 to 525 | same |
+| Pedestrians at two locations (hourly, one model over both series) | MAE | 339 | 307 | 303 | 296 to 305 | NeuralProphet's ID column and local normalization, its metrics converted to absolute units; Prophet fitted per location |
+| Pedestrians at two locations (hourly, one model over both series) | RMSE | 432 | 392 | 386 | 380 to 388 | same |
 
-On the shared configuration the two libraries are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Where soothsayer comes out ahead the difference is in training, the learning rate range test and the loss weights, not in the model.
+On the shared configuration soothsayer and NeuralProphet are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Against Prophet the picture is mixed on plain series and one-sided as soon as lags matter. Prophet places its last changepoint later in the data (at `changepoints_range` itself, where NeuralProphet and soothsayer stop at `range * n / (n + 1)`), which suits Peyton Manning; `changepoints_range: 0.88` gives soothsayer the same tail. NeuralProphet's last release is 1.0.0rc10 from June 2024 and its repository has been quiet since, so its numbers are a fixed reference; Prophet 1.4.0 is current.
 
 The datasets live in `test/fixtures/neuralprophet/`. Five of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, the R page views and the Melbourne pedestrians, MIT licensed by Facebook), the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, and the births are public US government data, see the NOTICE file there.
 

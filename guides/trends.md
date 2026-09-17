@@ -64,7 +64,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-Changepoints are spread evenly over the first `changepoints_range` of the training data the way NeuralProphet does it: `n + 1` points from the start, the first at zero, so the last changepoint sits at `changepoints_range * n / (n + 1)`, 73% of the way through with the defaults. Leaving the rest without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast. Prophet puts its last changepoint at `changepoints_range` itself; `changepoints_range: 0.88` gives you that tail here.
+Changepoints are spread evenly over the first `changepoints_range` of the training data the way NeuralProphet does it: `n + 1` points from the start, the first at zero, so the last changepoint sits at `changepoints_range * n / (n + 1)`, 73% of the way through with the defaults. Leaving the rest without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast. Prophet puts its last changepoint at `changepoints_range` itself; `changepoints_range: 0.88` gives you that tail here. Neither is better in general: across a dozen series the shorter tail won on Peyton Manning, retail sales and a daily series with a COVID break, the longer one on Wikipedia page views, sunspots and an hourly panel, each time by a wide margin. The tail segment is the slope your forecast extrapolates, so when the last stretch of your data has its own regime, raise `changepoints_range` or name the break.
 
 ## When you know where the break is
 

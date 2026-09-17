@@ -16,6 +16,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   with `split_df(valid_p=0.1)` and `fit(validation_df)`, seed 42; the
   panel's metrics were recomputed in absolute units since NeuralProphet
   reports a panel in normalized ones.
+  Prophet's numbers come from Prophet 1.4.0 fitted on the same training rows
+  with the same seasonality settings and predicting the same validation rows
+  (`prophet_refs.py` in the session notes); it has no auto-regression, so on
+  Yosemite and Energy it forecasts from time features alone and the number
+  says what that costs.
   Where Soothsayer can't match NeuralProphet's configuration yet, the notes
   column says what differs, so the comparison is a parity report, not a
   pass/fail. The assertions are regression ceilings set from Soothsayer's own
@@ -32,8 +37,11 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   @seed 42
 
   setup_all do
-    IO.puts("\n| Benchmark | Metric | NeuralProphet | Soothsayer | Ratio | Notes |")
-    IO.puts("|---|---|---|---|---|---|")
+    IO.puts(
+      "\n| Benchmark | Metric | Prophet | NeuralProphet | Soothsayer | vs NeuralProphet | Notes |"
+    )
+
+    IO.puts("|---|---|---|---|---|---|---|")
     :ok
   end
 
@@ -46,6 +54,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "PeytonManning",
         result,
         %{mean_absolute_error: 0.35033, root_mean_squared_error: 0.50095},
+        prophet: %{mean_absolute_error: 0.2915, root_mean_squared_error: 0.4774},
         notes: "same config: 10 changepoints, yearly 6, weekly 3, additive"
       )
 
@@ -74,6 +83,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "AirPassengers",
         result,
         %{mean_absolute_error: 30.1315, root_mean_squared_error: 31.0835},
+        prophet: %{mean_absolute_error: 24.2298, root_mean_squared_error: 27.8352},
         notes: "same config: multiplicative seasonality, weekly disabled for monthly rows"
       )
 
@@ -105,7 +115,9 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "EnergyPriceDaily",
         result,
         %{mean_absolute_error: 5.40186, root_mean_squared_error: 6.70655},
-        notes: "same configuration and metric"
+        prophet: %{mean_absolute_error: 9.6374, root_mean_squared_error: 11.4534},
+        notes:
+          "same configuration and metric; Prophet has no lags, temperature as a regressor only"
       )
 
       # Seed 42 gives 5.42 / 6.75. Across six seeds: MAE 5.40 to 5.46,
@@ -139,8 +151,9 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "YosemiteTemps",
         result,
         %{mean_absolute_error: 0.57336, root_mean_squared_error: 0.84714},
+        prophet: %{mean_absolute_error: 5.6292, root_mean_squared_error: 6.9022},
         notes:
-          "same config: 36 lags, 12 steps, 30 changepoints, daily seasonality; " <>
+          "same config: 36 lags, 12 steps, 30 changepoints, daily seasonality; Prophet has no lags; " <>
             "yearly off explicitly, NeuralProphet's auto rule turns it off on 65 days of data; " <>
             "12 missing readings imputed at fit"
       )
@@ -161,6 +174,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "RPageViewsOutliers",
         result,
         %{mean_absolute_error: 0.2271, root_mean_squared_error: 0.3219},
+        prophet: %{mean_absolute_error: 0.2699, root_mean_squared_error: 0.3819},
         notes: "same config: defaults, the outlier spikes Prophet's docs use"
       )
 
@@ -181,6 +195,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "BirthsUS",
         result,
         %{mean_absolute_error: 446.9993, root_mean_squared_error: 532.3921},
+        prophet: %{mean_absolute_error: 434.4995, root_mean_squared_error: 514.5654},
         notes: "same config: defaults plus US holidays (add_country_holidays)"
       )
 
@@ -213,6 +228,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
         "PedestriansPanel",
         result,
         %{mean_absolute_error: 306.6183, root_mean_squared_error: 392.2146},
+        prophet: %{mean_absolute_error: 339.1293, root_mean_squared_error: 432.4934},
         notes:
           "same config: ID column, global model, local normalization, weekly and daily " <>
             "seasonality, yearly off on one month of data"
@@ -229,7 +245,7 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
     @fixtures |> Path.join(file) |> DataFrame.from_csv!(dtypes: [{"ds", ds_dtype}])
   end
 
-  defp report(benchmark, result, reference, notes: notes) do
+  defp report(benchmark, result, reference, prophet: prophet, notes: notes) do
     config = result.model.config
 
     training =
@@ -240,8 +256,8 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
       theirs = reference[metric]
 
       IO.puts(
-        "| #{benchmark} | #{label} | #{format(theirs)} | #{format(ours)} | " <>
-          "#{Float.round(ours / theirs, 2)}x | #{notes} (#{training}) |"
+        "| #{benchmark} | #{label} | #{format(prophet[metric])} | #{format(theirs)} | " <>
+          "#{format(ours)} | #{Float.round(ours / theirs, 2)}x | #{notes} (#{training}) |"
       )
     end
   end
