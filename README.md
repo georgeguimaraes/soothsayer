@@ -428,7 +428,7 @@ Soothsayer.new(%{
 result = Soothsayer.backtest(model, df, horizon: 7)
 
 result.metrics              # %{mean_absolute_error: ..., root_mean_squared_error: ...}, plus coverage with an interval
-result.by_step[7]           # the same, for forecasts made 7 days ahead
+result.by_step[7]           # the same, for forecasts made 7 days ahead (with auto-regression)
 result.predictions          # DataFrame with origin, ds, step, y, yhat
 result.model                # the fitted model
 ```

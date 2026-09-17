@@ -674,6 +674,8 @@ defmodule Soothsayer do
 
     * `model` - A fitted `Soothsayer.Model` struct.
     * `x` - An `Explorer.Series` of dates or naive datetimes to predict for.
+      A model fitted on several series takes an `Explorer.DataFrame` with
+      "ds" and the id column instead, see `Soothsayer.Series`.
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns
         for occurrences the model doesn't know yet. Occurrences given at
@@ -686,12 +688,16 @@ defmodule Soothsayer do
         configured regressor, covering every predicted date. Required when
         the model was fitted with regressors.
 
+    With several series the `:history` and `:regressors` frames carry the id
+    column too.
+
   ## Returns
 
     An `Explorer.DataFrame` with one row per requested timestamp and the
     columns, in this order:
 
-    * `"ds"` - the timestamps, the series `x` itself
+    * `"ds"` - the timestamps, the series `x` itself (followed by the id
+      column for several series)
     * `"yhat"` - the forecast (the median when quantiles are configured)
     * one column per configured quantile, `"yhat_10"` for `0.1`,
       `"yhat_97.5"` for `0.975`, ascending
@@ -806,7 +812,9 @@ defmodule Soothsayer do
   ## Parameters
 
     * `model` - A fitted `Soothsayer.Model` struct.
-    * `x` - An `Explorer.Series` of dates or naive datetimes to predict for.
+    * `x` - An `Explorer.Series` of dates or naive datetimes to predict for,
+      or for a model fitted on several series a dataframe with "ds" and the
+      id column, see `Soothsayer.Series`.
       Plain dates mean midnight, which matters for sub-daily models.
     * `opts` - Optional keyword list:
       - `:events` - An `Explorer.DataFrame` with "event" and "ds" columns

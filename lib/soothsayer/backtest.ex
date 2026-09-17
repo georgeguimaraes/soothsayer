@@ -11,7 +11,7 @@ defmodule Soothsayer.Backtest do
   for its validation metrics.
 
   For models without auto-regression the forecast for a date doesn't depend
-  on the origin, so the per-step metrics come out identical.
+  on the origin, so every date is forecast once, as step 1, in a single call.
   """
 
   alias Explorer.DataFrame
@@ -42,8 +42,9 @@ defmodule Soothsayer.Backtest do
     * `:validation_fraction` - Share of rows held out at the end, default `0.1`.
       Like NeuralProphet's `split_df`, the validation part is the last
       `max(1, trunc(rows * fraction))` rows.
-    * `:horizon` - Steps ahead to forecast from each origin. Defaults to the
-      model's `ar.forecast_steps`, or 1 without auto-regression.
+    * `:horizon` - Steps ahead to forecast from each origin, with
+      auto-regression. Defaults to the model's `ar.forecast_steps`. Without
+      auto-regression every date is forecast once, as step 1.
     * `:events` - Events dataframe, passed to both fit and predict.
     * `:regressors` - Regressors dataframe for prediction. Defaults to the
       validation part itself, which holds the regressor columns for those dates.
