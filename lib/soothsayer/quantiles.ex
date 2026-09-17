@@ -69,6 +69,29 @@ defmodule Soothsayer.Quantiles do
   end
 
   @doc """
+  Prediction column name for a quantile.
+
+  ## Examples
+
+      iex> Soothsayer.Quantiles.column_name(0.1)
+      "yhat_10"
+      iex> Soothsayer.Quantiles.column_name(0.975)
+      "yhat_97.5"
+
+  """
+  @spec column_name(float()) :: String.t()
+  def column_name(quantile) do
+    percent = Float.round(quantile * 100, 1)
+
+    label =
+      if percent == Float.floor(percent),
+        do: Integer.to_string(trunc(percent)),
+        else: :erlang.float_to_binary(percent, decimals: 1)
+
+    "yhat_" <> label
+  end
+
+  @doc """
   Pinball (quantile) loss, averaged over all elements, each multiplied by
   its `sample_weight` when one is given.
 

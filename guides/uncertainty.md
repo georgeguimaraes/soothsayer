@@ -64,9 +64,35 @@ covered / length(holdout_values)
 
 If coverage is much lower than the nominal level the intervals are too narrow: try more epochs, since the heads train alongside the median and may not have converged. If it's much higher they are too wide, which usually means the training data had noisier stretches than the holdout.
 
+## Conformal prediction
+
+Quantile heads learn the noise of the training data, and nothing forces a 10/90 band to cover 80% of what comes next. Conformal prediction fixes the width on data the model has not seen. Keep a calibration stretch right after the training data, let the fitted model forecast it, and the errors it makes there set the width:
+
+```elixir
+calibrated =
+  model
+  |> Soothsayer.fit(training)
+  |> Soothsayer.calibrate(calibration, alpha: 0.1)
+
+predictions = Soothsayer.predict(calibrated, future_dates)
+predictions["yhat_lower"]
+predictions["yhat_upper"]
+```
+
+`alpha` is the miss rate you accept, so `0.1` asks for a 90% interval. Under the usual conformal assumption, that the calibration rows and the future are exchangeable, the interval covers a new point with probability at least `1 - alpha`, whatever the model got wrong. Two methods:
+
+- `method: :naive`, the default, scores each calibration row by `|y - yhat|` and builds `yhat -+ q_hat` around the point forecast. It needs no quantiles and gives a band of constant width.
+- `method: :cqr`, conformalized quantile regression, needs `quantiles` on the model. It scores how far each row falls outside the band between the lowest and highest quantile, then pushes that band out by `q_hat`. The band keeps the shape the heads learned, wider where the series is noisier, and the calibration corrects its size. With `alpha: {0.05, 0.05}` each side gets its own score and its own correction.
+
+`q_hat` is the `ceil((n + 1)(1 - alpha))`-th smallest score, so `alpha: 0.1` needs at least nine calibration rows and works better with a few hundred. The quantile columns stay as they were, the calibrated band lands in `yhat_lower` and `yhat_upper`. With auto-regression the calibration walks through the calibration frame the way `Soothsayer.backtest/3` does, one origin per row, and every step ahead gets its own `q_hat`; rows forecast further out than `forecast_steps` were never calibrated and use the last step's. Pass `:events` and `:regressors` for the calibration dates the way you would to `predict/3`.
+
+`Soothsayer.backtest/3` on a calibrated model reports the interval's `coverage` and `mean_interval_width` next to MAE and RMSE, and does the same from the outermost quantile columns when there is no calibration, which is the quick way to see whether the heads alone are honest.
+
+Two details differ from NeuralProphet. It takes `scores[-int(n * alpha)]` as `q_hat`, which has no finite-sample correction and falls back to the smallest score when `n * alpha < 1`, and by default it overwrites the quantile columns in place.
+
 ## Limits
 
-Intervals reflect the noise the model saw during training. They don't widen for model misspecification, structural breaks, or for the compounding error of chained auto-regressive blocks past `forecast_steps`. NeuralProphet's conformal prediction, which calibrates intervals on a holdout set, is not implemented.
+Quantile intervals reflect the noise the model saw during training. They don't widen for model misspecification, structural breaks, or for the compounding error of chained auto-regressive blocks past `forecast_steps`. Calibration corrects the size of the band but shares the last two blind spots, since the calibration stretch can only speak for what it contains.
 
 ## Next steps
 

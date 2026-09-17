@@ -1464,6 +1464,128 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "conformal prediction" do
+    defp noisy_frame(dates, start_date) do
+      y =
+        Enum.map(dates, fn date ->
+          days = Date.diff(date, start_date)
+          50 + 0.03 * days + 5 * :math.sin(2 * :math.pi() * days / 365.25) + :rand.normal(0, 3)
+        end)
+
+      DataFrame.new(%{"ds" => dates, "y" => y})
+    end
+
+    defp coverage(predictions, holdout) do
+      inside =
+        Series.and(
+          Series.greater_equal(holdout["y"], predictions["yhat_lower"]),
+          Series.less_equal(holdout["y"], predictions["yhat_upper"])
+        )
+
+      inside |> Series.cast({:s, 8}) |> Series.mean()
+    end
+
+    test "calibrated intervals cover about 1 - alpha of unseen points, with both methods" do
+      :rand.seed(:exsss, {11, 11, 11})
+      start_date = ~D[2019-01-01]
+      training = noisy_frame(Date.range(start_date, ~D[2021-12-31]) |> Enum.to_list(), start_date)
+
+      calibration =
+        noisy_frame(Date.range(~D[2022-01-01], ~D[2022-06-30]) |> Enum.to_list(), start_date)
+
+      holdout =
+        noisy_frame(Date.range(~D[2022-07-01], ~D[2022-12-31]) |> Enum.to_list(), start_date)
+
+      fitted =
+        Soothsayer.fit(
+          Soothsayer.new(%{
+            trend: %{changepoints: 0},
+            seasonality: %{weekly: %{enabled: false}},
+            quantiles: [0.1, 0.9],
+            epochs: 40,
+            seed: 5
+          }),
+          training
+        )
+
+      naive = Soothsayer.calibrate(fitted, calibration, alpha: 0.1)
+      naive_predictions = Soothsayer.predict(naive, holdout["ds"])
+
+      assert naive.config.calibration.method == :naive
+      assert map_size(naive.config.calibration.q_hat) == 1
+
+      assert DataFrame.names(naive_predictions) |> Enum.take(5) ==
+               ["ds", "yhat", "yhat_10", "yhat_90", "yhat_lower"]
+
+      naive_coverage = coverage(naive_predictions, holdout)
+      assert naive_coverage > 0.8 and naive_coverage < 0.98
+
+      cqr = Soothsayer.calibrate(fitted, calibration, alpha: 0.1, method: :cqr)
+      cqr_predictions = Soothsayer.predict(cqr, holdout["ds"])
+      cqr_coverage = coverage(cqr_predictions, holdout)
+      assert cqr_coverage > 0.8 and cqr_coverage < 0.98
+
+      # cqr keeps the quantile columns as they were and moves the band out
+      # from them by q_hat on each side
+      assert Series.to_list(cqr_predictions["yhat_10"]) ==
+               Series.to_list(naive_predictions["yhat_10"])
+
+      q = cqr.config.calibration.q_hat[1]
+
+      assert_in_delta Series.first(
+                        Series.subtract(cqr_predictions["yhat_10"], cqr_predictions["yhat_lower"])
+                      ),
+                      q,
+                      1.0e-4
+
+      # the backtest reports the calibrated interval's coverage and width
+      result =
+        Soothsayer.backtest(cqr, DataFrame.concat_rows(training, holdout),
+          validation_fraction: 0.05
+        )
+
+      assert result.metrics.coverage > 0.5
+      assert result.metrics.mean_interval_width > 0
+      assert "yhat_lower" in DataFrame.names(result.predictions)
+    end
+
+    test "with auto-regression every forecast step gets its own q_hat" do
+      :rand.seed(:exsss, {12, 12, 12})
+      start_date = ~D[2021-01-01]
+      training = noisy_frame(Date.range(start_date, ~D[2022-06-30]) |> Enum.to_list(), start_date)
+
+      calibration =
+        noisy_frame(Date.range(~D[2022-07-01], ~D[2022-09-30]) |> Enum.to_list(), start_date)
+
+      fitted =
+        Soothsayer.fit(
+          Soothsayer.new(%{
+            trend: %{changepoints: 0},
+            seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+            ar: %{enabled: true, lags: 7, forecast_steps: 3},
+            epochs: 5,
+            seed: 6
+          }),
+          training
+        )
+
+      calibrated = Soothsayer.calibrate(fitted, calibration, alpha: 0.2)
+
+      assert Map.keys(calibrated.config.calibration.q_hat) |> Enum.sort() == [1, 2, 3]
+      assert Enum.all?(Map.values(calibrated.config.calibration.q_hat), &(&1 > 0))
+
+      # ten days out: the first three rows are calibrated steps, the rest use step 3
+      future = Series.from_list(Date.range(~D[2022-10-01], ~D[2022-10-10]) |> Enum.to_list())
+      predictions = Soothsayer.predict(calibrated, future, history: calibration)
+
+      widths =
+        Series.subtract(predictions["yhat_upper"], predictions["yhat_lower"]) |> Series.to_list()
+
+      assert Enum.drop(widths, 2) |> Enum.uniq_by(&Float.round(&1, 4)) |> length() == 1
+      assert_in_delta hd(widths), 2 * calibrated.config.calibration.q_hat[1], 1.0e-4
+    end
+  end
+
   describe "training defaults" do
     test "auto learning rate and epochs are resolved and recorded on the fitted model" do
       dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()

@@ -8,6 +8,7 @@ defmodule Soothsayer do
   alias Explorer.DataFrame
   alias Explorer.Series
   alias Soothsayer.AR
+  alias Soothsayer.Conformal
   alias Soothsayer.Events
   alias Soothsayer.Frequency
   alias Soothsayer.Holidays
@@ -595,7 +596,7 @@ defmodule Soothsayer do
     quantile_columns =
       components.quantiles
       |> Enum.sort()
-      |> Enum.map(fn {quantile, tensor} -> {quantile_column(quantile), tensor} end)
+      |> Enum.map(fn {quantile, tensor} -> {Quantiles.column_name(quantile), tensor} end)
 
     # Disabled components are scalar zeros and stay out of the frame, except
     # the trend, which carries the level of the series even when disabled
@@ -607,12 +608,24 @@ defmodule Soothsayer do
           do: {Atom.to_string(key), tensor}
 
     columns =
-      [{"yhat", components.combined}] ++ quantile_columns ++ component_columns
+      [{"yhat", components.combined}] ++
+        quantile_columns ++ interval_columns(model, components) ++ component_columns
 
     DataFrame.new([
       {"ds", x} | Enum.map(columns, fn {name, tensor} -> {name, column(tensor, rows)} end)
     ])
   end
+
+  # Conformal bounds, once the model was calibrated with calibrate/3.
+  defp interval_columns(%Model{config: %{calibration: calibration}}, components)
+       when is_map(calibration) do
+    {lower, upper} =
+      Conformal.bounds(calibration, components.step, components.combined, components.quantiles)
+
+    [{"yhat_lower", lower}, {"yhat_upper", upper}]
+  end
+
+  defp interval_columns(_model, _components), do: []
 
   # A disabled trend is a single value (the training mean), broadcast to
   # every row.
@@ -624,18 +637,6 @@ defmodule Soothsayer do
       end
 
     Series.from_list(values, dtype: {:f, 64})
-  end
-
-  # 0.1 -> "yhat_10", 0.975 -> "yhat_97.5"
-  defp quantile_column(quantile) do
-    percent = Float.round(quantile * 100, 1)
-
-    label =
-      if percent == Float.floor(percent),
-        do: Integer.to_string(trunc(percent)),
-        else: :erlang.float_to_binary(percent, decimals: 1)
-
-    "yhat_" <> label
   end
 
   @doc """
@@ -713,8 +714,14 @@ defmodule Soothsayer do
         ar: #Nx.Tensor<...>,
         events: #Nx.Tensor<...>,
         regressors: #Nx.Tensor<...>,
-        quantiles: %{0.1 => #Nx.Tensor<...>, 0.9 => #Nx.Tensor<...>}
+        quantiles: %{0.1 => #Nx.Tensor<...>, 0.9 => #Nx.Tensor<...>},
+        step: #Nx.Tensor<...>
       }
+
+  `:step` is how many steps past the last observation each row is, `{n, 1}`,
+  1 for rows at or before it and for every row without auto-regression. With
+  auto-regression a row further out than `forecast_steps` is a chained
+  forecast, and its step says how far the chain went.
 
   """
   @spec predict_components(Soothsayer.Model.t(), Explorer.Series.t(), keyword()) :: %{
@@ -727,7 +734,8 @@ defmodule Soothsayer do
           events: Nx.Tensor.t(),
           regressors: Nx.Tensor.t(),
           lagged_regressors: Nx.Tensor.t(),
-          quantiles: %{float() => Nx.Tensor.t()}
+          quantiles: %{float() => Nx.Tensor.t()},
+          step: Nx.Tensor.t()
         }
   def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
@@ -748,7 +756,7 @@ defmodule Soothsayer do
       lagged_regressors: LaggedRegressors.known_values(training_data, regressors_df, model.config)
     }
 
-    {x_input, step_numbers} =
+    {x_input, step_numbers, steps_ahead} =
       if ar_enabled?(model) do
         {observed_values, last_observed} = known_values(model, history)
         forecast_steps = AR.forecast_steps(model.config)
@@ -780,7 +788,14 @@ defmodule Soothsayer do
             events_df
           )
 
-        {inputs, step_numbers}
+        # Steps ahead of the last observation, past forecast_steps too, so
+        # chained rows are told apart from calibrated ones.
+        steps_ahead =
+          Enum.map(prediction_timestamps, fn timestamp ->
+            max(Frequency.steps_between(last_observed, timestamp, model.config.frequency), 1)
+          end)
+
+        {inputs, step_numbers, steps_ahead}
       else
         samples = Enum.map(prediction_timestamps, &[&1])
         required = MapSet.new(prediction_timestamps)
@@ -788,7 +803,8 @@ defmodule Soothsayer do
         inputs =
           build_time_inputs(model, samples, required, events_df, regressor_values.regressors)
 
-        {inputs, List.duplicate(1, length(prediction_timestamps))}
+        ones = List.duplicate(1, length(prediction_timestamps))
+        {inputs, ones, ones}
       end
 
     x_normalized = normalize_with_params(x_input, model.config.normalization.x)
@@ -805,11 +821,12 @@ defmodule Soothsayer do
 
     components = denormalize_components(predictions, model.config.normalization.y)
 
-    Map.put(
-      components,
+    components
+    |> Map.put(
       :quantiles,
       denormalize_quantiles(quantile_outputs, model.config.quantiles, components.combined, model)
     )
+    |> Map.put(:step, steps_ahead |> Nx.tensor() |> Nx.reshape({:auto, 1}))
   end
 
   defp select_step(outputs, step_index) when is_tuple(outputs) do
@@ -1275,6 +1292,38 @@ defmodule Soothsayer do
       _, %{} = left, %{} = right -> deep_merge(left, right)
       _, _left, right -> right
     end)
+  end
+
+  @doc """
+  Calibrates prediction intervals on a frame the model has not seen, so
+  that `predict/3` adds `yhat_lower` and `yhat_upper` columns covering a
+  future point with probability `1 - alpha`. See `Soothsayer.Conformal`.
+
+  `calibration` has `ds` and `y` for the period right after the training
+  data. Options: `:alpha` (default `0.1`, or a `{lower, upper}` pair with
+  `:cqr`), `:method` (`:naive`, the default, around `yhat`, or `:cqr`
+  around the configured quantiles), `:events` and `:regressors` for the
+  calibration dates as in `predict/3`.
+
+  ## Examples
+
+      iex> calibrated = Soothsayer.calibrate(fitted_model, calibration_df, alpha: 0.1)
+      iex> Soothsayer.predict(calibrated, future_dates)
+      #Explorer.DataFrame<
+        Polars[30 x 7]
+        ds date [...]
+        yhat f64 [...]
+        yhat_lower f64 [...]
+        yhat_upper f64 [...]
+        ...
+      >
+
+  """
+  @spec calibrate(Soothsayer.Model.t(), Explorer.DataFrame.t(), keyword()) ::
+          Soothsayer.Model.t()
+  def calibrate(%Model{} = model, %DataFrame{} = calibration, opts \\ []) do
+    validate_training_data!(calibration)
+    put_in(model.config[:calibration], Conformal.calibrate(model, calibration, opts))
   end
 
   @doc """
