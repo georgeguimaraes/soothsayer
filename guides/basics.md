@@ -123,13 +123,11 @@ See the [README](https://github.com/georgeguimaraes/soothsayer#gpu-memory-config
 
 ## Making predictions
 
-`Soothsayer.predict/2` takes an Explorer Series of dates:
+`Soothsayer.predict/2` takes an Explorer Series of dates. `Soothsayer.future_timestamps/2` gives you the next ones after the training data, at the model's frequency:
 
 ```elixir
-alias Explorer.Series
-
-future_dates = Series.from_list([~D[2023-01-04], ~D[2023-01-05], ~D[2023-01-06]])
-predictions = Soothsayer.predict(fitted_model, future_dates)
+future = Soothsayer.future_timestamps(fitted_model, 3)
+predictions = Soothsayer.predict(fitted_model, future)
 # => #Explorer.DataFrame<
 #      Polars[3 x 5]
 #      ds date [2023-01-04, 2023-01-05, 2023-01-06]
@@ -141,6 +139,8 @@ predictions = Soothsayer.predict(fitted_model, future_dates)
 ```
 
 The result is a DataFrame with one row per date: `ds` (your series, same dtype), `yhat`, one column per configured quantile (`yhat_10`, `yhat_90`, see [Uncertainty](uncertainty.md)), then `trend` and one column per enabled component. The component columns add up to `yhat`.
+
+Any series of dates or naive datetimes works, not only the ones `future_timestamps/2` makes: predict the training period to see the fit, or `future_timestamps(fitted_model, 30, include_history: true)` for both at once. With several series the helper returns a frame with the id column, one block per series. Regressor, condition and cap columns are yours to add to a frame with those dates, passed as `regressors:`.
 
 ## Getting components
 

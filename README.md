@@ -28,7 +28,6 @@ Soothsayer accepts Nx 0.13 or 1.0. The current Axon release still declares `nx ~
 
 ```elixir
 alias Explorer.DataFrame
-alias Explorer.Series
 
 # Your data needs two columns: "ds" (dates) and "y" (values)
 df = DataFrame.new(%{
@@ -40,9 +39,9 @@ df = DataFrame.new(%{
 model = Soothsayer.new()
 fitted_model = Soothsayer.fit(model, df)
 
-# Make predictions
-future_dates = Date.range(~D[2023-01-01], ~D[2023-12-31])
-predictions = Soothsayer.predict(fitted_model, Series.from_list(Enum.to_list(future_dates)))
+# Make predictions for the next year
+future = Soothsayer.future_timestamps(fitted_model, 365)
+predictions = Soothsayer.predict(fitted_model, future)
 # => #Explorer.DataFrame<[365 x 5] ds, yhat, trend, yearly_seasonality, weekly_seasonality>
 ```
 

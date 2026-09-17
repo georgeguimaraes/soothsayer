@@ -499,7 +499,8 @@ defmodule Soothsayer do
     training_data = %{
       series: Map.new(samples, &{&1.id, &1.entry}),
       global_normalization: global_normalization,
-      last_timestamp: List.last(all_timestamps)
+      last_timestamp: List.last(all_timestamps),
+      ds_dtype: Series.dtype(data["ds"])
     }
 
     %{fitted_model | config: Map.put(config, :training_data, training_data)}
@@ -1724,6 +1725,62 @@ defmodule Soothsayer do
       _, %{} = left, %{} = right -> deep_merge(left, right)
       _, _left, right -> right
     end)
+  end
+
+  @doc """
+  The next `periods` timestamps after the training data, to predict on.
+
+  They continue from the last observation at the model's frequency and
+  have the dtype of the training `ds` column. A single series model gets
+  an `Explorer.Series`, a model over several series a dataframe with `ds`
+  and the id column, one block per series continuing from that series'
+  own last observation. With `include_history: true` the training
+  timestamps come first, for a plot of the fit and the forecast together.
+
+  Regressor, condition and capacity columns are yours to add: put them on
+  a frame with these timestamps and pass it as `regressors:`.
+
+  ## Examples
+
+      iex> future = Soothsayer.future_timestamps(fitted_model, 90)
+      iex> Soothsayer.predict(fitted_model, future)
+
+      iex> Soothsayer.future_timestamps(fitted_model, 30, include_history: true)
+
+  """
+  @spec future_timestamps(Soothsayer.Model.t(), pos_integer(), keyword()) ::
+          Explorer.Series.t() | Explorer.DataFrame.t()
+  def future_timestamps(%Model{} = model, periods, opts \\ [])
+      when is_integer(periods) and periods > 0 do
+    include_history = Keyword.get(opts, :include_history, false)
+
+    training_data =
+      model.config[:training_data] || raise(ArgumentError, "Model has not been fitted yet")
+
+    dtype = training_data.ds_dtype
+
+    dates_for = fn entry ->
+      future =
+        Enum.map(1..periods, &Frequency.shift(entry.last_timestamp, &1, model.config.frequency))
+
+      history = if include_history, do: entry.timestamps, else: []
+      Series.from_list(history ++ future) |> Series.cast(dtype)
+    end
+
+    case Soothsayer.Series.column(model.config) do
+      nil ->
+        dates_for.(series_entry(model, nil))
+
+      column ->
+        model.config
+        |> Soothsayer.Series.ids()
+        |> Enum.map(fn id ->
+          dates = dates_for.(series_entry(model, id))
+          ids = Series.from_list(List.duplicate(id, Series.size(dates)))
+          DataFrame.new([{"ds", dates}, {column, ids}])
+        end)
+        |> DataFrame.concat_rows()
+    end
   end
 
   @doc """

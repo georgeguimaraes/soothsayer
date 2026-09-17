@@ -2158,6 +2158,75 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "future_timestamps/3" do
+    test "continues from the last observation at the model's frequency, in the ds dtype" do
+      dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()
+      frame = DataFrame.new(%{"ds" => dates, "y" => Enum.map(dates, &Date.day_of_year/1)})
+      fitted = Soothsayer.fit(Soothsayer.new(%{epochs: 1}), frame)
+
+      future = Soothsayer.future_timestamps(fitted, 3)
+      assert Series.dtype(future) == :date
+      assert Series.to_list(future) == [~D[2023-01-01], ~D[2023-01-02], ~D[2023-01-03]]
+
+      with_history = Soothsayer.future_timestamps(fitted, 2, include_history: true)
+      assert Series.size(with_history) == 367
+      assert Series.first(with_history) == ~D[2022-01-01]
+      assert Series.last(with_history) == ~D[2023-01-02]
+
+      # monthly data steps by months, naive datetimes stay naive datetimes
+      months =
+        Enum.map(0..23, &NaiveDateTime.new!(2020 + div(&1, 12), rem(&1, 12) + 1, 1, 0, 0, 0))
+
+      monthly = DataFrame.new(%{"ds" => months, "y" => Enum.to_list(1..24)})
+
+      monthly_fit =
+        Soothsayer.fit(
+          Soothsayer.new(%{epochs: 1, seasonality: %{weekly: %{enabled: false}}}),
+          monthly
+        )
+
+      monthly_future = Soothsayer.future_timestamps(monthly_fit, 2)
+      assert match?({:naive_datetime, _}, Series.dtype(monthly_future))
+
+      assert Series.to_list(monthly_future) == [
+               ~N[2022-01-01 00:00:00.000000],
+               ~N[2022-02-01 00:00:00.000000]
+             ]
+
+      assert_raise ArgumentError, ~r/has not been fitted/, fn ->
+        Soothsayer.future_timestamps(Soothsayer.new(), 3)
+      end
+    end
+
+    test "gives every series its own block after its own last observation" do
+      dates = Date.range(~D[2022-01-01], ~D[2022-03-31]) |> Enum.to_list()
+
+      panel =
+        DataFrame.concat_rows([
+          DataFrame.new(%{
+            "ds" => dates,
+            "y" => Enum.map(dates, &Date.day_of_year/1),
+            "id" => List.duplicate("a", 90)
+          }),
+          DataFrame.new(%{
+            "ds" => Enum.take(dates, 60),
+            "y" => Enum.to_list(1..60),
+            "id" => List.duplicate("b", 60)
+          })
+        ])
+
+      fitted = Soothsayer.fit(Soothsayer.new(%{series: %{column: "id"}, epochs: 1}), panel)
+      future = Soothsayer.future_timestamps(fitted, 2)
+
+      assert DataFrame.to_columns(future, atom_keys: true) == %{
+               ds: [~D[2022-04-01], ~D[2022-04-02], ~D[2022-03-02], ~D[2022-03-03]],
+               id: ["a", "a", "b", "b"]
+             }
+
+      assert DataFrame.n_rows(Soothsayer.predict(fitted, future)) == 4
+    end
+  end
+
   describe "training defaults" do
     test "auto learning rate and epochs are resolved and recorded on the fitted model" do
       dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()
