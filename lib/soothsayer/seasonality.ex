@@ -206,17 +206,24 @@ defmodule Soothsayer.Seasonality do
   """
   @spec build_components(%{optional(atom()) => Axon.t()}, map()) ::
           %{optional(atom()) => Axon.t()}
-  def build_components(inputs, config) do
+  def build_components(inputs, config, series_input \\ nil) do
     Map.new(inputs, fn {period, input} ->
-      {period, build_period_component(input, config, period)}
+      {period, build_period_component(input, config, period, series_input)}
     end)
   end
 
-  defp build_period_component(input, config, period) do
-    if enabled?(config, period) do
-      Layers.position_dense(input, "#{period}_dense")
-    else
-      Axon.constant(0)
+  defp build_period_component(input, config, period, series_input) do
+    local_ids = Soothsayer.Series.local_ids(config, :seasonality)
+
+    cond do
+      not enabled?(config, period) ->
+        Axon.constant(0)
+
+      local_ids ->
+        Layers.series_dense(input, series_input, length(local_ids), "#{period}_dense")
+
+      true ->
+        Layers.position_dense(input, "#{period}_dense")
     end
   end
 

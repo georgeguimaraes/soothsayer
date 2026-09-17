@@ -146,12 +146,13 @@ defmodule Soothsayer.Model do
     lags = AR.lags(config)
     positions = AR.positions(config)
 
-    # Trend
-    trend_input = Trend.build_input(config)
-    trend = Trend.build_component(trend_input, config)
-
     # Several series: the one-hot of the sample's series and its level.
     series_inputs = Series.build_network_inputs(config)
+    series_one_hot = series_inputs && series_inputs.series
+
+    # Trend
+    trend_input = Trend.build_input(config)
+    trend = Trend.build_component(trend_input, config, series_one_hot)
 
     # Everything multiplicative is scaled by the trend through this one node.
     scale = multiplicative_scale(trend, series_inputs, config)
@@ -162,7 +163,7 @@ defmodule Soothsayer.Model do
 
     seasonality =
       seasonality_inputs
-      |> Seasonality.build_components(config)
+      |> Seasonality.build_components(config, series_one_hot)
       |> scale_seasonality(scale, config)
       |> then(fn components ->
         Map.new(Seasonality.periods(config), &{&1, Map.get(components, &1, Axon.constant(0))})

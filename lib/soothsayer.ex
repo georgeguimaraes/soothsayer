@@ -80,7 +80,13 @@ defmodule Soothsayer do
       epochs: :auto,
       learning_rate: :auto,
       recency: %{weight: 2, start: 0.0},
-      series: %{column: nil, normalize: :local},
+      series: %{
+        column: nil,
+        normalize: :local,
+        trend: :global,
+        seasonality: :global,
+        local_regularization: nil
+      },
       schedule: :one_cycle,
       optimizer: :adam,
       batch_size: nil,

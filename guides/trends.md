@@ -118,7 +118,7 @@ This is NeuralProphet's discontinuous growth. Each segment after the first gets 
 
 The jump is only allowed where a changepoint sits, so a step between two changepoints lands on the nearest one. Raise `changepoints` if the steps in your series are close together.
 
-`Soothsayer.Trend.get_weights/1` returns the kernel with one row per input column: `t`, then the `changepoints` slope adjustments, then the `changepoints` intercepts. With `growth: :linear` the intercept rows aren't there.
+`Soothsayer.Trend.get_weights/1` returns the kernel with one row per input column: `t`, then the `changepoints` slope adjustments, then the `changepoints` intercepts. With `growth: :linear` the intercept rows aren't there. A model with a local trend over [several series](series.md) returns one such map per series id.
 
 ## Regularization
 

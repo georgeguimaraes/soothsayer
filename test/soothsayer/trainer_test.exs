@@ -319,6 +319,54 @@ defmodule Soothsayer.TrainerTest do
     end
   end
 
+  describe "local_terms/2 and local_penalty/2" do
+    test "one term per local layer that exists, none without the option" do
+      params = %Axon.ModelState{
+        data: %{
+          "trend_dense" => %{"kernel" => Nx.iota({2, 3, 1}, type: :f32)},
+          "yearly_dense" => %{"kernel" => Nx.iota({2, 4, 1}, type: :f32)}
+        }
+      }
+
+      config = %{
+        series: %{
+          column: "id",
+          ids: ["a", "b"],
+          trend: :local,
+          seasonality: :local,
+          local_regularization: 2.0
+        },
+        seasonality: %{yearly: %{enabled: true}, weekly: %{enabled: false}, custom: %{}}
+      }
+
+      assert Trainer.local_terms(params, config) |> Enum.sort() ==
+               [{"trend_dense", 2.0}, {"yearly_dense", 2.0}]
+
+      assert Trainer.local_terms(params, put_in(config, [:series, :seasonality], :global)) ==
+               [{"trend_dense", 2.0}]
+
+      assert Trainer.local_terms(params, put_in(config, [:series, :local_regularization], nil)) ==
+               []
+    end
+
+    test "the penalty is lambda times the mean squared spread around the mean kernel" do
+      params = %Axon.ModelState{
+        data: %{
+          "trend_dense" => %{
+            "kernel" => Nx.tensor([[[1.0], [2.0]], [[3.0], [6.0]]]),
+            "bias" => Nx.tensor([[10.0], [-10.0]])
+          }
+        }
+      }
+
+      # spreads around the means (2, 4): 1, 1, 2, 2 -> squares 1, 1, 4, 4 -> mean 2.5
+      penalty = Trainer.local_penalty(params, %{"trend_dense" => 2.0}) |> Nx.to_number()
+      assert_in_delta penalty, 5.0, 1.0e-6
+
+      assert Trainer.local_penalty(params, %{}) |> Nx.to_number() == 0.0
+    end
+  end
+
   describe "compute_l1_penalty/2" do
     test "returns zero for empty layer list" do
       params = %Axon.ModelState{data: %{}}

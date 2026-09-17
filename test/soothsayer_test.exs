@@ -1755,6 +1755,94 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "local trend and seasonality" do
+    # Two series with their own slope and opposite yearly phase: shared
+    # kernels can only fit the average of the two.
+    defp diverging_panel(dates, start_date, seed) do
+      :rand.seed(:exsss, {seed, seed, seed})
+
+      [{"a", 100, 0.05, 0.0}, {"b", 300, -0.02, :math.pi()}]
+      |> Enum.map(fn {id, level, slope, phase} ->
+        y =
+          Enum.map(dates, fn date ->
+            days = Date.diff(date, start_date)
+
+            level + slope * days + 5 * :math.sin(2 * :math.pi() * days / 365.25 + phase) +
+              :rand.normal(0, 1)
+          end)
+
+        DataFrame.new(%{"ds" => dates, "y" => y, "id" => List.duplicate(id, length(dates))})
+      end)
+      |> DataFrame.concat_rows()
+    end
+
+    defp local_model(series) do
+      Soothsayer.new(%{
+        epochs: 30,
+        seed: 1,
+        trend: %{changepoints: 0},
+        seasonality: %{weekly: %{enabled: false}},
+        series: Map.merge(%{column: "id"}, series)
+      })
+    end
+
+    defp panel_mae(fitted, holdout) do
+      predictions = Soothsayer.predict(fitted, DataFrame.select(holdout, ["ds", "id"]))
+      Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs() |> Series.mean()
+    end
+
+    test "local kernels fit series that share nothing but the model, shared ones can't" do
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      future_dates = Date.range(~D[2023-01-01], ~D[2023-03-31]) |> Enum.to_list()
+      training = diverging_panel(dates, start_date, 1)
+      holdout = diverging_panel(future_dates, start_date, 2)
+
+      shared = Soothsayer.fit(local_model(%{}), training)
+      local = Soothsayer.fit(local_model(%{trend: :local, seasonality: :local}), training)
+
+      assert panel_mae(local, holdout) < panel_mae(shared, holdout) * 0.2
+
+      # one trend kernel per series, with opposite slopes
+      weights = Soothsayer.Trend.get_weights(local)
+      assert Map.keys(weights) == ["a", "b"]
+      assert Nx.to_number(weights["a"].kernel[0][0]) > 0
+      assert Nx.to_number(weights["b"].kernel[0][0]) < 0
+      assert Nx.shape(local.params.data["yearly_dense"]["kernel"]) == {2, 12, 1}
+      assert Nx.shape(Soothsayer.Trend.get_weights(shared).kernel) == {1, 1}
+    end
+
+    test "local regularization pulls the series' kernels toward each other" do
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      training = diverging_panel(dates, start_date, 3)
+
+      spread = fn fitted ->
+        weights = Soothsayer.Trend.get_weights(fitted)
+        abs(Nx.to_number(weights["a"].kernel[0][0]) - Nx.to_number(weights["b"].kernel[0][0]))
+      end
+
+      free = Soothsayer.fit(local_model(%{trend: :local}), training)
+      pulled = Soothsayer.fit(local_model(%{trend: :local, local_regularization: 10.0}), training)
+
+      assert spread.(pulled) < spread.(free) * 0.5
+    end
+
+    test "local modes need a column and the regularization needs something local" do
+      assert_raise ArgumentError, ~r/only be :local with a column/, fn ->
+        Soothsayer.new(%{series: %{trend: :local}})
+      end
+
+      assert_raise ArgumentError, ~r/needs a :local trend or seasonality/, fn ->
+        Soothsayer.new(%{series: %{column: "id", local_regularization: 1.0}})
+      end
+
+      assert_raise ArgumentError, ~r/series must be/, fn ->
+        Soothsayer.new(%{series: %{column: "id", seasonality: :each}})
+      end
+    end
+  end
+
   describe "training defaults" do
     test "auto learning rate and epochs are resolved and recorded on the fitted model" do
       dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()

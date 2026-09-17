@@ -61,15 +61,27 @@ defmodule Soothsayer.SeriesTest do
   end
 
   describe "validate_config!/1" do
+    defp series_config(overrides) do
+      defaults = %{
+        column: "id",
+        normalize: :local,
+        trend: :global,
+        seasonality: :global,
+        local_regularization: nil
+      }
+
+      %{series: Map.merge(defaults, overrides)}
+    end
+
     test "accepts a string column and the two normalize modes, rejects the rest" do
-      assert Series.validate_config!(%{series: %{column: "id", normalize: :global}}) == :ok
+      assert Series.validate_config!(series_config(%{normalize: :global})) == :ok
 
       assert_raise ArgumentError, ~r/series must be/, fn ->
-        Series.validate_config!(%{series: %{column: :id, normalize: :local}})
+        Series.validate_config!(series_config(%{column: :id}))
       end
 
       assert_raise ArgumentError, ~r/series must be/, fn ->
-        Series.validate_config!(%{series: %{column: "id", normalize: :each}})
+        Series.validate_config!(series_config(%{normalize: :each}))
       end
     end
   end

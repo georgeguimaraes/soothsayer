@@ -29,6 +29,55 @@ defmodule Soothsayer.Layers do
   end
 
   @doc """
+  A `position_dense/3` with one kernel per series, picked by the `series`
+  one-hot input: `{batch, positions, features}` and `{batch, n_series}` in,
+  `{batch, positions}` out. The kernel is `{n_series, features, 1}` and the
+  bias, when asked for, `{n_series, 1}`, so `params.data[name]["kernel"][i]`
+  is series `i`'s kernel and looks like the shared one.
+
+  Local trend and seasonality use it, see `Soothsayer.Series`. The layer
+  keeps the `name` of the shared layer it replaces, so regularization and
+  the weight readers find it.
+  """
+  @spec series_dense(Axon.t(), Axon.t(), pos_integer(), String.t(), keyword()) :: Axon.t()
+  def series_dense(input, series, n_series, name, opts \\ []) do
+    use_bias = Keyword.get(opts, :use_bias, false)
+
+    # The kernel shape follows the input's feature axis. Axon's glorot reads
+    # the leading series axis as part of the receptive field, so the scale
+    # keeps each series' kernel starting like a plain dense kernel.
+    kernel =
+      Axon.param(
+        "kernel",
+        fn input_shape, _series_shape -> {n_series, elem(input_shape, 2), 1} end,
+        initializer: Axon.Initializers.glorot_uniform(scale: n_series)
+      )
+
+    if use_bias do
+      bias = Axon.param("bias", {n_series, 1}, initializer: :zeros)
+
+      Axon.layer(&series_dense_op/5, [input, series, kernel, bias],
+        name: name,
+        op_name: :series_dense
+      )
+    else
+      Axon.layer(&series_dense_op/4, [input, series, kernel], name: name, op_name: :series_dense)
+    end
+  end
+
+  defp series_dense_op(input, series, kernel, _opts) do
+    kernel_for_sample = Nx.dot(series, [1], kernel, [0])
+
+    input
+    |> Nx.dot([2], [0], kernel_for_sample, [1], [0])
+    |> Nx.squeeze(axes: [-1])
+  end
+
+  defp series_dense_op(input, series, kernel, bias, opts) do
+    Nx.add(series_dense_op(input, series, kernel, opts), Nx.dot(series, [1], bias, [0]))
+  end
+
+  @doc """
   A `position_dense/3` over a slice of the feature axis, for inputs whose
   columns belong to more than one layer. `nil` when the range is `nil`.
   """

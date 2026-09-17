@@ -40,7 +40,7 @@ An id the model was not fitted on raises. The `:history` and `:regressors` frame
 
 ## What is shared and what isn't
 
-One network is trained on the samples of every series, so the trend, the seasonalities, the events, the regressors and the auto-regression are shared: the same coefficients apply to every series. What each series keeps for itself:
+One network is trained on the samples of every series. By default the trend, the seasonalities, the events, the regressors and the auto-regression are shared: the same coefficients apply to every series. What each series keeps for itself:
 
 - its scale. With `normalize: :local`, the default and NeuralProphet's, `y` is z-scored per series, so a store selling ten times more than another lands on the same footing and the shared components describe the shape both follow. `normalize: :global` scales every series with one mean and standard deviation, which only makes sense when the series really live on the same scale.
 - its own past for the lags. Auto-regression reads each series' observations, never a neighbour's.
@@ -50,13 +50,34 @@ The time axis is shared: numeric time starts at the earliest timestamp of any se
 
 The quantile heads see which series a sample belongs to, so prediction intervals can be wider for a noisier series.
 
+## Local trend and seasonality
+
+Series that grow at their own pace or peak in different months can't share a trend or a seasonality. `trend: :local` gives every series its own trend kernel and intercept, `seasonality: :local` its own Fourier coefficients for every period, while everything else stays shared:
+
+```elixir
+model = Soothsayer.new(%{
+  series: %{
+    column: "id",
+    trend: :local,
+    seasonality: :local,
+    local_regularization: 0.1
+  }
+})
+```
+
+Under the hood the kernel of a local layer has one slice per series, and each sample multiplies its features by the slice its one-hot picks, so the weights still train together in one pass. `local_regularization` is NeuralProphet's "glocal" mode: a penalty of `lambda * mean((kernel - mean kernel across series)^2)` pulls every series' kernel toward the average, so a series with little data leans on the others and a series with plenty can still differ. Start small, around `0.1`, since a large value flattens the differences you asked the local mode for. The intercepts are left out of the penalty, so levels stay apart when the series are scaled together.
+
+A local trend is also what lets `normalize: :global` work: with one scale for all series the shared trend can only describe one level, and a local intercept carries each series' own.
+
+`Soothsayer.Trend.get_weights/1` on a local trend returns a map from id to that series' `kernel` and `bias`, and `params.data["yearly_dense"]["kernel"]` and friends have the series axis first.
+
 ## Reading the effects
 
 `Soothsayer.get_event_effects/1`, `get_regressor_effects/1` and `get_ar_weights/1` return the shared coefficients as for a single series. Each series' scale is on the model under its training data, so a coefficient in normalized units means something different in the units of each series.
 
 ## Compared with NeuralProphet
 
-NeuralProphet lets the events frame carry an `ID` column for per-series events and can forecast an unknown id with the global normalization when asked to. Both are left out: events are shared and an unknown id raises. Time normalization is always global here, matching NeuralProphet's default.
+NeuralProphet lets the events frame carry an `ID` column for per-series events and can forecast an unknown id with the global normalization when asked to. Both are left out: events are shared and an unknown id raises. Time normalization is always global here, matching NeuralProphet's default. Local mode applies to the whole trend and to every seasonal period at once, where NeuralProphet has a switch per period, and the trend intercept is per series in local mode where NeuralProphet keeps one. The penalty is the same squared distance to the mean kernel, applied from the first step.
 
 ## Next steps
 

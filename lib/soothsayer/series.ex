@@ -40,17 +40,83 @@ defmodule Soothsayer.Series do
 
   @doc """
   Validates the `series` config: `column` nil or a string, `normalize`
-  `:local` or `:global`.
+  `:local` or `:global`, `trend` and `seasonality` `:global` or `:local`
+  (only with a column), `local_regularization` nil or a non-negative
+  number (only with something local).
   """
   @spec validate_config!(map()) :: :ok
-  def validate_config!(%{series: %{column: column, normalize: normalize}})
-      when (is_nil(column) or is_binary(column)) and normalize in [:local, :global],
-      do: :ok
-
   def validate_config!(%{series: series}) do
-    raise ArgumentError,
-          "series must be %{column: nil | \"name\", normalize: :local | :global}, " <>
-            "got #{inspect(series)}"
+    unless well_formed?(series) do
+      raise ArgumentError,
+            "series must be %{column: nil | \"name\", normalize: :local | :global, " <>
+              "trend: :global | :local, seasonality: :global | :local, " <>
+              "local_regularization: nil | number >= 0}, got #{inspect(series)}"
+    end
+
+    if is_nil(series.column) and :local in [series.trend, series.seasonality] do
+      raise ArgumentError, "series.trend and series.seasonality can only be :local with a column"
+    end
+
+    if series.local_regularization not in [nil, 0] and
+         :local not in [series.trend, series.seasonality] do
+      raise ArgumentError,
+            "series.local_regularization needs a :local trend or seasonality to pull together"
+    end
+
+    :ok
+  end
+
+  defp well_formed?(%{
+         column: column,
+         normalize: normalize,
+         trend: trend,
+         seasonality: seasonality,
+         local_regularization: local_regularization
+       }) do
+    (is_nil(column) or is_binary(column)) and normalize in [:local, :global] and
+      trend in [:global, :local] and seasonality in [:global, :local] and
+      (is_nil(local_regularization) or
+         (is_number(local_regularization) and local_regularization >= 0))
+  end
+
+  defp well_formed?(_series), do: false
+
+  @doc """
+  The ids when `component` (`:trend` or `:seasonality`) is `:local` and the
+  ids are known, else `nil`: what a component checks to decide between one
+  shared kernel and one per series.
+  """
+  @spec local_ids(map(), :trend | :seasonality) :: list(String.t()) | nil
+  def local_ids(config, component) do
+    if get_in(config, [:series, component]) == :local, do: ids(config)
+  end
+
+  @doc """
+  The layer names with one kernel per series, for the local regularization.
+  """
+  @spec local_layers(map()) :: list(String.t())
+  def local_layers(config) do
+    trend = if local_ids(config, :trend), do: ["trend_dense"], else: []
+
+    seasonality =
+      if local_ids(config, :seasonality),
+        do: Enum.map(Soothsayer.Seasonality.periods(config), &"#{&1}_dense"),
+        else: []
+
+    trend ++ seasonality
+  end
+
+  @doc """
+  Splits tensors with a leading series axis into a map by id: `%{kernel:
+  {n, ...}}` becomes `%{"a" => %{kernel: ...}, ...}`.
+  """
+  @spec by_id(list(String.t()), %{atom() => Nx.Tensor.t() | nil}) :: %{String.t() => map()}
+  def by_id(ids, tensors) do
+    ids
+    |> Enum.with_index()
+    |> Map.new(fn {id, index} ->
+      {id, Map.new(tensors, fn {key, tensor} -> {key, tensor && tensor[index]} end)}
+    end)
   end
 
   @doc """

@@ -97,7 +97,9 @@ defmodule Soothsayer.Trainer do
 
     # Axon.Loop calls the loss with targets and predictions only, so a
     # penalty or a per-sample weight needs the custom loop.
-    if regularization_terms(initial_params, config) == [] and not Map.has_key?(x, "sample_weight") do
+    if regularization_terms(initial_params, config) == [] and
+         local_terms(initial_params, config) == [] and
+         not Map.has_key?(x, "sample_weight") do
       train_standard(network, x, y, epochs, batch_size, initial_params, config, optimizer)
     else
       train_custom(network, x, y, epochs, batch_size, initial_params, config, optimizer)
@@ -230,7 +232,7 @@ defmodule Soothsayer.Trainer do
     jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
 
     train_step = fn params, opt_state, x_batch, y_batch ->
-      jit_train_step.(params, opt_state, x_batch, y_batch, %{})
+      jit_train_step.(params, opt_state, x_batch, y_batch, {%{}, %{}})
     end
 
     # Each step updates on one minibatch like real training, but the loss
@@ -246,7 +248,7 @@ defmodule Soothsayer.Trainer do
       |> Enum.reduce({[], initial_params, init_optimizer_fn.(initial_params)}, fn
         {x_batch, y_batch}, {losses, params, opt_state} ->
           {_batch_loss, params, opt_state} = train_step.(params, opt_state, x_batch, y_batch)
-          {[Nx.to_number(full_loss.(params, x, y, %{})) | losses], params, opt_state}
+          {[Nx.to_number(full_loss.(params, x, y, {%{}, %{}})) | losses], params, opt_state}
       end)
 
     suggest_learning_rate(Enum.reverse(losses), learning_rates)
@@ -609,6 +611,7 @@ defmodule Soothsayer.Trainer do
     # The weights ride along as a jit argument. Captured in a closure they
     # would sit on a backend the gradient can't reach.
     weights = Map.new(regularization_terms(initial_params, config))
+    local_weights = Map.new(local_terms(initial_params, config))
 
     {_init_fn, predict_fn} = Axon.build(network)
     {init_optim_fn, update_fn} = optimizer
@@ -617,7 +620,7 @@ defmodule Soothsayer.Trainer do
     jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
 
     train_step = fn params, opt_state, x_batch, y_batch ->
-      jit_train_step.(params, opt_state, x_batch, y_batch, weights)
+      jit_train_step.(params, opt_state, x_batch, y_batch, {weights, local_weights})
     end
 
     initial_opt_state = init_optim_fn.(initial_params)
@@ -674,8 +677,49 @@ defmodule Soothsayer.Trainer do
     for period <- Seasonality.periods(config), do: {"#{period}_dense", lambda}
   end
 
+  # One lambda per kernel row; a local kernel {series, rows, 1} broadcasts
+  # the same rows over its series axis.
   defp uniform_weights(kernel, lambda) do
-    Nx.broadcast(Nx.tensor(lambda, type: :f32), {Nx.axis_size(kernel, 0), 1})
+    Nx.broadcast(Nx.tensor(lambda, type: :f32), {Nx.axis_size(kernel, -2), 1})
+  end
+
+  @doc """
+  The local regularization terms of a config, `{layer_name, lambda}` for
+  every layer with one kernel per series when `series.local_regularization`
+  is set: the penalty pulls each series' kernel toward the mean kernel
+  across series, `lambda * mean((kernel - mean over series)^2)`, so the
+  series can differ without wandering off (NeuralProphet's glocal mode).
+  The bias is left alone, so under `normalize: :global` levels stay apart.
+  """
+  @spec local_terms(Axon.ModelState.t(), map()) :: list({String.t(), number()})
+  def local_terms(params, config) do
+    case get_in(config, [:series, :local_regularization]) do
+      lambda when is_number(lambda) and lambda > 0 ->
+        for name <- Soothsayer.Series.local_layers(config), Map.has_key?(params.data, name) do
+          {name, lambda}
+        end
+
+      _off ->
+        []
+    end
+  end
+
+  @doc """
+  The local regularization penalty of `params` for `{layer_name => lambda}`.
+  """
+  @spec local_penalty(Axon.ModelState.t(), %{String.t() => number()}) :: Nx.Tensor.t()
+  def local_penalty(_params, lambdas) when map_size(lambdas) == 0 do
+    Nx.tensor(0.0)
+  end
+
+  def local_penalty(params, lambdas) do
+    lambdas
+    |> Enum.map(fn {layer_name, lambda} ->
+      kernel = params.data[layer_name]["kernel"]
+      spread = Nx.subtract(kernel, Nx.mean(kernel, axes: [0], keep_axes: true))
+      Nx.multiply(lambda, Nx.mean(Nx.pow(spread, 2)))
+    end)
+    |> Enum.reduce(&Nx.add/2)
   end
 
   @doc """
@@ -701,10 +745,13 @@ defmodule Soothsayer.Trainer do
   end
 
   defp build_objective_fn(predict_fn, quantiles) do
-    fn params, x_input, y_target, weights ->
+    fn params, x_input, y_target, {weights, local_weights} ->
       predictions = predict_fn.(params, x_input)
       base_loss = loss(y_target, predictions, quantiles, Map.get(x_input, "sample_weight"))
-      Nx.add(base_loss, weighted_l1_penalty(params, weights))
+
+      base_loss
+      |> Nx.add(weighted_l1_penalty(params, weights))
+      |> Nx.add(local_penalty(params, local_weights))
     end
   end
 

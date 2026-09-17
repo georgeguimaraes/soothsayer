@@ -116,11 +116,19 @@ defmodule Soothsayer.Trend do
 
   """
   @spec build_component(Axon.t(), map()) :: Axon.t()
-  def build_component(input, %{trend: %{enabled: true}}) do
-    Layers.position_dense(input, "trend_dense", use_bias: true)
+  def build_component(input, config, series_input \\ nil)
+
+  def build_component(input, %{trend: %{enabled: true}} = config, series_input) do
+    case Soothsayer.Series.local_ids(config, :trend) do
+      nil ->
+        Layers.position_dense(input, "trend_dense", use_bias: true)
+
+      ids ->
+        Layers.series_dense(input, series_input, length(ids), "trend_dense", use_bias: true)
+    end
   end
 
-  def build_component(_input, _config), do: Axon.constant(0)
+  def build_component(_input, _config, _series_input), do: Axon.constant(0)
 
   @doc """
   Extracts learned trend weights from a fitted model.
@@ -153,7 +161,13 @@ defmodule Soothsayer.Trend do
       raise ArgumentError, "Trend layer not found in model params"
     end
 
-    %{kernel: trend_layer["kernel"], bias: trend_layer["bias"]}
+    weights = %{kernel: trend_layer["kernel"], bias: trend_layer["bias"]}
+
+    # A local trend keeps one kernel and bias per series, leading axis
+    case Soothsayer.Series.local_ids(model.config, :trend) do
+      nil -> weights
+      ids -> Soothsayer.Series.by_id(ids, weights)
+    end
   end
 
   # Feature Engineering
