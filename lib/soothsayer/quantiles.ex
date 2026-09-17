@@ -69,7 +69,8 @@ defmodule Soothsayer.Quantiles do
   end
 
   @doc """
-  Pinball (quantile) loss, averaged over all elements.
+  Pinball (quantile) loss, averaged over all elements, each multiplied by
+  its `sample_weight` when one is given.
 
   For error `d = target - prediction` the loss is `max(q * d, (q - 1) * d)`,
   which is minimized when `prediction` is the q-th quantile of the target.
@@ -80,12 +81,12 @@ defmodule Soothsayer.Quantiles do
       0.5
 
   """
-  @spec pinball_loss(Nx.Tensor.t(), Nx.Tensor.t(), float()) :: Nx.Tensor.t()
-  def pinball_loss(targets, predictions, quantile) do
+  @spec pinball_loss(Nx.Tensor.t(), Nx.Tensor.t(), float(), Nx.Tensor.t() | nil) :: Nx.Tensor.t()
+  def pinball_loss(targets, predictions, quantile, sample_weight \\ nil) do
     error = Nx.subtract(targets, predictions)
 
     Nx.max(Nx.multiply(quantile, error), Nx.multiply(quantile - 1, error))
-    |> Nx.mean()
+    |> Soothsayer.Trainer.weighted_mean(sample_weight)
   end
 
   @doc """

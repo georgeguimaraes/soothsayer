@@ -274,6 +274,51 @@ defmodule Soothsayer.TrainerTest do
     end
   end
 
+  describe "recency_weights/2 and the weighted loss" do
+    test "runs from 1 / weight before start to 1 at the end, halfway up mid-ramp" do
+      times = Nx.tensor([[0.0], [0.25], [0.5], [0.75], [1.0]])
+
+      weights =
+        Trainer.recency_weights(times, %{weight: 4, start: 0.5}) |> Nx.to_flat_list()
+
+      assert Enum.take(weights, 2) == [0.25, 0.25]
+      assert Enum.at(weights, 2) == 0.25
+      assert_in_delta Enum.at(weights, 3), (1 + 0.5 * 3) / 4, 1.0e-6
+      assert Enum.at(weights, 4) == 1.0
+    end
+
+    test "weights the loss of each target position before the mean" do
+      targets = Nx.tensor([[0.0, 0.0], [0.0, 0.0]])
+      predictions = %{combined: Nx.tensor([[0.2, 0.2], [0.4, 0.4]])}
+      plain = Trainer.loss(targets, predictions, []) |> Nx.to_number()
+
+      # Huber on the small errors is 0.5 * e^2: 0.02 for the first row, 0.08 for the second
+      weight = Nx.tensor([[1.0, 1.0], [2.0, 2.0]])
+      weighted = Trainer.loss(targets, predictions, [], weight) |> Nx.to_number()
+
+      assert_in_delta plain, (0.02 + 0.08) / 2, 1.0e-6
+      assert_in_delta weighted, (0.02 + 0.16) / 2, 1.0e-6
+    end
+
+    test "a sample_weight input routes training through the custom loop" do
+      network =
+        Axon.input("x", shape: {nil, 2})
+        |> Axon.dense(1, activation: :linear)
+        |> then(&Axon.container(%{combined: &1}))
+
+      x = %{
+        "x" => Nx.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+        "sample_weight" => Nx.tensor([[0.5], [0.75], [1.0]])
+      }
+
+      y = Nx.tensor([[3.0], [7.0], [11.0]])
+
+      params = Trainer.fit(network, x, y, 10, %{learning_rate: 0.1})
+
+      assert is_struct(params, Axon.ModelState)
+    end
+  end
+
   describe "compute_l1_penalty/2" do
     test "returns zero for empty layer list" do
       params = %Axon.ModelState{data: %{}}

@@ -135,6 +135,18 @@ model = Soothsayer.new(%{
 
 Setting `regularization` also switches to the cumulative hinge described above, since the penalty only makes sense on slope changes. With `growth: :discontinuous` the penalty covers the jumps as well. Higher values mean fewer surviving changes and a smoother trend. There's no universal right value, so start around `0.1` and compare the trend column on a holdout against what you know about the series.
 
+## Recent data first
+
+Training weighs recent rows more than old ones. By default the last row of the training data counts twice as much in the loss as the oldest, with a smooth half-cosine ramp in between, so a slope that changed recently pulls the fit harder than the years before it. This is NeuralProphet's `newer_samples_weight`, on by default there too.
+
+```elixir
+model = Soothsayer.new(%{
+  recency: %{weight: 5, start: 0.5}
+})
+```
+
+`weight` is how many times more the last row counts than the rows before `start`, and `start` is the point in the training span, as a fraction, where the ramp begins: rows before it all share the lowest weight. `recency: %{weight: nil}` turns the weighting off and every row counts the same. The weights only touch the loss, the regularization penalties stay as they are, and the learning rate range test runs on the weighted loss as well.
+
 ## Choosing parameters
 
 The default 10 changepoints is a reasonable start. Raise it when you expect many slope changes, lower it or use `changepoints: 0` when the growth rate is steady.

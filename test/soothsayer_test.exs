@@ -1403,6 +1403,67 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "recency weighting" do
+    # A slope that steepens in the last third: a single line fitted with
+    # recent rows weighted follows the new slope, a flat weight averages
+    # the two.
+    defp bent_series(dates, start_date, bend_date) do
+      Enum.map(dates, fn date ->
+        days = Date.diff(date, start_date)
+        bent_days = max(Date.diff(date, bend_date), 0)
+        100 + 0.02 * days + 0.06 * bent_days + :rand.normal(0, 0.5)
+      end)
+    end
+
+    test "weighting recent rows follows a slope that changed late in the training data" do
+      :rand.seed(:exsss, {9, 9, 9})
+      start_date = ~D[2021-01-01]
+      bend_date = ~D[2022-04-01]
+      training_dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      holdout_dates = Date.range(~D[2023-01-01], ~D[2023-01-31]) |> Enum.to_list()
+
+      training =
+        DataFrame.new(%{
+          "ds" => training_dates,
+          "y" => bent_series(training_dates, start_date, bend_date)
+        })
+
+      holdout =
+        DataFrame.new(%{
+          "ds" => holdout_dates,
+          "y" => bent_series(holdout_dates, start_date, bend_date)
+        })
+
+      config = %{
+        trend: %{changepoints: 0},
+        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+        epochs: 40,
+        seed: 4
+      }
+
+      errors =
+        for recency <- [%{weight: nil, start: 0.0}, %{weight: 10, start: 0.7}] do
+          model = Soothsayer.new(Map.put(config, :recency, recency))
+          fitted = Soothsayer.fit(model, training)
+          predictions = Soothsayer.predict(fitted, holdout["ds"])
+          Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs() |> Series.mean()
+        end
+
+      [flat_error, weighted_error] = errors
+      assert weighted_error < flat_error * 0.6
+    end
+
+    test "rejects a weight below 1 or a start outside [0, 1)" do
+      assert_raise ArgumentError, ~r/recency must be/, fn ->
+        Soothsayer.new(%{recency: %{weight: 0.5, start: 0.0}})
+      end
+
+      assert_raise ArgumentError, ~r/recency must be/, fn ->
+        Soothsayer.new(%{recency: %{weight: 2, start: 1.0}})
+      end
+    end
+  end
+
   describe "training defaults" do
     test "auto learning rate and epochs are resolved and recorded on the fitted model" do
       dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()

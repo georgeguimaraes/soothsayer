@@ -95,20 +95,53 @@ defmodule Soothsayer.Trainer do
     total_steps = epochs * div(n_rows, batch_size)
     optimizer = build_optimizer(config, config.learning_rate, total_steps)
 
-    if regularization_terms(initial_params, config) == [] do
+    # Axon.Loop calls the loss with targets and predictions only, so a
+    # penalty or a per-sample weight needs the custom loop.
+    if regularization_terms(initial_params, config) == [] and not Map.has_key?(x, "sample_weight") do
       train_standard(network, x, y, epochs, batch_size, initial_params, config, optimizer)
     else
-      train_with_regularization(
-        network,
-        x,
-        y,
-        epochs,
-        batch_size,
-        initial_params,
-        config,
-        optimizer
-      )
+      train_custom(network, x, y, epochs, batch_size, initial_params, config, optimizer)
     end
+  end
+
+  @doc """
+  Per-sample loss weights that favour recent rows, NeuralProphet's "newer
+  samples weight".
+
+  `target_times` holds the span-normalized time of every target position,
+  0 at the first training timestamp and 1 at the last. Rows at or before
+  `start` (a fraction of the span) get weight `1 / weight`, the last row
+  gets 1, and in between the weight follows a half cosine, so the ramp is
+  smooth rather than a cutoff. The mean loss shrinks by up to `1 / weight`,
+  which only rescales the gradient.
+
+  ## Examples
+
+      iex> times = Nx.tensor([[0.0], [0.5], [1.0]])
+      iex> Soothsayer.Trainer.recency_weights(times, %{weight: 2, start: 0.0}) |> Nx.to_flat_list()
+      [0.5, 0.75, 1.0]
+
+  """
+  @spec recency_weights(Nx.Tensor.t(), %{weight: number(), start: number()}) :: Nx.Tensor.t()
+  def recency_weights(target_times, %{weight: weight, start: start}) do
+    progress =
+      target_times
+      |> Nx.subtract(start)
+      |> Nx.divide(1.0 - start)
+      |> Nx.clip(0.0, 1.0)
+
+    ramp =
+      progress
+      |> Nx.subtract(1.0)
+      |> Nx.multiply(:math.pi())
+      |> Nx.cos()
+      |> Nx.multiply(0.5)
+      |> Nx.add(0.5)
+
+    ramp
+    |> Nx.multiply(weight - 1)
+    |> Nx.add(1.0)
+    |> Nx.divide(weight)
   end
 
   @doc """
@@ -187,9 +220,11 @@ defmodule Soothsayer.Trainer do
     {init_optimizer_fn, update_fn} = Polaris.Optimizers.adam(learning_rate: schedule)
     quantiles = config[:quantiles] || []
 
-    # No penalty during the range test, so the weights map stays empty.
+    # No penalty during the range test, so the weights map stays empty. The
+    # sample weights do apply, as in NeuralProphet, so the curve is measured
+    # on the loss that training will minimize.
     objective_fn = fn params, x_input, y_target, _weights ->
-      loss(y_target, predict_fn.(params, x_input), quantiles)
+      loss(y_target, predict_fn.(params, x_input), quantiles, Map.get(x_input, "sample_weight"))
     end
 
     jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
@@ -539,11 +574,17 @@ defmodule Soothsayer.Trainer do
     * `predictions` - The network output map, with `:combined` and,
       when quantiles are configured, a `:quantiles` tuple
     * `quantiles` - The sorted quantile list from the config
+    * `sample_weight` - Optional `{samples, forecast_steps}` weights, see
+      `recency_weights/2`. Every element of every term is multiplied by
+      its weight before the mean.
 
   """
-  @spec loss(Nx.Tensor.t(), map(), list(float())) :: Nx.Tensor.t()
-  def loss(targets, predictions, quantiles) do
-    base_loss = Axon.Losses.huber(targets, predictions.combined, reduction: :mean)
+  @spec loss(Nx.Tensor.t(), map(), list(float()), Nx.Tensor.t() | nil) :: Nx.Tensor.t()
+  def loss(targets, predictions, quantiles, sample_weight \\ nil) do
+    base_loss =
+      targets
+      |> Axon.Losses.huber(predictions.combined, reduction: :none)
+      |> weighted_mean(sample_weight)
 
     quantile_predictions =
       case Map.get(predictions, :quantiles) do
@@ -554,20 +595,17 @@ defmodule Soothsayer.Trainer do
     quantiles
     |> Enum.zip(quantile_predictions)
     |> Enum.reduce(base_loss, fn {quantile, prediction}, total ->
-      Nx.add(total, Quantiles.pinball_loss(targets, prediction, quantile))
+      Nx.add(total, Quantiles.pinball_loss(targets, prediction, quantile, sample_weight))
     end)
   end
 
-  defp train_with_regularization(
-         network,
-         x,
-         y,
-         epochs,
-         batch_size,
-         initial_params,
-         config,
-         optimizer
-       ) do
+  @doc false
+  def weighted_mean(elementwise, nil), do: Nx.mean(elementwise)
+
+  def weighted_mean(elementwise, sample_weight),
+    do: Nx.mean(Nx.multiply(elementwise, sample_weight))
+
+  defp train_custom(network, x, y, epochs, batch_size, initial_params, config, optimizer) do
     # The weights ride along as a jit argument. Captured in a closure they
     # would sit on a backend the gradient can't reach.
     weights = Map.new(regularization_terms(initial_params, config))
@@ -665,7 +703,7 @@ defmodule Soothsayer.Trainer do
   defp build_objective_fn(predict_fn, quantiles) do
     fn params, x_input, y_target, weights ->
       predictions = predict_fn.(params, x_input)
-      base_loss = loss(y_target, predictions, quantiles)
+      base_loss = loss(y_target, predictions, quantiles, Map.get(x_input, "sample_weight"))
       Nx.add(base_loss, weighted_l1_penalty(params, weights))
     end
   end

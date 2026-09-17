@@ -78,6 +78,7 @@ defmodule Soothsayer do
       missing: %{impute: true, impute_linear: 10, impute_rolling: 10, drop_samples: false},
       epochs: :auto,
       learning_rate: :auto,
+      recency: %{weight: 2, start: 0.0},
       schedule: :one_cycle,
       optimizer: :adam,
       batch_size: nil,
@@ -115,6 +116,18 @@ defmodule Soothsayer do
     validate_missing!(config)
     validate_events!(config)
     validate_training_options!(config)
+    validate_recency!(config)
+  end
+
+  defp validate_recency!(%{recency: %{weight: weight, start: start}})
+       when (is_nil(weight) or (is_number(weight) and weight >= 1)) and
+              is_number(start) and start >= 0 and start < 1,
+       do: :ok
+
+  defp validate_recency!(%{recency: recency}) do
+    raise ArgumentError,
+          "recency must be %{weight: nil | number >= 1, start: fraction in [0, 1)}, " <>
+            "got #{inspect(recency)}"
   end
 
   @event_defaults %{steps_before: 0, steps_after: 0, mode: :additive}
@@ -441,6 +454,7 @@ defmodule Soothsayer do
       |> put_training_regressors_input(model, timestamps, data)
       |> Map.new(fn {key, features} -> {key, Nx.take(features, position_indices, axis: 0)} end)
       |> Map.merge(ar_inputs)
+      |> put_sample_weight(timestamps, position_indices, config)
 
     {x_normalized, x_norm} = normalize_inputs(x, config)
 
@@ -1145,9 +1159,31 @@ defmodule Soothsayer do
     {Nx.divide(Nx.subtract(tensor, mean), std), mean, std}
   end
 
+  # The recency weights favour the last part of the training span. The
+  # targets of a sample are the last forecast_steps of its positions, and
+  # without AR the one position is the target.
+  defp put_sample_weight(x, _timestamps, _position_indices, %{recency: %{weight: weight}})
+       when is_nil(weight) or weight == 1,
+       do: x
+
+  defp put_sample_weight(x, timestamps, position_indices, config) do
+    span = Timestamp.days_since(List.last(timestamps), List.first(timestamps))
+    steps = AR.forecast_steps(config)
+
+    target_times =
+      timestamps
+      |> Trend.date_to_numeric(List.first(timestamps))
+      |> Nx.divide(max(span, 1.0e-9))
+      |> Nx.take(position_indices, axis: 0)
+      |> then(&Nx.slice_along_axis(&1, Nx.axis_size(&1, 1) - steps, steps, axis: 1))
+
+    Map.put(x, "sample_weight", Trainer.recency_weights(target_times, config.recency))
+  end
+
   # The lags are already in normalized y space, which is the space the
   # components subtracted from them predict in, so they must stay there.
-  @unnormalized_inputs ["ar"]
+  # The sample weights are loss weights, not features.
+  @unnormalized_inputs ["ar", "sample_weight"]
 
   defp normalize_inputs(x, config) do
     Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->
