@@ -35,7 +35,7 @@ model = Soothsayer.new(%{
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enabled` | `true` | Turn the trend component on or off |
-| `changepoints` | `10` | Number of potential slope changes |
+| `changepoints` | `10` | Number of potential slope changes, or a list of dates to bend at |
 | `changepoints_range` | `0.8` | Fraction of the data where changepoints can sit |
 | `growth` | `:linear` | `:linear` for a continuous trend, `:discontinuous` to allow jumps at changepoints, `:logistic` to saturate at a `cap` column |
 | `regularization` | `nil` | L1 penalty on slope changes (and jumps), `nil` for none |
@@ -64,7 +64,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-Changepoints are spread evenly over the first `changepoints_range` of the training data the way NeuralProphet does it: `n + 1` points from the start, the first at zero, so the last changepoint sits at `changepoints_range * n / (n + 1)`, 73% of the way through with the defaults. Leaving the rest without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast. Prophet puts its last changepoint at `changepoints_range` itself; `changepoints_range: 0.88` gives you that tail here. Neither is better in general: across a dozen series the shorter tail won on Peyton Manning, retail sales and a daily series with a COVID break, the longer one on Wikipedia page views, sunspots and an hourly panel, each time by a wide margin. The tail segment is the slope your forecast extrapolates, so when the last stretch of your data has its own regime, raise `changepoints_range` or name the break.
+Changepoints are spread evenly over the first `changepoints_range` of the training data the way NeuralProphet does it: `n + 1` points from the start, the first at zero, so the last changepoint sits at `changepoints_range * n / (n + 1)`, 73% of the way through with the defaults. Leaving the rest without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast. Prophet puts its last changepoint at `changepoints_range` itself, and `changepoints_range: 0.88` gives you that tail here. Neither is better in general: across a dozen series the shorter tail won on Peyton Manning, retail sales and a daily series with a COVID break, the longer one on Wikipedia page views, sunspots and an hourly panel, each time by a wide margin. The tail segment is the slope your forecast extrapolates, so when the last stretch of your data has its own regime, raise `changepoints_range` or name the break.
 
 ## When you know where the break is
 
@@ -78,7 +78,7 @@ model = Soothsayer.new(%{
 
 The dates take the same type as your `ds` column, must be sorted and unique, and have to fall inside the training data. `changepoints_range` does nothing with a list. Combined with `growth: :discontinuous` a listed date can carry a level jump as well as a slope change, which is the honest model for a cliff like a lockdown.
 
-This matters more than it sounds. On monthly US retail sales the default grid puts its last changepoint in January 2008, so the final segment has to describe the crash, the trough and the recovery with one line and the forecast undershoots by 4%. Two changepoints, one where the crash starts (January 2008) and one at the trough (August 2009), bring the error down to 1%; the first one matters too, since it keeps the pre-crash years from bending the line the recovery starts from. Any evenly spaced grid, here or in Prophet, is hostage to whether a point lands near the break; naming the dates is not.
+This matters more than it sounds. On monthly US retail sales the default grid puts its last changepoint in January 2008, so the final segment has to describe the crash, the trough and the recovery with one line and the forecast undershoots by 4%. Two changepoints, one where the crash starts (January 2008) and one at the trough (August 2009), bring the error down to 1%. The first one matters too, since it keeps the pre-crash years from bending the line the recovery starts from. Any evenly spaced grid, here or in Prophet, is hostage to whether a point lands near the break. Named dates aren't.
 
 ## Example: a slope change
 
@@ -148,11 +148,12 @@ df = DataFrame.new(%{
 model = Soothsayer.new(%{trend: %{growth: :logistic}})
 fitted = Soothsayer.fit(model, df)
 
-future = DataFrame.new(%{"ds" => future_dates, "cap" => List.duplicate(50_000, length(future_dates))})
-Soothsayer.predict(fitted, future["ds"], regressors: future)
+future = Soothsayer.future_timestamps(fitted, 90)
+capacity = DataFrame.new(%{"ds" => future, "cap" => List.duplicate(50_000, 90)})
+Soothsayer.predict(fitted, future, regressors: capacity)
 ```
 
-The trend is `floor + (cap - floor) * sigmoid(trend)`, so changepoints bend how fast the series approaches the ceiling rather than the slope itself, and the capacity can change over time since it is a column, not a number. `cap` must be present at fit and, through `regressors:`, for every predicted date; a `floor` given at fit is required at predict too, and every cap has to sit above its floor. On an S-shaped series a linear trend keeps climbing past the ceiling where the logistic one levels off. Logistic growth has no discontinuous variant, and NeuralProphet does not offer it at all.
+The trend is `floor + (cap - floor) * sigmoid(trend)`, so changepoints bend how fast the series approaches the ceiling rather than the slope itself, and the capacity can change over time since it is a column, not a number. `cap` must be present at fit and, through `regressors:`, for every predicted date. A `floor` given at fit is required at predict too, and every cap has to sit above its floor. On an S-shaped series a linear trend keeps climbing past the ceiling where the logistic one levels off. Logistic growth has no discontinuous variant, and NeuralProphet does not offer it at all.
 
 ## Regularization
 

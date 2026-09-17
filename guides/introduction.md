@@ -1,6 +1,6 @@
 # Introduction to Soothsayer 🧙🔮
 
-Soothsayer is an Elixir library for time series forecasting, inspired by [Facebook's Prophet](https://facebook.github.io/prophet/) and [NeuralProphet](https://neuralprophet.com/).
+Soothsayer is an Elixir library for time series forecasting, inspired by [Facebook's Prophet](https://facebook.github.io/prophet/) and [NeuralProphet](https://neuralprophet.com/). On plain series it lands where Prophet does, and when a series has more to it there are the neural pieces: auto-regression, lagged regressors, networks on regressors, and one model over many series.
 
 ## The model
 
@@ -26,6 +26,7 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 |---------|------------|---------------|
 | Trend | Yes | Yes |
 | Changepoints | Yes | Yes |
+| Changepoints at dates you name | Yes | Yes |
 | Yearly seasonality | Yes | Yes |
 | Weekly seasonality | Yes | Yes |
 | Daily seasonality | Yes | Yes |
@@ -58,10 +59,17 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 | Global and local modeling (several series in one model) | Yes | Yes |
 | Newer sample weighting | Yes | Yes |
 | Cross-validation over several cutoffs | Yes | Yes |
+| Future timestamps to predict on (`make_future_dataframe`) | Yes | Yes |
 
 ## Where the numbers differ from NeuralProphet
 
-Same model, a few deliberate differences in the details. Regularization here is the lambda times the sum of absolute weights, applied from the first step with no rescaling, while NeuralProphet scales some of its lambdas and only starts the penalty at 66% of training, so a lambda that works there needs retuning here. The trend scale that multiplies seasonality, events and regressors in multiplicative mode is detached from the gradient only at the lag positions, NeuralProphet detaches it everywhere. Multiplicative components work with the trend disabled, they become rescaled additive ones, where NeuralProphet raises. Predict gives one `events` column and one `regressors` column in the units of the series instead of additive and multiplicative pairs. The Fourier columns are interleaved, sine then cosine per term, where NeuralProphet 1.0 puts all sines first, which only matters when you compare kernels. The trend basis is the same as NeuralProphet's: segmentwise without regularization, cumulative with it. Conformal prediction takes the `ceil((n + 1)(1 - alpha))`-th smallest calibration score as its width, the finite-sample rank, where NeuralProphet takes `scores[-int(n * alpha)]`, and puts the band in `yhat_lower` and `yhat_upper` instead of overwriting the quantile columns. With several series the time axis is always global, and local mode covers the whole trend and every seasonal period at once with a per-series trend intercept, where NeuralProphet has a switch per period and one intercept. Recent rows weigh more in the loss by default on both sides, weight 2 with a half cosine ramp, `recency: %{enabled: false}` turns it off.
+Same model, a few deliberate differences in the details. Regularization here is the lambda times the sum of absolute weights, applied from the first step with no rescaling, while NeuralProphet scales some of its lambdas and only starts the penalty at 66% of training, so a lambda that works there needs retuning here.
+
+The trend scale that multiplies seasonality, events and regressors in multiplicative mode is detached from the gradient only at the lag positions, NeuralProphet detaches it everywhere. Multiplicative components work with the trend disabled, they become rescaled additive ones, where NeuralProphet raises. Predict gives one `events` column and one `regressors` column in the units of the series instead of additive and multiplicative pairs. The Fourier columns are interleaved, sine then cosine per term, where NeuralProphet 1.0 puts all sines first, which only matters when you compare kernels. The trend basis is the same as NeuralProphet's: segmentwise without regularization, cumulative with it.
+
+Conformal prediction takes the `ceil((n + 1)(1 - alpha))`-th smallest calibration score as its width, the finite-sample rank, where NeuralProphet takes `scores[-int(n * alpha)]`, and puts the band in `yhat_lower` and `yhat_upper` instead of overwriting the quantile columns.
+
+With several series the time axis is always global, and local mode covers the whole trend and every seasonal period at once with a per-series trend intercept, where NeuralProphet has a switch per period and one intercept. Recent rows weigh more in the loss by default on both sides, weight 2 with a half cosine ramp, `recency: %{enabled: false}` turns it off.
 
 ## Quick example
 

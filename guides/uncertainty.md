@@ -44,23 +44,17 @@ At prediction time upper quantiles are clipped to never fall below the median an
 
 ## Checking calibration
 
-The honest test of an interval is coverage on data the model didn't see:
+The honest test of an interval is coverage on data the model didn't see. `Soothsayer.backtest/3` reports it next to MAE and RMSE, from the outermost quantile columns:
 
 ```elixir
-alias Explorer.Series
+result = Soothsayer.backtest(model, df, horizon: 7)
 
-predictions = Soothsayer.predict(fitted, holdout_dates)
-lower = Series.to_list(predictions["yhat_10"])
-upper = Series.to_list(predictions["yhat_90"])
-
-covered =
-  [holdout_values, lower, upper]
-  |> Enum.zip()
-  |> Enum.count(fn {actual, low, high} -> actual >= low and actual <= high end)
-
-covered / length(holdout_values)
-# => about 0.8 for a well calibrated 10/90 interval
+result.metrics.coverage             # about 0.8 for a well calibrated 10/90 interval
+result.metrics.mean_interval_width  # in the units of y
+result.by_step[7].coverage          # a week ahead
 ```
+
+`Soothsayer.cross_validate/3` gives the same numbers across several cutoffs through the history.
 
 If coverage is much lower than the nominal level the intervals are too narrow: try more epochs, since the heads train alongside the median and may not have converged. If it's much higher they are too wide, which usually means the training data had noisier stretches than the holdout.
 
@@ -84,7 +78,7 @@ predictions["yhat_upper"]
 - `method: :naive`, the default, scores each calibration row by `|y - yhat|` and builds `yhat -+ q_hat` around the point forecast. It needs no quantiles and gives a band of constant width.
 - `method: :cqr`, conformalized quantile regression, needs `quantiles` on the model. It scores how far each row falls outside the band between the lowest and highest quantile, then pushes that band out by `q_hat`. The band keeps the shape the heads learned, wider where the series is noisier, and the calibration corrects its size. With `alpha: {0.05, 0.05}` each side gets its own score and its own correction.
 
-`q_hat` is the `ceil((n + 1)(1 - alpha))`-th smallest score, so `alpha: 0.1` needs at least nine calibration rows and works better with a few hundred. The quantile columns stay as they were, the calibrated band lands in `yhat_lower` and `yhat_upper`. With auto-regression the calibration walks through the calibration frame the way `Soothsayer.backtest/3` does, one origin per row, and every step ahead gets its own `q_hat`; rows forecast further out than `forecast_steps` were never calibrated and use the last step's. Pass `:events` and `:regressors` for the calibration dates the way you would to `predict/3`.
+`q_hat` is the `ceil((n + 1)(1 - alpha))`-th smallest score, so `alpha: 0.1` needs at least nine calibration rows and works better with a few hundred. The quantile columns stay as they were, the calibrated band lands in `yhat_lower` and `yhat_upper`. With auto-regression the calibration walks through the calibration frame the way `Soothsayer.backtest/3` does, one origin per row, and every step ahead gets its own `q_hat`, and rows forecast further out than `forecast_steps` were never calibrated and use the last step's. Pass `:events` and `:regressors` for the calibration dates the way you would to `predict/3`.
 
 `Soothsayer.backtest/3` on a calibrated model reports the interval's `coverage` and `mean_interval_width` next to MAE and RMSE, and does the same from the outermost quantile columns when there is no calibration, which is the quick way to see whether the heads alone are honest.
 

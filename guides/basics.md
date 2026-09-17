@@ -63,7 +63,7 @@ model = Soothsayer.new(%{
 | `seasonality.weekly.fourier_terms` | `3` | Flexibility of weekly pattern |
 | `seasonality.daily.enabled` | `:auto` | Daily seasonality, on for sub-daily data with at least two days of it |
 | `seasonality.daily.fourier_terms` | `6` | Flexibility of daily pattern |
-| `seasonality.custom` | `%{}` | Other periods, `%{"monthly" => %{period: 30.5, fourier_terms: 3}}`; any period takes a `condition` column, see [Seasonality](seasonality.md) |
+| `seasonality.custom` | `%{}` | Other periods, `%{"monthly" => %{period: 30.5, fourier_terms: 3}}`, and any period takes a `condition` column, see [Seasonality](seasonality.md) |
 | `frequency` | `:auto` | Step between rows, inferred from `ds`, or `{amount, unit}` such as `{1, :hour}` |
 | `ar.enabled` | `false` | Auto-regression on the series' own past, with `ar.lags`, see [Auto-regression](autoregression.md) |
 | `ar.layers` | `[]` | Hidden layers of the AR network, empty means linear |

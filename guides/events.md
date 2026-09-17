@@ -165,7 +165,7 @@ future_events = DataFrame.new(%{
 predictions = Soothsayer.predict(fitted, future_dates, events: future_events)
 ```
 
-Without `events:` the remembered occurrences, the yearly recurring events and the country holidays still apply; only occurrences the model has never seen are left out.
+Without `events:` the remembered occurrences, the yearly recurring events and the country holidays still apply. Only occurrences the model has never seen are left out.
 
 ## Inspecting event effects
 
@@ -277,7 +277,7 @@ Soothsayer.get_event_effects(fitted)
 # }
 ```
 
-Holidays are named in English by default ("Independence Day", "Thanksgiving Day", "Christmas Day"). The same name from two countries is one event, so `countries: ["US", "GB"]` has a single "Christmas Day". A substitute day ("Christmas Day (substitute day)") is its own event, since the observed Monday behaves differently from the 25th. Your own events can't reuse a holiday name; fit raises if they do.
+Holidays are named in English by default ("Independence Day", "Thanksgiving Day", "Christmas Day"). The same name from two countries is one event, so `countries: ["US", "GB"]` has a single "Christmas Day". A substitute day ("Christmas Day (substitute day)") is its own event, since the observed Monday behaves differently from the 25th. Your own events can't reuse a holiday name, fit raises if they do.
 
 | Option | Description |
 |--------|-------------|
@@ -288,7 +288,7 @@ Holidays are named in English by default ("Independence Day", "Thanksgiving Day"
 | `mode` | `:additive` (default) or `:multiplicative`, for every holiday at once, like an event's `mode`. |
 | `regularization` | One L1 lambda for every holiday, like an event's `regularization`. Default `nil`. |
 
-A holiday is a plain date, so on hourly data it lands on midnight like any date event. Use the window to cover the rest of the day. Holidays share one window, one mode and one regularization, like NeuralProphet's `add_country_holidays`; an event you name yourself can have its own.
+A holiday is a plain date, so on hourly data it lands on midnight like any date event. Use the window to cover the rest of the day. Holidays share one window, one mode and one regularization, like NeuralProphet's `add_country_holidays`, while an event you name yourself can have its own.
 
 ## Network architecture
 

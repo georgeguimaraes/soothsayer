@@ -36,7 +36,9 @@ Soothsayer.predict(fitted, future)
 # => ds, id, yhat, trend, yearly_seasonality, ...
 ```
 
-An id the model was not fitted on raises, unless you ask for it to be forecast anyway, see below. The `:history` and `:regressors` frames carry the id column too, so each series gets its own recent observations and its own regressor values. `Soothsayer.backtest/3` holds out the tail of every series and walks each one separately; its predictions frame has the id column first.
+`Soothsayer.future_timestamps/2` builds that frame for you: the next `periods` timestamps of every series, each continuing from its own last observation, with the id column filled in.
+
+An id the model was not fitted on raises, unless you ask for it to be forecast anyway, see below. The `:history` and `:regressors` frames carry the id column too, so each series gets its own recent observations and its own regressor values. `Soothsayer.backtest/3` holds out the tail of every series and walks each one separately, and its predictions frame has the id column first.
 
 ## Events per series
 

@@ -171,8 +171,8 @@ The first `lags` observations only seed the lag windows, so training targets sta
 Each AR prediction needs the `lags` values ending at its origin. For dates inside the training data the origin is the day before and the lags are real observations. For dates after the last observation, Soothsayer forecasts in blocks of `forecast_steps`: the first block directly from the last observation, the next block from the end of the first block using its predictions as lags, and so on up to the latest date you asked for.
 
 ```elixir
-future_dates = Date.range(~D[2023-05-16], ~D[2023-06-14]) |> Enum.to_list()
-predictions = Soothsayer.predict(fitted_with_ar, Series.from_list(future_dates))
+future = Soothsayer.future_timestamps(fitted_with_ar, 30)
+predictions = Soothsayer.predict(fitted_with_ar, future)
 ```
 
 With the default `forecast_steps: 1` every block is one day, so this is plain recursive forecasting: each day is predicted from the previous day's prediction and errors compound over the horizon. Trend, seasonality, events and regressors keep working at any horizon since they only depend on the date.

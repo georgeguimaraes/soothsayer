@@ -169,8 +169,9 @@ fitted = Soothsayer.fit(model, df)
 The column has to be in the training dataframe at fit, and at predict it travels in the same `regressors:` dataframe as the future regressors, covering every date you ask for:
 
 ```elixir
-future = DataFrame.new(%{"ds" => future_dates, "summer" => Enum.map(future_dates, &(&1.month in 6..8))})
-Soothsayer.predict(fitted, Series.from_list(future_dates), regressors: future)
+future = Soothsayer.future_timestamps(fitted, 90)
+conditions = DataFrame.new(%{"ds" => future, "summer" => Enum.map(Series.to_list(future), &(&1.month in 6..8))})
+Soothsayer.predict(fitted, future, regressors: conditions)
 ```
 
 Predicting without it raises and names the missing column. `Soothsayer.backtest/3` passes the whole validation frame as `regressors:` by default, so the column rides along there without any extra work.

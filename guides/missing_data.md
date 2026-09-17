@@ -25,7 +25,7 @@ The lags are the previous steps of the series, so the data has to be complete at
 1. **Regrid.** Every timestamp between the first and the last row that isn't in the data becomes a row of missing values. A timestamp that isn't on the grid at all (14:03 in a 5-minute series) raises, naming it.
 2. **Drop the tail.** Rows at the end with a missing `y` are dropped rather than made up, so the series ends on something observed.
 3. **Impute.** Every gap in `y`, in the regressor columns and in the lagged regressor columns is filled in two passes:
-   - linearly between the gap's neighbours, up to `impute_linear` values from each end, so gaps of up to `2 * impute_linear` steps are filled completely;
+   - linearly between the gap's neighbours, up to `impute_linear` values from each end, so gaps of up to `2 * impute_linear` steps are filled completely.
    - then with a rolling mean over a centered window of `impute_rolling + 2 * impute_linear` steps, for whatever the first pass left open.
 
    Gaps longer than `2 * impute_linear + impute_rolling` steps (30 with the defaults) keep their middle.

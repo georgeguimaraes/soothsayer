@@ -63,13 +63,15 @@ Fitting raises if a configured column is missing.
 Prediction needs the regressor values for every date you ask for. Pass them as a dataframe with `ds` and the regressor columns:
 
 ```elixir
+future = Soothsayer.future_timestamps(fitted, 30)
+
 future_regressors = DataFrame.new(%{
-  "ds" => future_dates,
+  "ds" => future,
   "temperature" => forecast_temperatures,
   "marketing_spend" => planned_spend
 })
 
-predictions = Soothsayer.predict(fitted, Series.from_list(future_dates), regressors: future_regressors)
+predictions = Soothsayer.predict(fitted, future, regressors: future_regressors)
 ```
 
 Soothsayer raises if a date has no regressor row rather than filling in zeros, since a forecast built on a made-up regressor value would be wrong without saying so.
@@ -163,7 +165,7 @@ Lagged regressors are read only up to each forecast origin, never on the dates b
 
 ```elixir
 newer = DataFrame.new(%{"ds" => recent_dates, "temperature" => recent_temperatures})
-Soothsayer.predict(fitted, Series.from_list(future_dates), regressors: newer)
+Soothsayer.predict(fitted, future, regressors: newer)
 ```
 
 Soothsayer raises naming the first missing date rather than filling in zeros. The `lagged_regressors` column of `Soothsayer.predict/3` holds their combined contribution.
