@@ -145,7 +145,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-`weight` is how many times more the last row counts than the rows before `start`, and `start` is the point in the training span, as a fraction, where the ramp begins: rows before it all share the lowest weight. `recency: %{weight: nil}` turns the weighting off and every row counts the same. The weights only touch the loss, the regularization penalties stay as they are, and the learning rate range test runs on the weighted loss as well.
+`weight` is how many times more the last row counts than the rows before `start`, and `start` is the point in the training span, as a fraction, where the ramp begins: rows before it all share the lowest weight. `recency: %{enabled: false}` turns the weighting off and every row counts the same. The weights only touch the loss, the regularization penalties stay as they are, and the learning rate range test runs on the weighted loss as well.
 
 ## Choosing parameters
 

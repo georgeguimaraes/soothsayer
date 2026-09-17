@@ -79,7 +79,7 @@ defmodule Soothsayer do
       missing: %{impute: true, impute_linear: 10, impute_rolling: 10, drop_samples: false},
       epochs: :auto,
       learning_rate: :auto,
-      recency: %{weight: 2, start: 0.0},
+      recency: %{enabled: true, weight: 2, start: 0.0},
       series: %{
         column: nil,
         normalize: :local,
@@ -128,14 +128,14 @@ defmodule Soothsayer do
     Soothsayer.Series.validate_config!(config)
   end
 
-  defp validate_recency!(%{recency: %{weight: weight, start: start}})
-       when (is_nil(weight) or (is_number(weight) and weight >= 1)) and
+  defp validate_recency!(%{recency: %{enabled: enabled, weight: weight, start: start}})
+       when is_boolean(enabled) and is_number(weight) and weight >= 1 and
               is_number(start) and start >= 0 and start < 1,
        do: :ok
 
   defp validate_recency!(%{recency: recency}) do
     raise ArgumentError,
-          "recency must be %{weight: nil | number >= 1, start: fraction in [0, 1)}, " <>
+          "recency must be %{enabled: boolean, weight: number >= 1, start: fraction in [0, 1)}, " <>
             "got #{inspect(recency)}"
   end
 
@@ -1433,8 +1433,8 @@ defmodule Soothsayer do
   # The recency weights favour the last part of the training span. The
   # targets of a sample are the last forecast_steps of its positions, and
   # without AR the one position is the target.
-  defp put_sample_weight(x, _timestamps, _position_indices, %{recency: %{weight: weight}}, _span)
-       when is_nil(weight) or weight == 1,
+  defp put_sample_weight(x, _timestamps, _position_indices, %{recency: recency}, _span)
+       when recency.enabled == false or recency.weight == 1,
        do: x
 
   defp put_sample_weight(x, timestamps, position_indices, config, time_span) do

@@ -1445,7 +1445,7 @@ defmodule SoothsayerTest do
       }
 
       errors =
-        for recency <- [%{weight: nil, start: 0.0}, %{weight: 10, start: 0.7}] do
+        for recency <- [%{enabled: false}, %{weight: 10, start: 0.7}] do
           model = Soothsayer.new(Map.put(config, :recency, recency))
           fitted = Soothsayer.fit(model, training)
           predictions = Soothsayer.predict(fitted, holdout["ds"])
@@ -1456,14 +1456,21 @@ defmodule SoothsayerTest do
       assert weighted_error < flat_error * 0.6
     end
 
-    test "rejects a weight below 1 or a start outside [0, 1)" do
+    test "rejects a weight below 1, a start outside [0, 1) or a non-boolean enabled" do
       assert_raise ArgumentError, ~r/recency must be/, fn ->
-        Soothsayer.new(%{recency: %{weight: 0.5, start: 0.0}})
+        Soothsayer.new(%{recency: %{weight: 0.5}})
       end
 
       assert_raise ArgumentError, ~r/recency must be/, fn ->
-        Soothsayer.new(%{recency: %{weight: 2, start: 1.0}})
+        Soothsayer.new(%{recency: %{start: 1.0}})
       end
+
+      assert_raise ArgumentError, ~r/recency must be/, fn ->
+        Soothsayer.new(%{recency: %{enabled: nil}})
+      end
+
+      assert Soothsayer.new(%{recency: %{enabled: false}}).config.recency ==
+               %{enabled: false, weight: 2, start: 0.0}
     end
   end
 

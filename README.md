@@ -302,7 +302,7 @@ Soothsayer.new(%{
   schedule: :one_cycle,  # or :constant (default: one-cycle)
   optimizer: :adam,      # or :adamw
   batch_size: nil,       # rows per gradient step (default: from the data size)
-  recency: %{weight: 2, start: 0.0},  # recent rows weigh more in the loss, nil weight turns it off
+  recency: %{enabled: true, weight: 2, start: 0.0},  # recent rows weigh more in the loss
   seed: nil              # integer for reproducible fits (default: random)
 })
 ```
@@ -315,7 +315,7 @@ With `learning_rate: :auto`, Soothsayer runs a learning rate range test before t
 
 Too smooth a fit wants more epochs or a fixed higher learning rate. A fit that only works on the training data wants fewer epochs or more regularization.
 
-Recent rows count more than old ones, NeuralProphet's newer samples weight: by default the last training row weighs twice the oldest, with a smooth ramp in between, so a slope that changed recently pulls harder. `recency: %{weight: 5, start: 0.5}` makes the last half of the data count up to five times more, `recency: %{weight: nil}` treats every row the same. See the [Trends guide](guides/trends.md#recent-data-first).
+Recent rows count more than old ones, NeuralProphet's newer samples weight: by default the last training row weighs twice the oldest, with a smooth ramp in between, so a slope that changed recently pulls harder. `recency: %{weight: 5, start: 0.5}` makes the last half of the data count up to five times more, `recency: %{enabled: false}` treats every row the same. See the [Trends guide](guides/trends.md#recent-data-first).
 
 ### Future regressors
 
