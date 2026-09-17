@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.0.0...v1.1.0) (2026-09-17)
+
+
+### Features
+
+* conformal prediction, intervals calibrated on held out data ([09156ed](https://github.com/georgeguimaraes/soothsayer/commit/09156ed4def6e982cc9b168652a3c354e925059d))
+* local trend and seasonality across series, with local regularization ([4c2bba4](https://github.com/georgeguimaraes/soothsayer/commit/4c2bba4af17dc7482dc3364847c305340cb8e369))
+* recency weighting, recent rows weigh more in the loss ([f18cfc8](https://github.com/georgeguimaraes/soothsayer/commit/f18cfc8597fda9cf0a7dfe5987585981ccf7ddd0))
+* several series in one model ([eb558f9](https://github.com/georgeguimaraes/soothsayer/commit/eb558f98fc2162fc3549fb6fbec69ee5145afcad))
+
+
+### Documentation
+
+* the 1.1 features in the README, introduction and guides ([51c79c2](https://github.com/georgeguimaraes/soothsayer/commit/51c79c2850a8f8eb34709ee9302564c530332a69))
+
+
+### Code Refactoring
+
+* fit and predict keep their state per series ([14f3818](https://github.com/georgeguimaraes/soothsayer/commit/14f38186a5a76f879b8c6dda5e7492cd96ac5293))
+
 ## [1.0.0](https://github.com/georgeguimaraes/soothsayer/compare/v0.6.3...v1.0.0) (2026-09-16)
 
 
