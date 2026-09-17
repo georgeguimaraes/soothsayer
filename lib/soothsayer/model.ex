@@ -32,6 +32,12 @@ defmodule Soothsayer.Model do
   defstruct [:network, :params, :config, :predict_fn]
 
   @typedoc """
+  Trained parameters, an `Axon.ModelState` struct. Axon does not declare
+  a type for it yet, so this one stands in.
+  """
+  @type model_state :: %Axon.ModelState{}
+
+  @typedoc """
   A model. `predict_fn` is the network's predict function compiled with
   EXLA, set by `fit/4` so that `predict/2` doesn't rebuild the network on
   every call. When it is `nil` (a model assembled by hand) `predict/2`
@@ -39,7 +45,7 @@ defmodule Soothsayer.Model do
   """
   @type t :: %__MODULE__{
           network: Axon.t(),
-          params: term() | nil,
+          params: model_state() | nil,
           config: map(),
           predict_fn: (term(), map() -> map()) | nil
         }

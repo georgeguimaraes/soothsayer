@@ -74,7 +74,7 @@ defmodule Soothsayer.Trainer do
 
   """
   @spec fit(Axon.t(), %{String.t() => Nx.Tensor.t()}, Nx.Tensor.t(), non_neg_integer(), map()) ::
-          Axon.ModelState.t(any(), any())
+          Soothsayer.Model.model_state()
   def fit(network, x, y, epochs, config) do
     seed = config[:seed]
     if seed, do: :rand.seed(:exsss, {seed, seed, seed})
@@ -532,7 +532,7 @@ defmodule Soothsayer.Trainer do
       #Nx.Tensor<f32 6.0>
 
   """
-  @spec compute_l1_penalty(Axon.ModelState.t(any(), any()), list(String.t())) :: Nx.Tensor.t()
+  @spec compute_l1_penalty(Soothsayer.Model.model_state(), list(String.t())) :: Nx.Tensor.t()
   def compute_l1_penalty(params, layer_names) do
     if Enum.empty?(layer_names) do
       Nx.tensor(0.0)
@@ -641,7 +641,7 @@ defmodule Soothsayer.Trainer do
   `Soothsayer.Events.regularization_weights/1` and
   `Soothsayer.Regressors.regularization_weights/1`.
   """
-  @spec regularization_terms(Axon.ModelState.t(any(), any()), map()) ::
+  @spec regularization_terms(Soothsayer.Model.model_state(), map()) ::
           list({String.t(), Nx.Tensor.t()})
   def regularization_terms(params, config) do
     layer_names = Map.keys(params.data)
@@ -691,7 +691,7 @@ defmodule Soothsayer.Trainer do
   series can differ without wandering off (NeuralProphet's glocal mode).
   The bias is left alone, so under `normalize: :global` levels stay apart.
   """
-  @spec local_terms(Axon.ModelState.t(), map()) :: list({String.t(), number()})
+  @spec local_terms(Soothsayer.Model.model_state(), map()) :: list({String.t(), number()})
   def local_terms(params, config) do
     case get_in(config, [:series, :local_regularization]) do
       lambda when is_number(lambda) and lambda > 0 ->
@@ -707,7 +707,7 @@ defmodule Soothsayer.Trainer do
   @doc """
   The local regularization penalty of `params` for `{layer_name => lambda}`.
   """
-  @spec local_penalty(Axon.ModelState.t(), %{String.t() => number()}) :: Nx.Tensor.t()
+  @spec local_penalty(Soothsayer.Model.model_state(), %{String.t() => number()}) :: Nx.Tensor.t()
   def local_penalty(_params, lambdas) when map_size(lambdas) == 0 do
     Nx.tensor(0.0)
   end
@@ -728,7 +728,7 @@ defmodule Soothsayer.Trainer do
   output columns.
   """
   @spec weighted_l1_penalty(
-          Axon.ModelState.t(any(), any()),
+          Soothsayer.Model.model_state(),
           list({String.t(), Nx.Tensor.t()}) | %{String.t() => Nx.Tensor.t()}
         ) :: Nx.Tensor.t()
   def weighted_l1_penalty(params, terms) do
