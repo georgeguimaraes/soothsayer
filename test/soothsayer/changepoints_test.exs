@@ -84,19 +84,15 @@ defmodule Soothsayer.ChangepointsTest do
     end
 
     test "returns evenly spaced indices in the first portion of data" do
-      # 100 samples, 5 changepoints, 80% range = first 80 samples
-      # Changepoints at: 16, 32, 48, 64, 80 (evenly spaced)
+      # 100 samples, 5 changepoints, 80% range: six evenly spaced points
+      # from 0 to 80, the first one dropped, so the last changepoint sits
+      # at 80 * 5 / 6 like NeuralProphet's
       result = Trend.compute_changepoint_indices(100, 5, 0.8)
 
-      assert length(result) == 5
-      assert Enum.all?(result, fn idx -> idx >= 0 and idx <= 80 end)
-      # Check that indices are evenly spaced
-      [first | _rest] = result
-      spacing = Enum.at(result, 1) - first
+      assert result == [13, 26, 40, 53, 66]
 
-      assert Enum.all?(Enum.chunk_every(result, 2, 1, :discard), fn [a, b] ->
-               b - a == spacing
-             end)
+      spacings = result |> Enum.chunk_every(2, 1, :discard) |> Enum.map(fn [a, b] -> b - a end)
+      assert Enum.min(spacings) >= 13 and Enum.max(spacings) <= 14
     end
 
     test "respects changepoints_range parameter" do

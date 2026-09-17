@@ -504,18 +504,20 @@ The test suite includes a benchmark layer that fits Soothsayer on the datasets N
 mix test --only benchmark
 ```
 
-Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over five seeds:
+Results as of September 2026 (lower is better). The Soothsayer column is the benchmark's fixed seed, the range is over six seeds:
 
 | Dataset | Metric | NeuralProphet | Soothsayer | Range over seeds | Notes |
 |---------|--------|---------------|------------|------------------|-------|
-| Peyton Manning (daily) | MAE | 0.350 | 0.298 | 0.298 to 0.299 | identical configuration |
-| Peyton Manning (daily) | RMSE | 0.501 | 0.493 | 0.493 to 0.495 | identical configuration |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.39 | 5.37 to 5.42 | identical configuration and metric (average over horizons 1 to 7) |
-| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.73 | 6.70 to 6.77 | same |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.482 | 0.480 to 0.484 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit |
-| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.718 | 0.710 to 0.718 | same |
-| Air passengers (monthly, multiplicative) | MAE | 30.1 | 25.1 | 22.4 to 25.9 | identical configuration, 130 training rows so the seed matters |
-| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 27.0 | 24.5 to 27.9 | same caveat |
+| Peyton Manning (daily) | MAE | 0.350 | 0.350 | 0.348 to 0.352 | identical configuration |
+| Peyton Manning (daily) | RMSE | 0.501 | 0.502 | 0.500 to 0.502 | identical configuration |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | MAE | 5.40 | 5.42 | 5.40 to 5.46 | identical configuration and metric (average over horizons 1 to 7) |
+| Energy price (daily, AR 14 lags, 7 direct steps, temperature as future and lagged regressor) | RMSE | 6.71 | 6.75 | 6.72 to 6.81 | same |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | MAE | 0.573 | 0.467 | 0.464 to 0.515 | same configuration; yearly seasonality off as NeuralProphet's auto rule does on 65 days; 12 NaN readings imputed at fit |
+| Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.689 | 0.688 to 0.719 | same |
+| Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.2 | 20.3 to 26.1 | identical configuration, 130 training rows so the seed matters |
+| Air passengers (monthly, multiplicative) | RMSE | 31.1 | 24.8 | 22.1 to 27.6 | same caveat |
+
+On the shared configuration the two libraries are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Where soothsayer comes out ahead the difference is in training, the learning rate range test and the loss weights, not in the model.
 
 The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, MIT licensed by Facebook) and the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, see the NOTICE file there.
 

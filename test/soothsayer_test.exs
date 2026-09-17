@@ -811,12 +811,12 @@ defmodule SoothsayerTest do
       start_date = ~D[2020-01-01]
       dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
 
-      # 10 changepoints over the first 80% of 1096 days sit every 87.7 days,
-      # the sixth at day 526, where the level jumps by 40.
+      # 10 changepoints over the first 80% of 1096 days sit every 79.7 days,
+      # the sixth at day 478, where the level jumps by 40.
       y =
         Enum.map(dates, fn date ->
           days = Date.diff(date, start_date)
-          jump = if days >= 526, do: 40.0, else: 0.0
+          jump = if days >= 478, do: 40.0, else: 0.0
           100 + 0.02 * days + jump + :rand.normal(0, 1)
         end)
 

@@ -64,7 +64,7 @@ model = Soothsayer.new(%{
 })
 ```
 
-Changepoints are spread evenly over the first `changepoints_range` of the training data. Leaving the last 20% without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast.
+Changepoints are spread evenly over the first `changepoints_range` of the training data the way NeuralProphet does it: `n + 1` points from the start, the first at zero, so the last changepoint sits at `changepoints_range * n / (n + 1)`, 73% of the way through with the defaults. Leaving the rest without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast. Prophet puts its last changepoint at `changepoints_range` itself; `changepoints_range: 0.88` gives you that tail here.
 
 ## Example: a slope change
 

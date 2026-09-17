@@ -188,7 +188,7 @@ defmodule Soothsayer.Trend do
   ## Examples
 
       iex> Soothsayer.Trend.compute_changepoint_indices(100, 5, 0.8)
-      [16, 32, 48, 64, 80]
+      [13, 26, 40, 53, 66]
 
   """
   @spec compute_changepoint_indices(non_neg_integer(), non_neg_integer(), float()) ::
@@ -196,8 +196,12 @@ defmodule Soothsayer.Trend do
   def compute_changepoint_indices(_n_samples, 0, _changepoints_range), do: []
 
   def compute_changepoint_indices(n_samples, changepoints, changepoints_range) do
-    max_index = trunc(n_samples * changepoints_range)
-    step = max_index / changepoints
+    # NeuralProphet spreads n + 1 points evenly over the first
+    # changepoints_range of the data, the first at zero, so the last
+    # changepoint sits at range * n / (n + 1) and the final segment, the
+    # one every forecast extrapolates, is a little longer than the others.
+    max_index = n_samples * changepoints_range
+    step = max_index / (changepoints + 1)
 
     1..changepoints
     |> Enum.map(fn i -> trunc(i * step) end)
