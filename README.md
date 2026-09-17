@@ -427,13 +427,18 @@ Soothsayer.new(%{
 ```elixir
 result = Soothsayer.backtest(model, df, horizon: 7)
 
-result.metrics              # %{mean_absolute_error: ..., root_mean_squared_error: ...}, plus coverage with an interval
+result.metrics              # MAE, RMSE, MAPE and SMAPE, plus coverage with an interval
 result.by_step[7]           # the same, for forecasts made 7 days ahead (with auto-regression)
 result.predictions          # DataFrame with origin, ds, step, y, yhat
 result.model                # the fitted model
 ```
 
-This is the protocol NeuralProphet uses for its validation metrics, and what the benchmark suite runs.
+This is the protocol NeuralProphet uses for its validation metrics, and what the benchmark suite runs. For Prophet's protocol, several cutoffs through the history with a fresh fit at each, use `Soothsayer.cross_validate/3`:
+
+```elixir
+result = Soothsayer.cross_validate(model, df, horizon: 30, period: 90, initial: 730)
+result.by_step[30]          # MAE, RMSE, MAPE, SMAPE a month ahead, across every cutoff
+```
 
 ## EXLA
 
@@ -532,7 +537,6 @@ The datasets live in `test/fixtures/neuralprophet/`. Five of them are Prophet's 
 From NeuralProphet, still missing here:
 
 - a choice of loss function (it's Huber)
-- the data split utilities, `split_df` and the cross-validation splits
 
 ## Contributing
 

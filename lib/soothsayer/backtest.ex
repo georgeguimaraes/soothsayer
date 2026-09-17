@@ -24,7 +24,9 @@ defmodule Soothsayer.Backtest do
           optional(:coverage) => float(),
           optional(:mean_interval_width) => float(),
           mean_absolute_error: float(),
-          root_mean_squared_error: float()
+          root_mean_squared_error: float(),
+          mean_absolute_percentage_error: float() | nil,
+          symmetric_mean_absolute_percentage_error: float() | nil
         }
 
   @type result :: %{
@@ -85,7 +87,7 @@ defmodule Soothsayer.Backtest do
 
     %{
       model: fitted_model,
-      metrics: frame_metrics(predictions),
+      metrics: evaluate(predictions),
       by_step: metrics_by_step(predictions),
       predictions: predictions
     }
@@ -275,23 +277,67 @@ defmodule Soothsayer.Backtest do
   end
 
   @doc """
-  Mean absolute error and root mean squared error between two series.
+  Mean absolute error, root mean squared error, mean absolute percentage
+  error and its symmetric version between two series. The percentage
+  errors skip rows where their denominator is zero and are `nil` when no
+  row is left.
   """
-  @spec metrics(Series.t(), Series.t()) :: %{
-          mean_absolute_error: float(),
-          root_mean_squared_error: float()
-        }
+  @spec metrics(Series.t(), Series.t()) :: metrics()
   def metrics(actual, predicted) do
     actual = actual |> Series.to_tensor() |> Nx.as_type({:f, 32})
     predicted = predicted |> Series.to_tensor() |> Nx.as_type({:f, 32})
+    error = Nx.abs(Nx.subtract(actual, predicted))
 
     %{
-      mean_absolute_error: Axon.Metrics.mean_absolute_error(actual, predicted) |> Nx.to_number(),
-      root_mean_squared_error:
-        Axon.Losses.mean_squared_error(actual, predicted, reduction: :mean)
-        |> Nx.sqrt()
-        |> Nx.to_number()
+      mean_absolute_error: Nx.to_number(Nx.mean(error)),
+      root_mean_squared_error: error |> Nx.pow(2) |> Nx.mean() |> Nx.sqrt() |> Nx.to_number(),
+      mean_absolute_percentage_error: mean_ratio(error, Nx.abs(actual)),
+      symmetric_mean_absolute_percentage_error:
+        mean_ratio(Nx.multiply(2, error), Nx.add(Nx.abs(actual), Nx.abs(predicted)))
     }
+  end
+
+  # The mean of numerator / denominator over the rows where the denominator
+  # is not zero, nil when there is no such row
+  defp mean_ratio(numerator, denominator) do
+    keep = Nx.not_equal(denominator, 0)
+    count = keep |> Nx.sum() |> Nx.to_number()
+
+    if count == 0 do
+      nil
+    else
+      ratio = Nx.divide(numerator, Nx.select(keep, denominator, 1))
+      Nx.to_number(Nx.divide(Nx.sum(Nx.select(keep, ratio, 0)), count))
+    end
+  end
+
+  @doc """
+  Every metric of a predictions frame with `y` and `yhat`: `metrics/2` plus
+  `interval_metrics/3` when the frame carries an interval, `yhat_lower` and
+  `yhat_upper` first, else the outermost quantile columns.
+  """
+  @spec evaluate(DataFrame.t()) :: metrics()
+  def evaluate(predictions) do
+    base = metrics(predictions["y"], predictions["yhat"])
+
+    case interval_columns(predictions) do
+      {lower, upper} -> Map.merge(base, interval_metrics(predictions["y"], lower, upper))
+      nil -> base
+    end
+  end
+
+  @doc """
+  `evaluate/1` per distinct value of the `step` column.
+  """
+  @spec metrics_by_step(DataFrame.t()) :: %{pos_integer() => metrics()}
+  def metrics_by_step(predictions) do
+    predictions["step"]
+    |> Series.distinct()
+    |> Series.to_list()
+    |> Map.new(fn step ->
+      rows = DataFrame.filter_with(predictions, &Series.equal(&1["step"], step))
+      {step, evaluate(rows)}
+    end)
   end
 
   @doc """
@@ -313,17 +359,6 @@ defmodule Soothsayer.Backtest do
       coverage: Series.mean(Series.cast(inside, {:s, 8})),
       mean_interval_width: Series.mean(Series.subtract(upper, lower))
     }
-  end
-
-  # MAE and RMSE, plus the interval metrics when the frame has an interval:
-  # the conformal columns first, else the outermost quantile columns.
-  defp frame_metrics(predictions) do
-    base = metrics(predictions["y"], predictions["yhat"])
-
-    case interval_columns(predictions) do
-      {lower, upper} -> Map.merge(base, interval_metrics(predictions["y"], lower, upper))
-      nil -> base
-    end
   end
 
   defp interval_columns(predictions) do
@@ -350,16 +385,6 @@ defmodule Soothsayer.Backtest do
 
   defp fit_options(nil), do: []
   defp fit_options(events), do: [events: events]
-
-  defp metrics_by_step(predictions) do
-    predictions["step"]
-    |> Series.distinct()
-    |> Series.to_list()
-    |> Map.new(fn step ->
-      rows = DataFrame.filter_with(predictions, &Series.equal(&1["step"], step))
-      {step, frame_metrics(rows)}
-    end)
-  end
 
   defp maybe_put(options, _key, nil), do: options
   defp maybe_put(options, key, value), do: Keyword.put(options, key, value)

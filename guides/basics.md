@@ -232,6 +232,18 @@ result.by_step[7].mean_absolute_error   # a week ahead
 
 `result.predictions` is a dataframe of every forecast with columns `origin`, `ds`, `step`, `y` and `yhat`, so you can plot errors by horizon or by season. Events and regressors go in as `events:` and `regressors:` options.
 
+One cutoff at the end says how the configuration does now. To see how it holds up across the history, cross-validate, Prophet's protocol: several cutoffs, a fresh fit at each, and a forecast of the next `horizon` rows from each one:
+
+```elixir
+result = Soothsayer.cross_validate(model, df, horizon: 30, period: 90, initial: 730)
+
+result.cutoffs                                    # the dates the model was refitted at
+result.metrics.mean_absolute_percentage_error     # over every cutoff and step
+result.by_step[30].mean_absolute_error            # a month ahead, across cutoffs
+```
+
+`horizon`, `period` and `initial` count rows of the series: the last cutoff sits `horizon` rows before the end, the others `period` rows apart going back, as long as `initial` rows remain to fit on. Pass `cutoffs: [dates]` to pick them yourself. The metrics add MAPE and SMAPE to MAE and RMSE, and coverage when the model has quantiles or was calibrated. `result.predictions` has a `cutoff` column instead of `origin`. With several series a cutoff applies to all of them and each contributes its own rows.
+
 ## Next steps
 
 - [Trends](trends.md): piecewise linear trends with changepoints

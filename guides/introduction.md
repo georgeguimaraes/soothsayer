@@ -56,7 +56,7 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 | Conformal prediction | Yes | Yes |
 | Global and local modeling (several series in one model) | Yes | Yes |
 | Newer sample weighting | Yes | Yes |
-| Data split utilities | No | Yes |
+| Cross-validation over several cutoffs | Yes | Yes |
 
 ## Where the numbers differ from NeuralProphet
 

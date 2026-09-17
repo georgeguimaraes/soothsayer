@@ -1669,6 +1669,29 @@ defmodule Soothsayer do
   end
 
   @doc """
+  Evaluates a model configuration over several cutoffs through the history,
+  Prophet's cross-validation: at each cutoff the model is fitted on the
+  rows before it and forecasts the `horizon` rows after it. Returns the
+  cutoffs, overall and per-step metrics (MAE, RMSE, MAPE, SMAPE, and
+  coverage with an interval), and a dataframe of every forecast. See
+  `Soothsayer.CrossValidation`.
+
+  ## Examples
+
+      iex> result = Soothsayer.cross_validate(model, df, horizon: 30, period: 90, initial: 730)
+      iex> result.cutoffs
+      [~D[2022-01-01], ~D[2022-04-01], ~D[2022-07-01], ~D[2022-10-01]]
+      iex> result.by_step[30].mean_absolute_percentage_error
+      0.061
+
+  """
+  @spec cross_validate(Soothsayer.Model.t(), Explorer.DataFrame.t(), keyword()) ::
+          Soothsayer.CrossValidation.result()
+  def cross_validate(%Model{} = model, %DataFrame{} = data, opts \\ []) do
+    Soothsayer.CrossValidation.run(model, data, opts)
+  end
+
+  @doc """
   Evaluates a model configuration with a rolling-origin backtest.
 
   Holds out the last `validation_fraction` of `data`, fits on the rest, and
@@ -1680,7 +1703,12 @@ defmodule Soothsayer do
 
       iex> result = Soothsayer.backtest(Soothsayer.new(%{ar: %{enabled: true, lags: 14, forecast_steps: 7}}), df)
       iex> result.metrics
-      %{mean_absolute_error: 5.65, root_mean_squared_error: 7.04}
+      %{
+        mean_absolute_error: 5.65,
+        root_mean_squared_error: 7.04,
+        mean_absolute_percentage_error: 0.11,
+        symmetric_mean_absolute_percentage_error: 0.1
+      }
       iex> result.by_step[7].mean_absolute_error
       6.9
 
