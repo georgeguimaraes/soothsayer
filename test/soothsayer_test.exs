@@ -860,6 +860,88 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "changepoints at known dates" do
+    # A slope that bends once, at a date the grid doesn't land on
+    defp bend_frame(dates, start_date, bend_date, seed) do
+      :rand.seed(:exsss, {seed, seed, seed})
+
+      y =
+        Enum.map(dates, fn date ->
+          days = Date.diff(date, start_date)
+          after_bend = max(Date.diff(date, bend_date), 0)
+          100 + 0.01 * days + 0.08 * after_bend + :rand.normal(0, 0.5)
+        end)
+
+      DataFrame.new(%{"ds" => dates, "y" => y})
+    end
+
+    test "naming the bend beats the grid, and the dates replace it" do
+      start_date = ~D[2019-01-01]
+      bend_date = ~D[2022-06-15]
+
+      training =
+        bend_frame(
+          Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list(),
+          start_date,
+          bend_date,
+          1
+        )
+
+      holdout =
+        bend_frame(
+          Date.range(~D[2023-01-01], ~D[2023-03-31]) |> Enum.to_list(),
+          start_date,
+          bend_date,
+          2
+        )
+
+      config = %{
+        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+        epochs: 30,
+        seed: 3
+      }
+
+      errors =
+        for changepoints <- [10, [bend_date]] do
+          model = Soothsayer.new(Map.put(config, :trend, %{changepoints: changepoints}))
+          fitted = Soothsayer.fit(model, training)
+          predictions = Soothsayer.predict(fitted, holdout["ds"])
+
+          {fitted,
+           Series.subtract(predictions["yhat"], holdout["y"]) |> Series.abs() |> Series.mean()}
+        end
+
+      [{_grid, grid_error}, {named, named_error}] = errors
+      assert named_error < grid_error * 0.5
+      assert named.config.changepoint_positions == [Date.diff(bend_date, start_date) * 1.0]
+      assert Nx.shape(Soothsayer.Trend.get_weights(named).kernel) == {2, 1}
+    end
+
+    test "dates must be sorted, unique, of the right type and inside the data" do
+      assert_raise ArgumentError, ~r/sorted and unique/, fn ->
+        Soothsayer.new(%{trend: %{changepoints: [~D[2022-06-01], ~D[2021-01-01]]}})
+      end
+
+      assert_raise ArgumentError, ~r/must be Date or NaiveDateTime/, fn ->
+        Soothsayer.new(%{trend: %{changepoints: ["2022-06-01"]}})
+      end
+
+      assert_raise ArgumentError, ~r/count or a non-empty list/, fn ->
+        Soothsayer.new(%{trend: %{changepoints: []}})
+      end
+
+      dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()
+      frame = DataFrame.new(%{"ds" => dates, "y" => Enum.map(dates, &Date.day_of_year/1)})
+
+      assert_raise ArgumentError, ~r/outside the training data/, fn ->
+        Soothsayer.fit(
+          Soothsayer.new(%{trend: %{changepoints: [~D[2023-06-01]]}, epochs: 1}),
+          frame
+        )
+      end
+    end
+  end
+
   describe "custom and conditional seasonalities" do
     defp cycle_frame(dates, start_date, period, summer_only?) do
       y =

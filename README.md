@@ -103,7 +103,7 @@ The trend is piecewise linear. It can change slope at up to `changepoints` point
 ```elixir
 Soothsayer.new(%{
   trend: %{
-    changepoints: 10,      # number of potential changepoints (default: 10)
+    changepoints: 10,      # number of potential changepoints (default: 10), or a list of dates
     changepoints_range: 0.8  # place changepoints in first 80% of data (default: 0.8)
   }
 })

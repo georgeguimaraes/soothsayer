@@ -117,6 +117,7 @@ defmodule Soothsayer do
     validate_regularization!(config, [:seasonality, :regularization])
     validate_regularization!(config, [:trend, :regularization])
     validate_growth!(config)
+    validate_changepoints!(config)
     validate_regularization!(config, [:ar, :regularization])
     Frequency.validate!(config.frequency)
     validate_lagged_regressors!(config)
@@ -199,6 +200,33 @@ defmodule Soothsayer do
       raise ArgumentError,
             "lagged_regressors_layers must be a list of positive integers, got #{inspect(layers)}"
     end
+  end
+
+  # A count spreads changepoints over the data, a list of dates puts them
+  # where the user knows the slope changed.
+  defp validate_changepoints!(%{trend: %{changepoints: count}})
+       when is_integer(count) and count >= 0,
+       do: :ok
+
+  defp validate_changepoints!(%{trend: %{changepoints: [_ | _] = dates}}) do
+    unless Enum.all?(dates, &(is_struct(&1, Date) or is_struct(&1, NaiveDateTime))) do
+      raise ArgumentError,
+            "trend.changepoints dates must be Date or NaiveDateTime values, got #{inspect(dates)}"
+    end
+
+    sorted = Enum.sort_by(dates, &Timestamp.to_naive_datetime/1, NaiveDateTime)
+
+    unless dates == sorted and dates == Enum.uniq(dates) do
+      raise ArgumentError,
+            "trend.changepoints dates must be sorted and unique, got #{inspect(dates)}"
+    end
+
+    :ok
+  end
+
+  defp validate_changepoints!(%{trend: %{changepoints: other}}) do
+    raise ArgumentError,
+          "trend.changepoints must be a count or a non-empty list of dates, got #{inspect(other)}"
   end
 
   defp validate_growth!(%{trend: %{growth: growth}}) do

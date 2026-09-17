@@ -76,7 +76,29 @@ defmodule Soothsayer.Trend do
   they are.
   """
   @spec time_columns(map()) :: pos_integer()
-  def time_columns(config), do: 1 + (get_in(config, [:trend, :changepoints]) || 0)
+  def time_columns(config), do: 1 + count(config)
+
+  @doc """
+  How many changepoints a config has: the count of the grid, or the length
+  of the list when the dates are given.
+
+  ## Examples
+
+      iex> Soothsayer.Trend.count(%{trend: %{changepoints: 10}})
+      10
+
+      iex> Soothsayer.Trend.count(%{trend: %{changepoints: [~D[2009-08-01]]}})
+      1
+
+  """
+  @spec count(map()) :: non_neg_integer()
+  def count(config) do
+    case get_in(config, [:trend, :changepoints]) do
+      nil -> 0
+      dates when is_list(dates) -> length(dates)
+      changepoints -> changepoints
+    end
+  end
 
   @doc """
   The width of the trend input: `time_columns/1` plus one intercept column
@@ -93,10 +115,8 @@ defmodule Soothsayer.Trend do
   """
   @spec feature_count(map()) :: pos_integer()
   def feature_count(config) do
-    changepoints = get_in(config, [:trend, :changepoints]) || 0
-
     case growth(config) do
-      :discontinuous -> time_columns(config) + changepoints
+      :discontinuous -> time_columns(config) + count(config)
       :linear -> time_columns(config)
     end
   end
@@ -213,8 +233,11 @@ defmodule Soothsayer.Trend do
   ## Parameters
 
     * `dates` - List of timestamps in the dataset.
-    * `changepoints` - Number of changepoints to create.
-    * `changepoints_range` - Fraction of data to place changepoints in (0-1).
+    * `changepoints` - Number of changepoints to spread over the data, or
+      the list of dates to put them at, which must fall strictly inside the
+      data's span.
+    * `changepoints_range` - Fraction of data to place changepoints in (0-1),
+      ignored with a list of dates.
 
   ## Returns
 
@@ -227,9 +250,27 @@ defmodule Soothsayer.Trend do
       [~D[2023-01-17], ~D[2023-02-02], ~D[2023-02-18], ~D[2023-03-06], ~D[2023-03-22]]
 
   """
-  @spec compute_changepoint_positions(list(Timestamp.input()), non_neg_integer(), float()) ::
-          list(Timestamp.input())
+  @spec compute_changepoint_positions(
+          list(Timestamp.input()),
+          non_neg_integer() | list(Timestamp.input()),
+          float()
+        ) :: list(Timestamp.input())
   def compute_changepoint_positions(_dates, 0, _changepoints_range), do: []
+
+  def compute_changepoint_positions(dates, changepoints, _range) when is_list(changepoints) do
+    first = List.first(dates)
+    last = List.last(dates)
+
+    for changepoint <- changepoints,
+        Timestamp.days_since(changepoint, first) <= 0 or
+          Timestamp.days_since(last, changepoint) <= 0 do
+      raise ArgumentError,
+            "Changepoint #{inspect(changepoint)} is outside the training data, which runs " <>
+              "from #{inspect(first)} to #{inspect(last)}"
+    end
+
+    changepoints
+  end
 
   def compute_changepoint_positions(dates, changepoints, changepoints_range) do
     n_samples = length(dates)
@@ -444,7 +485,8 @@ defmodule Soothsayer.Trend do
   @doc """
   The time axis of a model: `first_timestamp`, the origin of the numeric
   time, and `changepoint_positions`, in days from it, spread over the first
-  `changepoints_range` of the sorted timestamps.
+  `changepoints_range` of the sorted timestamps or at the dates the config
+  names.
   """
   @spec changepoint_metadata(list(Timestamp.input()), map()) :: %{
           first_timestamp: Timestamp.input(),

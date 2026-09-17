@@ -166,6 +166,32 @@ defmodule Soothsayer.TrendTest do
     end
   end
 
+  describe "changepoint_metadata/2 with dates" do
+    test "puts the changepoints at the dates, in days from the first timestamp" do
+      dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)
+      config = %{trend: %{changepoints: [~D[2023-01-11], ~D[2023-03-01]]}}
+
+      metadata = Trend.changepoint_metadata(dates, config)
+
+      assert metadata.first_timestamp == ~D[2023-01-01]
+      assert metadata.changepoint_positions == [10.0, 59.0]
+      assert Trend.count(config) == 2
+      assert Trend.feature_count(config) == 3
+    end
+
+    test "rejects a date outside the training span" do
+      dates = Enum.map(0..99, fn i -> Date.add(~D[2023-01-01], i) end)
+
+      assert_raise ArgumentError, ~r/outside the training data/, fn ->
+        Trend.changepoint_metadata(dates, %{trend: %{changepoints: [~D[2023-06-01]]}})
+      end
+
+      assert_raise ArgumentError, ~r/outside the training data/, fn ->
+        Trend.changepoint_metadata(dates, %{trend: %{changepoints: [~D[2023-01-01]]}})
+      end
+    end
+  end
+
   describe "build_changepoint_features/2" do
     test "returns nil when no changepoint positions" do
       t = Nx.tensor([[1.0], [2.0], [3.0]])

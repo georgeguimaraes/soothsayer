@@ -24,7 +24,7 @@ For the math behind the changepoints, see [NeuralProphet's trend docs](https://n
 model = Soothsayer.new(%{
   trend: %{
     enabled: true,           # default: true
-    changepoints: 10,        # potential changepoints, default: 10
+    changepoints: 10,        # potential changepoints, default: 10, or a list of dates
     changepoints_range: 0.8, # place them in the first 80% of the data, default: 0.8
     growth: :linear,         # or :discontinuous to let the level jump at changepoints
     regularization: nil      # L1 penalty on slope changes, default: nil
@@ -65,6 +65,20 @@ model = Soothsayer.new(%{
 ```
 
 Changepoints are spread evenly over the first `changepoints_range` of the training data the way NeuralProphet does it: `n + 1` points from the start, the first at zero, so the last changepoint sits at `changepoints_range * n / (n + 1)`, 73% of the way through with the defaults. Leaving the rest without one means the final slope is fitted on a decent stretch of data, and that final slope is what gets extrapolated into the forecast. Prophet puts its last changepoint at `changepoints_range` itself; `changepoints_range: 0.88` gives you that tail here.
+
+## When you know where the break is
+
+A grid is a guess. When you know the date a regime changed, a recession trough, a product launch, a pricing change, give the changepoints as dates instead of a count and the trend can bend exactly there and nowhere else:
+
+```elixir
+model = Soothsayer.new(%{
+  trend: %{changepoints: [~D[2009-08-01]]}
+})
+```
+
+The dates take the same type as your `ds` column, must be sorted and unique, and have to fall inside the training data. `changepoints_range` does nothing with a list. Combined with `growth: :discontinuous` a listed date can carry a level jump as well as a slope change, which is the honest model for a cliff like a lockdown.
+
+This matters more than it sounds. On monthly US retail sales the default grid puts its last changepoint in January 2008, so the final segment has to describe the crash, the trough and the recovery with one line and the forecast undershoots by 4%. Two changepoints, one where the crash starts (January 2008) and one at the trough (August 2009), bring the error down to 1%; the first one matters too, since it keeps the pre-crash years from bending the line the recovery starts from. Any evenly spaced grid, here or in Prophet, is hostage to whether a point lands near the break; naming the dates is not.
 
 ## Example: a slope change
 
