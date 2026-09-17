@@ -296,6 +296,12 @@ defmodule Soothsayer.Model do
   # At the lag positions the seasonal terms are only there to be subtracted
   # from the lags, and NeuralProphet detaches the trend inside them so that
   # subtraction doesn't train the trend a second time through the lags.
+  #
+  # NeuralProphet detaches the trend at the target positions too, so the
+  # multiplicative products never train it. Tested on 2026-09-17: detaching
+  # everywhere made Air Passengers worse on five seeds out of six (mean MAE
+  # 26.9 against 24.6) and moved the trend further from NeuralProphet's own
+  # (rmse 7.05 against 5.54), so the gradient through the products stays.
   defp detach_at_lags(trend, 0), do: trend
 
   defp detach_at_lags(trend, lags) do
