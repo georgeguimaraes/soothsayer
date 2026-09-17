@@ -25,6 +25,7 @@ defmodule Soothsayer.Model do
   alias Soothsayer.Quantiles
   alias Soothsayer.Regressors
   alias Soothsayer.Seasonality
+  alias Soothsayer.Series
   alias Soothsayer.Trainer
   alias Soothsayer.Trend
 
@@ -149,8 +150,11 @@ defmodule Soothsayer.Model do
     trend_input = Trend.build_input(config)
     trend = Trend.build_component(trend_input, config)
 
+    # Several series: the one-hot of the sample's series and its level.
+    series_inputs = Series.build_network_inputs(config)
+
     # Everything multiplicative is scaled by the trend through this one node.
-    scale = multiplicative_scale(trend, config)
+    scale = multiplicative_scale(trend, series_inputs, config)
 
     # Seasonality, one component per period. Periods missing from the config
     # (only in unit tests, Soothsayer.new fills them all in) become zero.
@@ -221,12 +225,14 @@ defmodule Soothsayer.Model do
           [ar, events_at_targets, regressors_at_targets, lagged_regressors]
       )
 
-    # Quantile heads see every input the components see
+    # Quantile heads see every input the components see, and which series
+    # a sample belongs to, so widths can differ per series
     inputs =
       Enum.reject(
         [trend_input] ++
           Enum.map(Seasonality.periods(config), &seasonality_inputs[&1]) ++
-          [ar_input, events_input, regressors_input, lagged_regressors_input],
+          [ar_input, events_input, regressors_input, lagged_regressors_input] ++
+          [series_inputs && series_inputs.series],
         &is_nil/1
       )
 
@@ -249,11 +255,16 @@ defmodule Soothsayer.Model do
   # network works in normalized y space, where the trend is centered near
   # zero, so the multiplier is the trend plus the series level (mean / std).
   # The level is only known after fit computes the normalization, which is
-  # why fit rebuilds the network; before that the level is zero. NeuralProphet
+  # why fit rebuilds the network; before that the level is zero. With several
+  # series each sample brings its own level as an input. NeuralProphet
   # computes trend + additive + trend.detach() * multiplicative, the same sum,
   # except that the trend is detached only at the lag positions here.
-  defp multiplicative_scale(trend, config) do
+  defp multiplicative_scale(trend, nil, config) do
     Axon.add(detach_at_lags(trend, AR.lags(config)), Axon.constant(series_level(config)))
+  end
+
+  defp multiplicative_scale(trend, %{level: level}, config) do
+    Axon.add(detach_at_lags(trend, AR.lags(config)), level)
   end
 
   # A disabled period is a scalar constant and stays one; multiplying it by

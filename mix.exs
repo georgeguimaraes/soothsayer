@@ -84,7 +84,8 @@ defmodule Soothsayer.MixProject do
         "guides/events.md",
         "guides/regressors.md",
         "guides/missing_data.md",
-        "guides/uncertainty.md"
+        "guides/uncertainty.md",
+        "guides/series.md"
       ],
       groups_for_extras: [
         Tutorials: [
@@ -96,7 +97,8 @@ defmodule Soothsayer.MixProject do
           "guides/events.md",
           "guides/regressors.md",
           "guides/missing_data.md",
-          "guides/uncertainty.md"
+          "guides/uncertainty.md",
+          "guides/series.md"
         ]
       ]
     ]

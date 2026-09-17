@@ -80,6 +80,7 @@ defmodule Soothsayer do
       epochs: :auto,
       learning_rate: :auto,
       recency: %{weight: 2, start: 0.0},
+      series: %{column: nil, normalize: :local},
       schedule: :one_cycle,
       optimizer: :adam,
       batch_size: nil,
@@ -118,6 +119,7 @@ defmodule Soothsayer do
     validate_events!(config)
     validate_training_options!(config)
     validate_recency!(config)
+    Soothsayer.Series.validate_config!(config)
   end
 
   defp validate_recency!(%{recency: %{weight: weight, start: start}})
@@ -383,7 +385,11 @@ defmodule Soothsayer do
     # Every series is prepared on its own: sorted, on the frequency grid,
     # gaps imputed. What the series share (frequency, the time axis, the
     # :auto seasonalities, holidays) is settled from all of them together.
-    prepared = Enum.map(split_series(data, model.config), &prepare_series(&1, model.config))
+    prepared =
+      data
+      |> Soothsayer.Series.split(model.config)
+      |> Enum.map(&prepare_series(&1, model.config))
+
     frequency = shared_frequency(prepared)
 
     all_timestamps =
@@ -395,16 +401,20 @@ defmodule Soothsayer do
       |> Map.update!(:seasonality, &Seasonality.resolve_auto(&1, all_timestamps, frequency))
       |> put_holiday_events(all_timestamps)
       |> Map.merge(Trend.changepoint_metadata(all_timestamps, model.config))
+      |> put_series_ids(prepared)
 
     model = %{model | config: config}
     time_span = Timestamp.days_since(List.last(all_timestamps), List.first(all_timestamps))
+    shared_normalization = shared_y_normalization(prepared, config)
 
     # One training sample per forecast origin, per series. Without AR that
     # is every timestamp on its own. With AR a sample is the origin's lags
     # followed by its forecast_steps targets, see AR.training_samples/4,
     # and every time-based feature is gathered at all of those positions so
     # the network can evaluate the components at the lag timestamps too.
-    samples = Enum.map(prepared, &training_samples(&1, model, events_df, time_span))
+    samples =
+      Enum.map(prepared, &training_samples(&1, model, events_df, time_span, shared_normalization))
+
     x = samples |> Enum.map(& &1.x) |> concatenate_inputs()
     y_normalized = samples |> Enum.map(& &1.y) |> Nx.concatenate(axis: 0)
 
@@ -448,8 +458,29 @@ defmodule Soothsayer do
     %{fitted_model | config: Map.put(config, :training_data, training_data)}
   end
 
-  # Single series: the whole frame under the id nil.
-  defp split_series(data, _config), do: [{nil, data}]
+  defp put_series_ids(config, [%{id: nil}]), do: config
+
+  defp put_series_ids(config, prepared) do
+    put_in(config, [:series, :ids], Enum.map(prepared, & &1.id))
+  end
+
+  # Under normalize: :global one mean and std over every series' known
+  # values; nil means each series computes its own.
+  defp shared_y_normalization(prepared, %{series: %{normalize: :global, column: column}})
+       when not is_nil(column) do
+    known =
+      prepared
+      |> Enum.flat_map(fn %{data: data} ->
+        data["y"] |> Series.cast({:f, 64}) |> Series.to_list()
+      end)
+      |> Enum.reject(&(&1 == :nan))
+      |> Nx.tensor(type: {:f, 32})
+
+    {_normalized, mean, std} = normalize(Nx.new_axis(known, -1))
+    %{mean: mean, std: std}
+  end
+
+  defp shared_y_normalization(_prepared, _config), do: nil
 
   # Sorted timestamps, missing rows and values dropped, regridded or
   # imputed, and the condition columns read from the prepared frame.
@@ -471,23 +502,30 @@ defmodule Soothsayer do
     }
   end
 
-  defp shared_frequency([%{frequency: frequency}]), do: frequency
+  defp shared_frequency(prepared) do
+    case prepared |> Enum.map(& &1.frequency) |> Enum.uniq() do
+      [frequency] ->
+        frequency
+
+      _frequencies ->
+        raise ArgumentError,
+              "Every series must have the same frequency, got " <>
+                Enum.map_join(prepared, ", ", fn %{id: id, frequency: frequency} ->
+                  "#{inspect(id)}: #{Frequency.describe(frequency)}"
+                end)
+    end
+  end
 
   # The inputs, targets and the training entry of one series.
-  defp training_samples(
-         %{id: id, data: data, timestamps: timestamps} = series,
-         model,
-         events_df,
-         time_span
-       ) do
+  defp training_samples(series, model, events_df, time_span, shared_normalization) do
+    %{id: id, data: data, timestamps: timestamps} = series
     config = model.config
 
     # The mean and std come from the known values only, so the NaNs left at
     # unfilled positions stay NaN and never reach a training sample.
     y_values = data["y"] |> Series.cast({:f, 64}) |> Series.to_list()
     y_full = Nx.tensor(y_values, type: {:f, 32})
-    known_y = y_values |> Enum.reject(&(&1 == :nan)) |> Nx.tensor(type: {:f, 32})
-    {_known_normalized, y_mean, y_std} = normalize(Nx.new_axis(known_y, -1))
+    %{mean: y_mean, std: y_std} = shared_normalization || own_y_normalization(y_values)
     y_full_normalized = Nx.divide(Nx.subtract(y_full, y_mean), y_std)
 
     {y_normalized, ar_inputs, position_indices} =
@@ -554,7 +592,15 @@ defmodule Soothsayer do
         Map.new(LaggedRegressors.names(config), &{&1, Regressors.values_by_timestamp(data, &1)})
     }
 
+    x = Soothsayer.Series.put_inputs(x, config, id, entry, Nx.axis_size(y_normalized, 0))
+
     %{id: id, x: x, y: y_normalized, entry: entry}
+  end
+
+  defp own_y_normalization(y_values) do
+    known_y = y_values |> Enum.reject(&(&1 == :nan)) |> Nx.tensor(type: {:f, 32})
+    {_known_normalized, mean, std} = normalize(Nx.new_axis(known_y, -1))
+    %{mean: mean, std: std}
   end
 
   defp concatenate_inputs([x]), do: x
@@ -565,8 +611,10 @@ defmodule Soothsayer do
     end)
   end
 
-  # The level the network bakes in, see Soothsayer.Model.
-  defp y_normalization([%{entry: %{normalization: normalization}}]), do: normalization
+  # The level the network bakes in, see Soothsayer.Model. With several
+  # series the level is an input instead.
+  defp y_normalization([%{id: nil, entry: %{normalization: normalization}}]), do: normalization
+  defp y_normalization(_samples), do: nil
 
   # The trend features of some timestamps on the model's time axis: the
   # numeric time from first_timestamp and the changepoint columns.
@@ -670,10 +718,12 @@ defmodule Soothsayer do
       >
 
   """
-  @spec predict(Soothsayer.Model.t(), Explorer.Series.t(), keyword()) :: Explorer.DataFrame.t()
-  def predict(%Model{} = model, %Series{} = x, opts \\ []) do
+  @spec predict(Soothsayer.Model.t(), Explorer.Series.t() | Explorer.DataFrame.t(), keyword()) ::
+          Explorer.DataFrame.t()
+  def predict(%Model{} = model, x, opts \\ []) do
     components = predict_components(model, x, opts)
-    rows = Series.size(x)
+    {timestamps, id_columns} = prediction_frame_columns(model, x)
+    rows = Series.size(timestamps)
 
     quantile_columns =
       components.quantiles
@@ -693,9 +743,32 @@ defmodule Soothsayer do
       [{"yhat", components.combined}] ++
         quantile_columns ++ interval_columns(model, components) ++ component_columns
 
-    DataFrame.new([
-      {"ds", x} | Enum.map(columns, fn {name, tensor} -> {name, column(tensor, rows)} end)
-    ])
+    DataFrame.new(
+      [{"ds", timestamps}] ++
+        id_columns ++ Enum.map(columns, fn {name, tensor} -> {name, column(tensor, rows)} end)
+    )
+  end
+
+  # The ds column of the output and, for several series, the id column.
+  defp prediction_frame_columns(model, %Series{} = x) do
+    if Soothsayer.Series.enabled?(model.config) do
+      raise ArgumentError,
+            "This model was fitted on several series. Pass a dataframe with \"ds\" and " <>
+              "the #{inspect(Soothsayer.Series.column(model.config))} column to predict."
+    end
+
+    {x, []}
+  end
+
+  defp prediction_frame_columns(model, %DataFrame{} = x) do
+    case Soothsayer.Series.column(model.config) do
+      nil ->
+        raise ArgumentError,
+              "This model was fitted on a single series. Pass a series of dates to predict."
+
+      column ->
+        {x["ds"], [{column, x[column]}]}
+    end
   end
 
   # Conformal bounds, once the model was calibrated with calibrate/3.
@@ -819,14 +892,98 @@ defmodule Soothsayer do
           quantiles: %{float() => Nx.Tensor.t()},
           step: Nx.Tensor.t()
         }
-  def predict_components(%Model{} = model, %Series{} = x, opts \\ []) do
+  def predict_components(%Model{} = model, x, opts \\ []) do
     events_df = Keyword.get(opts, :events)
     history = Keyword.get(opts, :history)
     regressors_df = Keyword.get(opts, :regressors)
     validate_regressors_option!(model, regressors_df)
+    validate_series_column!(model, history, "history")
+    {timestamps, _id_columns} = prediction_frame_columns(model, x)
+    prediction_timestamps = Timestamp.from_series(timestamps)
 
-    prediction_timestamps = Timestamp.from_series(x)
-    entry = series_entry(model, nil)
+    case Soothsayer.Series.column(model.config) do
+      nil ->
+        series_components(model, nil, prediction_timestamps, events_df, history, regressors_df)
+
+      column ->
+        ids = Series.to_list(x[column])
+        validate_known_ids!(model, ids)
+
+        # Each series is forecast on its own, in the order its rows appear,
+        # and the results go back into the caller's row order.
+        {components, positions} =
+          ids
+          |> Enum.with_index()
+          |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+          |> Enum.sort()
+          |> Enum.map(fn {id, indices} ->
+            components =
+              series_components(
+                model,
+                id,
+                Enum.map(indices, &Enum.at(prediction_timestamps, &1)),
+                events_df,
+                history && Soothsayer.Series.rows_of(history, column, id),
+                regressors_df && Soothsayer.Series.rows_of(regressors_df, column, id)
+              )
+
+            {components, indices}
+          end)
+          |> Enum.unzip()
+
+        order =
+          positions
+          |> List.flatten()
+          |> Enum.with_index()
+          |> Enum.sort()
+          |> Enum.map(&elem(&1, 1))
+
+        reorder_components(components, Nx.tensor(order))
+    end
+  end
+
+  defp validate_known_ids!(model, ids) do
+    known = Soothsayer.Series.ids(model.config)
+
+    case Enum.reject(Enum.uniq(ids), &(&1 in known)) do
+      [] ->
+        :ok
+
+      unknown ->
+        raise ArgumentError,
+              "Unknown series #{inspect(unknown)}, the model was fitted on #{inspect(known)}"
+    end
+  end
+
+  defp reorder_components(components, order) do
+    quantiles =
+      components
+      |> Enum.map(& &1.quantiles)
+      |> concatenate_components(order)
+
+    components
+    |> Enum.map(&Map.delete(&1, :quantiles))
+    |> concatenate_components(order)
+    |> Map.put(:quantiles, quantiles)
+  end
+
+  # Maps of tensors, concatenated along the rows and put in `order`. Scalar
+  # (disabled) components stay scalars.
+  defp concatenate_components(maps, order) do
+    Map.new(hd(maps), fn {key, first} ->
+      if Nx.rank(first) == 0 do
+        {key, first}
+      else
+        tensor = maps |> Enum.map(& &1[key]) |> Nx.concatenate(axis: 0)
+        {key, Nx.take(tensor, order, axis: 0)}
+      end
+    end)
+  end
+
+  # The components of one series' timestamps, `{n, 1}` each.
+  defp series_components(model, id, prediction_timestamps, events_df, history, regressors_df) do
+    entry = series_entry(model, id)
+    series = %{id: id, entry: entry}
 
     regressor_values = %{
       regressors:
@@ -849,6 +1006,7 @@ defmodule Soothsayer do
             last_observed,
             regressor_values,
             model,
+            series,
             prediction_timestamps,
             events_df
           )
@@ -889,7 +1047,10 @@ defmodule Soothsayer do
         {inputs, ones, ones}
       end
 
-    x_normalized = normalize_with_params(x_input, model.config.normalization.x)
+    x_normalized =
+      x_input
+      |> normalize_with_params(model.config.normalization.x)
+      |> put_series_inputs(model, series)
 
     # The network forecasts every step from each sample's origin. Each
     # requested timestamp keeps the step it was asked for, so every
@@ -1094,6 +1255,7 @@ defmodule Soothsayer do
   defp validate_regressors_option!(%Model{} = model, regressors_df) do
     names = Regressors.names(model.config)
     conditions = Seasonality.condition_columns(model.config)
+    validate_series_column!(model, regressors_df, "regressors")
 
     case {names ++ conditions, regressors_df} do
       {[], _frame} ->
@@ -1133,6 +1295,10 @@ defmodule Soothsayer do
     |> Map.new(fn {key, features} ->
       {key, Nx.reshape(features, {length(samples), positions, :auto})}
     end)
+  end
+
+  defp put_series_inputs(x, model, %{id: id, entry: entry}) do
+    Soothsayer.Series.put_inputs(x, model.config, id, entry, Nx.axis_size(x["trend"], 0))
   end
 
   # Observed values in normalized y space, keyed by timestamp, and the last
@@ -1186,6 +1352,7 @@ defmodule Soothsayer do
          last_observed,
          regressor_values,
          model,
+         series,
          prediction_timestamps,
          events_df
        ) do
@@ -1195,7 +1362,7 @@ defmodule Soothsayer do
     |> Frequency.range(last_prediction, model.config.frequency)
     |> Enum.chunk_every(AR.forecast_steps(model.config))
     |> Enum.reduce(known_values, fn block_timestamps, known_values ->
-      forecast_block(known_values, regressor_values, model, block_timestamps, events_df)
+      forecast_block(known_values, regressor_values, model, series, block_timestamps, events_df)
     end)
   end
 
@@ -1204,13 +1371,14 @@ defmodule Soothsayer do
   # last block may be shorter than forecast_steps and keeps only what it
   # needs). Returns known_values with the block's predictions added, in
   # normalized y space so they can feed later lags.
-  defp forecast_block(known_values, regressor_values, model, block_timestamps, events_df) do
+  defp forecast_block(known_values, regressor_values, model, series, block_timestamps, events_df) do
     origin = Frequency.shift(hd(block_timestamps), -1, model.config.frequency)
 
     inputs =
       model
       |> sample_inputs([origin], block_timestamps, known_values, regressor_values, events_df)
       |> normalize_with_params(model.config.normalization.x)
+      |> put_series_inputs(model, series)
 
     %{combined: combined} = Model.predict(model, inputs)
 
@@ -1270,8 +1438,9 @@ defmodule Soothsayer do
 
   # The lags are already in normalized y space, which is the space the
   # components subtracted from them predict in, so they must stay there.
-  # The sample weights are loss weights, not features.
-  @unnormalized_inputs ["ar", "sample_weight"]
+  # The sample weights are loss weights, not features, and the series
+  # one-hot and level must reach the network as they are.
+  @unnormalized_inputs ["ar", "sample_weight", "series", "series_level"]
 
   defp normalize_inputs(x, config) do
     Enum.reduce(x, {%{}, %{}}, fn {key, tensor}, acc ->
@@ -1343,6 +1512,26 @@ defmodule Soothsayer do
               "Training data must contain a 'y' (target values) column. Available columns: #{inspect(columns)}"
 
       true ->
+        :ok
+    end
+  end
+
+  # With several series every frame given at predict must say which series
+  # its rows belong to.
+  defp validate_series_column!(_model, nil, _name), do: :ok
+
+  defp validate_series_column!(model, %DataFrame{} = frame, name) do
+    case Soothsayer.Series.column(model.config) do
+      nil ->
+        :ok
+
+      column ->
+        unless column in DataFrame.names(frame) do
+          raise ArgumentError,
+                "The #{name} frame needs the #{inspect(column)} column, this model was " <>
+                  "fitted on several series. Available columns: #{inspect(DataFrame.names(frame))}"
+        end
+
         :ok
     end
   end

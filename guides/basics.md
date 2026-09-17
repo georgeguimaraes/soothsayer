@@ -78,6 +78,7 @@ model = Soothsayer.new(%{
 | `quantiles` | `[]` | Prediction interval quantiles, e.g. `[0.1, 0.9]`, see [Uncertainty](uncertainty.md) |
 | `epochs` | `:auto` | Passes over the training data, picked from the data size, or a number |
 | `learning_rate` | `:auto` | Found by a learning rate range test before training, or a number |
+| `series` | `%{column: nil, normalize: :local}` | Several series in one model, told apart by `column`, each scaled on its own or all together, see [Several series](series.md) |
 | `recency` | `%{weight: 2, start: 0.0}` | Recent rows weigh more in the loss, the last one `weight` times the oldest; `weight: nil` turns it off, see [Trends](trends.md#recent-data-first) |
 | `schedule` | `:one_cycle` | Learning rate schedule, `:one_cycle` or `:constant` |
 | `optimizer` | `:adam` | `:adam` or `:adamw` |

@@ -1589,6 +1589,172 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "several series" do
+    # Two series with the same seasonal amplitude and noise, shifted in
+    # level, so one seasonality kernel fits both once each is z-scored.
+    defp panel_frame(ids_and_levels, dates, start_date, seed) do
+      :rand.seed(:exsss, {seed, seed, seed})
+
+      ids_and_levels
+      |> Enum.map(fn {id, level} ->
+        y =
+          Enum.map(dates, fn date ->
+            days = Date.diff(date, start_date)
+
+            level + 0.02 * days + 5 * :math.sin(2 * :math.pi() * days / 365.25) +
+              :rand.normal(0, 1)
+          end)
+
+        DataFrame.new(%{"ds" => dates, "y" => y, "id" => List.duplicate(id, length(dates))})
+      end)
+      |> DataFrame.concat_rows()
+    end
+
+    defp rows_of(frame, id), do: DataFrame.filter_with(frame, &Series.equal(&1["id"], id))
+
+    defp mae(predictions, actual) do
+      Series.subtract(predictions["yhat"], actual["y"]) |> Series.abs() |> Series.mean()
+    end
+
+    test "one model over two series forecasts each about as well as its own fit" do
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      future_dates = Date.range(~D[2023-01-01], ~D[2023-03-31]) |> Enum.to_list()
+      levels = [{"a", 100}, {"b", 300}]
+      training = panel_frame(levels, dates, start_date, 1)
+      holdout = panel_frame(levels, future_dates, start_date, 2)
+      config = %{epochs: 20, seed: 1, trend: %{changepoints: 0}}
+
+      fitted = Soothsayer.fit(Soothsayer.new(Map.put(config, :series, %{column: "id"})), training)
+      assert fitted.config.series.ids == ["a", "b"]
+
+      # rows in a shuffled order come back in that order, with the id column
+      shuffled = DataFrame.slice(holdout, Enum.shuffle(0..(DataFrame.n_rows(holdout) - 1)))
+      predictions = Soothsayer.predict(fitted, DataFrame.select(shuffled, ["ds", "id"]))
+
+      assert DataFrame.names(predictions) |> Enum.take(3) == ["ds", "id", "yhat"]
+      assert Series.to_list(predictions["ds"]) == Series.to_list(shuffled["ds"])
+      assert Series.to_list(predictions["id"]) == Series.to_list(shuffled["id"])
+
+      for {id, level} <- levels do
+        single =
+          Soothsayer.fit(
+            Soothsayer.new(config),
+            DataFrame.select(rows_of(training, id), ["ds", "y"])
+          )
+
+        single_error =
+          mae(Soothsayer.predict(single, rows_of(holdout, id)["ds"]), rows_of(holdout, id))
+
+        panel_error = mae(rows_of(predictions, id), rows_of(shuffled, id))
+        assert panel_error < single_error * 1.3
+        assert_in_delta Series.mean(rows_of(predictions, id)["trend"]), level + 0.02 * 1140, 15
+      end
+
+      # the components still add up per row
+      components = Soothsayer.predict_components(fitted, DataFrame.select(holdout, ["ds", "id"]))
+      parts = for key <- [:trend, :yearly_seasonality, :weekly_seasonality], do: components[key]
+      summed = Enum.reduce(parts, &Nx.add/2)
+      assert Nx.all_close(summed, components.combined, atol: 1.0e-2) |> Nx.to_number() == 1
+    end
+
+    test "predict wants a frame with the id column and known ids" do
+      start_date = ~D[2022-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      training = panel_frame([{"a", 10}, {"b", 20}], dates, start_date, 3)
+
+      fitted =
+        Soothsayer.fit(
+          Soothsayer.new(%{series: %{column: "id"}, epochs: 1, trend: %{changepoints: 0}}),
+          training
+        )
+
+      future = Series.from_list([~D[2023-01-01]])
+
+      assert_raise ArgumentError, ~r/fitted on several series/, fn ->
+        Soothsayer.predict(fitted, future)
+      end
+
+      assert_raise ArgumentError, ~r/Unknown series \["c"\]/, fn ->
+        Soothsayer.predict(fitted, DataFrame.new(%{"ds" => [~D[2023-01-01]], "id" => ["c"]}))
+      end
+
+      single =
+        Soothsayer.fit(
+          Soothsayer.new(%{epochs: 1}),
+          DataFrame.select(rows_of(training, "a"), ["ds", "y"])
+        )
+
+      assert_raise ArgumentError, ~r/fitted on a single series/, fn ->
+        Soothsayer.predict(single, DataFrame.new(%{"ds" => [~D[2023-01-01]], "id" => ["a"]}))
+      end
+    end
+
+    test "series with different frequencies are refused" do
+      daily =
+        DataFrame.new(%{
+          "ds" => Date.range(~D[2022-01-01], ~D[2022-01-31]) |> Enum.to_list(),
+          "y" => Enum.to_list(1..31),
+          "id" => List.duplicate("a", 31)
+        })
+
+      weekly =
+        DataFrame.new(%{
+          "ds" => Date.range(~D[2022-01-01], ~D[2022-03-31], 7) |> Enum.to_list(),
+          "y" => Enum.to_list(1..13),
+          "id" => List.duplicate("b", 13)
+        })
+
+      assert_raise ArgumentError, ~r/same frequency/, fn ->
+        Soothsayer.fit(
+          Soothsayer.new(%{series: %{column: "id"}, epochs: 1}),
+          DataFrame.concat_rows([daily, weekly])
+        )
+      end
+    end
+
+    test "auto-regression seeds each series from its own history and the backtest walks each series" do
+      start_date = ~D[2021-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      levels = [{"a", 100}, {"b", 300}]
+      training = panel_frame(levels, dates, start_date, 4)
+
+      model =
+        Soothsayer.new(%{
+          series: %{column: "id"},
+          ar: %{enabled: true, lags: 7, forecast_steps: 2},
+          trend: %{changepoints: 0},
+          epochs: 5,
+          seed: 2
+        })
+
+      result = Soothsayer.backtest(model, training, validation_fraction: 0.02)
+
+      assert DataFrame.names(result.predictions) |> Enum.take(3) == ["id", "origin", "ds"]
+
+      assert result.predictions["id"] |> Series.distinct() |> Series.to_list() |> Enum.sort() == [
+               "a",
+               "b"
+             ]
+
+      assert result.metrics.mean_absolute_error < 10
+
+      # history for one series only moves that series' forecast
+      fitted = Soothsayer.fit(model, training)
+      future = DataFrame.new(%{"ds" => [~D[2023-01-02], ~D[2023-01-02]], "id" => ["a", "b"]})
+      plain = Soothsayer.predict(fitted, future)
+      history = DataFrame.new(%{"ds" => [~D[2023-01-01]], "y" => [500.0], "id" => ["a"]})
+      with_history = Soothsayer.predict(fitted, future, history: history)
+
+      assert abs(Series.first(with_history["yhat"]) - Series.first(plain["yhat"])) > 5
+      assert Series.last(with_history["yhat"]) == Series.last(plain["yhat"])
+
+      assert_raise ArgumentError, ~r/history frame needs the "id" column/, fn ->
+        Soothsayer.predict(fitted, future, history: DataFrame.select(history, ["ds", "y"]))
+      end
+    end
+  end
+
   describe "training defaults" do
     test "auto learning rate and epochs are resolved and recorded on the fitted model" do
       dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()

@@ -70,7 +70,7 @@ defmodule Soothsayer.Backtest do
     horizon = Keyword.get(opts, :horizon, AR.forecast_steps(model.config))
     events = Keyword.get(opts, :events)
 
-    {train, validation} = split(data, validation_fraction)
+    {train, validation} = split(data, validation_fraction, Soothsayer.Series.column(model.config))
     regressors = Keyword.get(opts, :regressors, validation)
 
     fitted_model = Soothsayer.fit(model, train, fit_options(events))
@@ -106,6 +106,35 @@ defmodule Soothsayer.Backtest do
         %DataFrame{} = validation,
         opts \\ []
       ) do
+    case Soothsayer.Series.column(fitted_model.config) do
+      nil ->
+        series_rolling_predictions(fitted_model, nil, validation, opts)
+
+      column ->
+        # Every series walks its own validation rows; the frames are stacked
+        # with the id column first.
+        validation
+        |> Soothsayer.Series.unique_ids!(column)
+        |> Enum.map(&one_series_rolling_predictions(fitted_model, column, &1, validation, opts))
+        |> DataFrame.concat_rows()
+    end
+  end
+
+  defp one_series_rolling_predictions(fitted_model, column, id, validation, opts) do
+    rows = Soothsayer.Series.rows_of(validation, column, id)
+
+    opts =
+      Keyword.update(opts, :regressors, rows, &(&1 && Soothsayer.Series.rows_of(&1, column, id)))
+
+    predictions = series_rolling_predictions(fitted_model, id, rows, opts)
+    ids = Series.from_list(List.duplicate(id, DataFrame.n_rows(predictions)))
+
+    predictions
+    |> DataFrame.put(column, ids)
+    |> then(&DataFrame.select(&1, [column | DataFrame.names(&1) -- [column]]))
+  end
+
+  defp series_rolling_predictions(fitted_model, id, validation, opts) do
     horizon = Keyword.get(opts, :horizon, AR.forecast_steps(fitted_model.config))
     events = Keyword.get(opts, :events)
     regressors = Keyword.get(opts, :regressors, validation)
@@ -113,7 +142,7 @@ defmodule Soothsayer.Backtest do
     actual_by_date = Enum.zip(validation_dates, Series.to_list(validation["y"])) |> Map.new()
 
     last_training_date =
-      same_kind(Soothsayer.series_entry(fitted_model, nil).last_timestamp, hd(validation_dates))
+      same_kind(Soothsayer.series_entry(fitted_model, id).last_timestamp, hd(validation_dates))
 
     predict_options = [regressors: regressors] |> maybe_put(:events, events)
 
@@ -127,7 +156,7 @@ defmodule Soothsayer.Backtest do
 
     rows =
       Enum.flat_map(origins, fn {origin_date, target_dates, options} ->
-        forecast_rows(fitted_model, origin_date, target_dates, options, actual_by_date)
+        forecast_rows(fitted_model, id, origin_date, target_dates, options, actual_by_date)
       end)
 
     columns =
@@ -155,9 +184,9 @@ defmodule Soothsayer.Backtest do
     end)
   end
 
-  defp forecast_rows(fitted_model, origin_date, target_dates, options, actual_by_date) do
-    components =
-      Soothsayer.predict_components(fitted_model, Series.from_list(target_dates), options)
+  defp forecast_rows(fitted_model, id, origin_date, target_dates, options, actual_by_date) do
+    input = prediction_input(target_dates, id, fitted_model)
+    components = Soothsayer.predict_components(fitted_model, input, options)
 
     interval =
       if calibrated?(fitted_model) do
@@ -204,6 +233,15 @@ defmodule Soothsayer.Backtest do
 
   defp calibrated?(model), do: is_map(model.config[:calibration])
 
+  # A series of dates for a single series model, a frame with the id column
+  # for several series.
+  defp prediction_input(dates, nil, _model), do: Series.from_list(dates)
+
+  defp prediction_input(dates, id, model) do
+    column = Soothsayer.Series.column(model.config)
+    DataFrame.new([{"ds", dates}, {column, List.duplicate(id, length(dates))}])
+  end
+
   # The training data keeps naive datetimes, the origin column follows the
   # validation frame's own kind.
   defp same_kind(%NaiveDateTime{} = timestamp, %Date{}), do: NaiveDateTime.to_date(timestamp)
@@ -211,13 +249,26 @@ defmodule Soothsayer.Backtest do
 
   @doc """
   Splits a dataframe into training and validation parts, validation being
-  the last `max(1, trunc(rows * fraction))` rows.
+  the last `max(1, trunc(rows * fraction))` rows. With a series `column`
+  every series is split that way on its own.
   """
-  @spec split(DataFrame.t(), float()) :: {DataFrame.t(), DataFrame.t()}
-  def split(%DataFrame{} = data, validation_fraction) do
+  @spec split(DataFrame.t(), float(), String.t() | nil) :: {DataFrame.t(), DataFrame.t()}
+  def split(data, validation_fraction, column \\ nil)
+
+  def split(%DataFrame{} = data, validation_fraction, nil) do
     rows = DataFrame.n_rows(data)
     validation_rows = max(1, trunc(rows * validation_fraction))
     {DataFrame.head(data, rows - validation_rows), DataFrame.tail(data, validation_rows)}
+  end
+
+  def split(%DataFrame{} = data, validation_fraction, column) do
+    {trains, validations} =
+      data
+      |> Soothsayer.Series.unique_ids!(column)
+      |> Enum.map(&split(Soothsayer.Series.rows_of(data, column, &1), validation_fraction, nil))
+      |> Enum.unzip()
+
+    {DataFrame.concat_rows(trains), DataFrame.concat_rows(validations)}
   end
 
   @doc """
