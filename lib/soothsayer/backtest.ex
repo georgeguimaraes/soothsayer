@@ -113,7 +113,7 @@ defmodule Soothsayer.Backtest do
     actual_by_date = Enum.zip(validation_dates, Series.to_list(validation["y"])) |> Map.new()
 
     last_training_date =
-      same_kind(fitted_model.config.training_data.last_timestamp, hd(validation_dates))
+      same_kind(Soothsayer.series_entry(fitted_model, nil).last_timestamp, hd(validation_dates))
 
     predict_options = [regressors: regressors] |> maybe_put(:events, events)
 

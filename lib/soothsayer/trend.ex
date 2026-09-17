@@ -412,31 +412,41 @@ defmodule Soothsayer.Trend do
   """
   @spec build_features(list(Timestamp.input()), map()) :: {Nx.Tensor.t(), map()}
   def build_features(timestamps, config) do
-    first_timestamp = List.first(timestamps)
-    changepoints = get_in(config, [:trend, :changepoints]) || 0
-    changepoints_range = get_in(config, [:trend, :changepoints_range]) || 0.8
-
-    changepoint_positions =
-      compute_numeric_changepoint_positions(
-        timestamps,
-        first_timestamp,
-        changepoints,
-        changepoints_range
-      )
+    %{first_timestamp: first_timestamp, changepoint_positions: changepoint_positions} =
+      metadata = changepoint_metadata(timestamps, config)
 
     t = date_to_numeric(timestamps, first_timestamp) |> Nx.new_axis(-1)
 
     changepoint_features =
       build_changepoint_features(t, changepoint_positions, basis(config), growth(config))
 
-    tensor = build_trend_input(t, changepoint_features)
+    {build_trend_input(t, changepoint_features), metadata}
+  end
 
-    metadata = %{
+  @doc """
+  The time axis of a model: `first_timestamp`, the origin of the numeric
+  time, and `changepoint_positions`, in days from it, spread over the first
+  `changepoints_range` of the sorted timestamps.
+  """
+  @spec changepoint_metadata(list(Timestamp.input()), map()) :: %{
+          first_timestamp: Timestamp.input(),
+          changepoint_positions: list(float()) | nil
+        }
+  def changepoint_metadata(timestamps, config) do
+    first_timestamp = List.first(timestamps)
+    changepoints = get_in(config, [:trend, :changepoints]) || 0
+    changepoints_range = get_in(config, [:trend, :changepoints_range]) || 0.8
+
+    %{
       first_timestamp: first_timestamp,
-      changepoint_positions: changepoint_positions
+      changepoint_positions:
+        compute_numeric_changepoint_positions(
+          timestamps,
+          first_timestamp,
+          changepoints,
+          changepoints_range
+        )
     }
-
-    {tensor, metadata}
   end
 
   defp compute_numeric_changepoint_positions(

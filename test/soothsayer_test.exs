@@ -970,8 +970,11 @@ defmodule SoothsayerTest do
       fitted = Soothsayer.fit(model, gapped)
 
       # the regridded row got an imputed condition value along with its y
-      assert length(fitted.config.training_data.timestamps) == DataFrame.n_rows(gapped) + 1
-      assert fitted.config.training_data.regressors["summer"][~N[2020-07-15 00:00:00]] == 1.0
+      assert length(Soothsayer.series_entry(fitted, nil).timestamps) ==
+               DataFrame.n_rows(gapped) + 1
+
+      assert Soothsayer.series_entry(fitted, nil).regressors["summer"][~N[2020-07-15 00:00:00]] ==
+               1.0
     end
   end
 
@@ -1222,10 +1225,10 @@ defmodule SoothsayerTest do
       {dates, data} = gapped_frame(40, [5, 6])
       fitted = Soothsayer.fit(Soothsayer.new(%{epochs: 1, learning_rate: 0.01}), data)
 
-      assert length(fitted.config.training_data.timestamps) == 38
+      assert length(Soothsayer.series_entry(fitted, nil).timestamps) == 38
 
       refute Enum.at(dates, 5) in Enum.map(
-               fitted.config.training_data.timestamps,
+               Soothsayer.series_entry(fitted, nil).timestamps,
                &NaiveDateTime.to_date/1
              )
 
@@ -1242,9 +1245,9 @@ defmodule SoothsayerTest do
       std = std |> Nx.squeeze() |> Nx.to_number()
       gap_timestamp = dates |> Enum.at(10) |> NaiveDateTime.new!(~T[00:00:00])
 
-      assert length(fitted.config.training_data.timestamps) == 40
+      assert length(Soothsayer.series_entry(fitted, nil).timestamps) == 40
 
-      assert_in_delta fitted.config.training_data.known_values[gap_timestamp],
+      assert_in_delta Soothsayer.series_entry(fitted, nil).known_values[gap_timestamp],
                       (15.0 - mean) / std,
                       1.0e-4
     end
@@ -1255,8 +1258,8 @@ defmodule SoothsayerTest do
       assert DataFrame.n_rows(without_row) == 39
 
       fitted = Soothsayer.fit(ar_model(), without_row)
-      assert length(fitted.config.training_data.timestamps) == 40
-      assert fitted.config.training_data.known_values |> Map.keys() |> length() == 40
+      assert length(Soothsayer.series_entry(fitted, nil).timestamps) == 40
+      assert Soothsayer.series_entry(fitted, nil).known_values |> Map.keys() |> length() == 40
     end
 
     test "with auto-regression an off-grid row raises" do
@@ -1276,7 +1279,7 @@ defmodule SoothsayerTest do
                    fn -> Soothsayer.fit(ar_model(), data) end
 
       fitted = Soothsayer.fit(ar_model(%{missing: %{drop_samples: true}}), data)
-      known = fitted.config.training_data.known_values
+      known = Soothsayer.series_entry(fitted, nil).known_values
 
       # 10 imputed from each side, the 20 in the middle stay unknown
       assert map_size(known) == 100
