@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.2.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.1.0...v1.2.0) (2026-09-17)
+
+
+### Features
+
+* changepoints at dates you know ([2c086b2](https://github.com/georgeguimaraes/soothsayer/commit/2c086b2058834938a95e22a4e0dadf108caad823))
+* cross-validation over several cutoffs ([a53d388](https://github.com/georgeguimaraes/soothsayer/commit/a53d3881aaa466c27496742ad8213bd0f8eea265))
+* events per series and forecasts for series the model never saw ([c971b63](https://github.com/georgeguimaraes/soothsayer/commit/c971b63c014a1b886c350df8a2c4995b0982973b))
+* future_timestamps helper ([65ee5fd](https://github.com/georgeguimaraes/soothsayer/commit/65ee5fd07d86a51802e775e5b1bc3b22a4269cb2))
+* logistic growth, a trend that saturates at a cap ([d20619d](https://github.com/georgeguimaraes/soothsayer/commit/d20619dd01eeb1f24fbf78c8312b6e889c0a5c7e))
+* recency has an enabled switch like ar and trend ([ae110f8](https://github.com/georgeguimaraes/soothsayer/commit/ae110f8fd3b236fe433bec711a66d315a032e845))
+
+
+### Bug Fixes
+
+* changepoints sit where NeuralProphet puts them ([151e6e0](https://github.com/georgeguimaraes/soothsayer/commit/151e6e06621d172783304900ad0ece89c6d4e3e4))
+* stop referencing Axon.ModelState.t() in specs ([34b9da6](https://github.com/georgeguimaraes/soothsayer/commit/34b9da602b9fe90493523500f48d2454baf8c9bd))
+
+
+### Documentation
+
+* future_timestamps in the guides, no more semicolons ([f469032](https://github.com/georgeguimaraes/soothsayer/commit/f469032afb2125cd412455057979b872ff203272))
+* predict takes a frame for several series, backtest horizon is an AR thing ([d4d7845](https://github.com/georgeguimaraes/soothsayer/commit/d4d784515ed6d8b5d28ffe4fbd2f31478ec02cf2))
+* why the trend is detached only at the lag positions ([b36c8e9](https://github.com/georgeguimaraes/soothsayer/commit/b36c8e9b6a7b135c44da7479f80ec18733c062e2))
+
+
+### Tests
+
+* Prophet as a second reference in the benchmarks ([9e8beed](https://github.com/georgeguimaraes/soothsayer/commit/9e8beeda88e773cf5b040eff25d75f992cd0d12a))
+* three more NeuralProphet benchmarks ([84c8538](https://github.com/georgeguimaraes/soothsayer/commit/84c853884184468e92513fb7f2594b932cd72aea))
+
 ## [1.1.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.0.0...v1.1.0) (2026-09-17)
 
 
