@@ -302,6 +302,7 @@ Soothsayer.new(%{
   schedule: :one_cycle,  # or :constant (default: one-cycle)
   optimizer: :adam,      # or :adamw
   batch_size: nil,       # rows per gradient step (default: from the data size)
+  recency: %{weight: 2, start: 0.0},  # recent rows weigh more in the loss, nil weight turns it off
   seed: nil              # integer for reproducible fits (default: random)
 })
 ```
@@ -313,6 +314,8 @@ The defaults follow NeuralProphet. Training runs in shuffled minibatches, so one
 With `learning_rate: :auto`, Soothsayer runs a learning rate range test before training: about a hundred steps with the rate climbing from `1.0e-6` to `10`, watching the training loss, and picking the rate where the loss falls fastest. That rate is the peak of the one-cycle schedule, which warms up from a tenth of it, peaks at 30% of training, and cools down to a hundredth by the end. The values actually used are recorded on the fitted model's config.
 
 Too smooth a fit wants more epochs or a fixed higher learning rate. A fit that only works on the training data wants fewer epochs or more regularization.
+
+Recent rows count more than old ones, NeuralProphet's newer samples weight: by default the last training row weighs twice the oldest, with a smooth ramp in between, so a slope that changed recently pulls harder. `recency: %{weight: 5, start: 0.5}` makes the last half of the data count up to five times more, `recency: %{weight: nil}` treats every row the same. See the [Trends guide](guides/trends.md#recent-data-first).
 
 ### Future regressors
 
@@ -381,7 +384,41 @@ predictions["yhat_10"]  # lower line of the 80% interval
 predictions["yhat_90"]  # upper line
 ```
 
-Each quantile is a linear head over the same inputs as the components, trained with the pinball loss, so intervals widen where the series is noisier. See the [Uncertainty guide](guides/uncertainty.md).
+Each quantile is a linear head over the same inputs as the components, trained with the pinball loss, so intervals widen where the series is noisier.
+
+Nothing forces those intervals to cover as much as they promise, so calibrate them on data the model hasn't seen:
+
+```elixir
+calibrated = Soothsayer.calibrate(fitted_model, calibration_df, alpha: 0.1)
+
+predictions = Soothsayer.predict(calibrated, future_dates)
+predictions["yhat_lower"]  # a 90% interval that holds up on new data
+predictions["yhat_upper"]
+```
+
+This is conformal prediction: the model forecasts the calibration stretch, and the size of its misses there sets the width. `method: :naive` (the default) builds a band of constant width around `yhat`, `method: :cqr` pushes the quantile band out by the right amount. See the [Uncertainty guide](guides/uncertainty.md).
+
+### Several series
+
+Many related series can share one model, NeuralProphet's global modeling. Put them in one frame with a column that names the series:
+
+```elixir
+model = Soothsayer.new(%{series: %{column: "store"}})
+fitted_model = Soothsayer.fit(model, df)   # df has ds, y and store
+
+future = DataFrame.new(%{"ds" => dates, "store" => stores})
+Soothsayer.predict(fitted_model, future)   # ds, store, yhat, ...
+```
+
+Every series is scaled and seeded for its lags on its own, and the components are shared, so a series with little history borrows the shape of the others. When they don't follow one shape, give each its own trend or seasonality:
+
+```elixir
+Soothsayer.new(%{
+  series: %{column: "store", trend: :local, seasonality: :local, local_regularization: 0.1}
+})
+```
+
+`local_regularization` pulls the per-series kernels toward their average, NeuralProphet's glocal mode. See the [Several series guide](guides/series.md).
 
 ### Evaluating a configuration
 
@@ -390,7 +427,7 @@ Each quantile is a linear head over the same inputs as the components, trained w
 ```elixir
 result = Soothsayer.backtest(model, df, horizon: 7)
 
-result.metrics              # %{mean_absolute_error: ..., root_mean_squared_error: ...}
+result.metrics              # %{mean_absolute_error: ..., root_mean_squared_error: ...}, plus coverage with an interval
 result.by_step[7]           # the same, for forecasts made 7 days ahead
 result.predictions          # DataFrame with origin, ds, step, y, yhat
 result.model                # the fitted model
@@ -486,9 +523,6 @@ The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's
 
 From NeuralProphet, still missing here:
 
-- conformal prediction (calibrating the intervals on a holdout set)
-- global and local modeling of many series at once through an ID column
-- newer-sample weighting in the loss
 - a choice of loss function (it's Huber)
 - the data split utilities, `split_df` and the cross-validation splits
 

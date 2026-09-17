@@ -53,14 +53,14 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 | Recurring events | Yes | No |
 | Uncertainty estimation | Yes | Yes |
 | Multiplicative seasonality | Yes | Yes |
-| Conformal prediction | No | Yes |
-| Global and local modeling (ID column) | No | Yes |
-| Newer sample weighting | No | Yes |
+| Conformal prediction | Yes | Yes |
+| Global and local modeling (several series in one model) | Yes | Yes |
+| Newer sample weighting | Yes | Yes |
 | Data split utilities | No | Yes |
 
 ## Where the numbers differ from NeuralProphet
 
-Same model, a few deliberate differences in the details. Regularization here is the lambda times the sum of absolute weights, applied from the first step with no rescaling, while NeuralProphet scales some of its lambdas and only starts the penalty at 66% of training, so a lambda that works there needs retuning here. The trend scale that multiplies seasonality, events and regressors in multiplicative mode is detached from the gradient only at the lag positions, NeuralProphet detaches it everywhere. Multiplicative components work with the trend disabled, they become rescaled additive ones, where NeuralProphet raises. Predict gives one `events` column and one `regressors` column in the units of the series instead of additive and multiplicative pairs. The Fourier columns are interleaved, sine then cosine per term, where NeuralProphet 1.0 puts all sines first, which only matters when you compare kernels. The trend basis is the same as NeuralProphet's: segmentwise without regularization, cumulative with it.
+Same model, a few deliberate differences in the details. Regularization here is the lambda times the sum of absolute weights, applied from the first step with no rescaling, while NeuralProphet scales some of its lambdas and only starts the penalty at 66% of training, so a lambda that works there needs retuning here. The trend scale that multiplies seasonality, events and regressors in multiplicative mode is detached from the gradient only at the lag positions, NeuralProphet detaches it everywhere. Multiplicative components work with the trend disabled, they become rescaled additive ones, where NeuralProphet raises. Predict gives one `events` column and one `regressors` column in the units of the series instead of additive and multiplicative pairs. The Fourier columns are interleaved, sine then cosine per term, where NeuralProphet 1.0 puts all sines first, which only matters when you compare kernels. The trend basis is the same as NeuralProphet's: segmentwise without regularization, cumulative with it. Conformal prediction takes the `ceil((n + 1)(1 - alpha))`-th smallest calibration score as its width, the finite-sample rank, where NeuralProphet takes `scores[-int(n * alpha)]`, and puts the band in `yhat_lower` and `yhat_upper` instead of overwriting the quantile columns. With several series the events are shared, an unknown id raises, the time axis is always global, and local mode covers the whole trend and every seasonal period at once with a per-series trend intercept, where NeuralProphet has a switch per period and one intercept. Recent rows weigh more in the loss by default on both sides, weight 2 with a half cosine ramp.
 
 ## Quick example
 
@@ -97,7 +97,8 @@ predictions["trend"]
 - [Events](events.md), holidays, promotions and country holidays
 - [Regressors](regressors.md), future and lagged regressors
 - [Missing data](missing_data.md), what fit does with gaps
-- [Uncertainty](uncertainty.md), prediction intervals from quantiles
+- [Uncertainty](uncertainty.md), prediction intervals from quantiles and conformal calibration
+- [Several series](series.md), one model over many series, shared or per-series trend and seasonality
 
 ## Resources
 
