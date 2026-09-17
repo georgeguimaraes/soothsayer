@@ -36,7 +36,23 @@ Soothsayer.predict(fitted, future)
 # => ds, id, yhat, trend, yearly_seasonality, ...
 ```
 
-An id the model was not fitted on raises. The `:history` and `:regressors` frames carry the id column too, so each series gets its own recent observations and its own regressor values. `Soothsayer.backtest/3` holds out the tail of every series and walks each one separately; its predictions frame has the id column first.
+An id the model was not fitted on raises, unless you ask for it to be forecast anyway, see below. The `:history` and `:regressors` frames carry the id column too, so each series gets its own recent observations and its own regressor values. `Soothsayer.backtest/3` holds out the tail of every series and walks each one separately; its predictions frame has the id column first.
+
+## Events per series
+
+An events frame with only `event` and `ds` applies to every series: a national holiday, a site-wide sale. Add the id column and each row is an event for that series alone:
+
+```elixir
+events = DataFrame.new(%{
+  "event" => ["promo", "promo"],
+  "ds" => [~D[2023-03-01], ~D[2023-04-15]],
+  "id" => ["store_a", "store_b"]
+})
+
+fitted = Soothsayer.fit(model, df, events: events)
+```
+
+The same rule holds for the events frame given to `predict/3` and to `Soothsayer.backtest/3`, and the model remembers the dates it saw at fit per series. Country holidays and yearly recurring events stay shared, since they are configured, not given as rows.
 
 ## What is shared and what isn't
 
@@ -46,7 +62,7 @@ One network is trained on the samples of every series. By default the trend, the
 - its own past for the lags. Auto-regression reads each series' observations, never a neighbour's.
 - its regressor and condition values.
 
-The time axis is shared: numeric time starts at the earliest timestamp of any series and the changepoints are placed over the union of all timestamps, so a series that starts late sees the same changepoints as the others. The `:auto` seasonality decisions and the country holidays are settled on that union as well. Events are shared too: a date in the events frame is an event for every series.
+The time axis is shared: numeric time starts at the earliest timestamp of any series and the changepoints are placed over the union of all timestamps, so a series that starts late sees the same changepoints as the others. The `:auto` seasonality decisions and the country holidays are settled on that union as well.
 
 The quantile heads see which series a sample belongs to, so prediction intervals can be wider for a noisier series.
 
@@ -71,13 +87,26 @@ A local trend is also what lets `normalize: :global` work: with one scale for al
 
 `Soothsayer.Trend.get_weights/1` on a local trend returns a map from id to that series' `kernel` and `bias`, and `params.data["yearly_dense"]["kernel"]` and friends have the series axis first.
 
+## Unknown series
+
+A series with no history at all, a store that opens next month, has nothing to fit but can still borrow the shape of the others. With `unknown: :global` an id the model never saw is forecast with the shared components on the global scale, the mean and standard deviation over every training series:
+
+```elixir
+model = Soothsayer.new(%{series: %{column: "id", unknown: :global}})
+fitted = Soothsayer.fit(model, df)
+
+Soothsayer.predict(fitted, DataFrame.new(%{"ds" => dates, "id" => List.duplicate("new_store", 30)}))
+```
+
+The forecast is the shared trend and seasonality at the average level of the training series, which is the best guess before the first observation. It needs every component shared, so `unknown: :global` is refused with a local trend or seasonality: a local kernel has no slice for a series it never saw. With auto-regression the unknown series needs `:history` rows to seed its lags, and once it has a few observations you are usually better off refitting with it in the frame. The default, `unknown: :error`, raises with the list of known ids. This is NeuralProphet's `unknown_data_normalization`.
+
 ## Reading the effects
 
 `Soothsayer.get_event_effects/1`, `get_regressor_effects/1` and `get_ar_weights/1` return the shared coefficients as for a single series. Each series' scale is on the model under its training data, so a coefficient in normalized units means something different in the units of each series.
 
 ## Compared with NeuralProphet
 
-NeuralProphet lets the events frame carry an `ID` column for per-series events and can forecast an unknown id with the global normalization when asked to. Both are left out: events are shared and an unknown id raises. Time normalization is always global here, matching NeuralProphet's default. Local mode applies to the whole trend and to every seasonal period at once, where NeuralProphet has a switch per period, and the trend intercept is per series in local mode where NeuralProphet keeps one. The penalty is the same squared distance to the mean kernel, applied from the first step.
+Time normalization is always global here, matching NeuralProphet's default. Local mode applies to the whole trend and to every seasonal period at once, where NeuralProphet has a switch per period, and the trend intercept is per series in local mode where NeuralProphet keeps one. The penalty is the same squared distance to the mean kernel, applied from the first step.
 
 ## Next steps
 

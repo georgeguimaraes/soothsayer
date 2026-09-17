@@ -273,11 +273,11 @@ defmodule Soothsayer.Events do
   Every occurrence of every configured event, by event name, for the
   timestamps about to be featurized.
 
-  Takes the union of the occurrences the fitted model remembers
-  (`config.training_data.event_dates`) and the ones in `events_df` (`nil`
-  for none), repeats the events configured with `recurring: :yearly` on
-  their month and day over the years of `timestamps` (February 29 only in
-  leap years), and adds the country holidays named in `config.holidays`
+  Takes the union of the occurrences the fitted model `remembered` for the
+  series (as `frame_dates/1` gave them at fit) and the ones in `events_df`
+  (`nil` for none), repeats the events configured with `recurring: :yearly`
+  on their month and day over the years of `timestamps` (February 29 only
+  in leap years), and adds the country holidays named in `config.holidays`
   for those years.
 
   ## Examples
@@ -285,15 +285,18 @@ defmodule Soothsayer.Events do
       iex> config = %{events: %{"launch" => %{steps_before: 0, steps_after: 0, recurring: :yearly}}}
       iex> events_df = Explorer.DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2022-03-01]]})
       iex> timestamps = [~N[2022-01-01 00:00:00], ~N[2023-12-31 00:00:00]]
-      iex> Soothsayer.Events.event_dates(events_df, config, timestamps)
+      iex> Soothsayer.Events.event_dates(events_df, %{}, config, timestamps)
       %{"launch" => [~N[2022-03-01 00:00:00], ~N[2023-03-01 00:00:00]]}
 
   """
-  @spec event_dates(DataFrame.t() | nil, map(), list(Timestamp.t())) ::
-          %{String.t() => list(Timestamp.t())}
-  def event_dates(events_df, config, timestamps) do
+  @spec event_dates(
+          DataFrame.t() | nil,
+          %{String.t() => list(Timestamp.t())},
+          map(),
+          list(Timestamp.t())
+        ) :: %{String.t() => list(Timestamp.t())}
+  def event_dates(events_df, remembered, config, timestamps) do
     events_config = config[:events] || %{}
-    remembered = get_in(config, [:training_data, :event_dates]) || %{}
     from_frame = frame_dates(events_df)
     years = years(timestamps)
 

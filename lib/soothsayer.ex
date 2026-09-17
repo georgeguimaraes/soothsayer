@@ -85,7 +85,8 @@ defmodule Soothsayer do
         normalize: :local,
         trend: :global,
         seasonality: :global,
-        local_regularization: nil
+        local_regularization: nil,
+        unknown: :error
       },
       schedule: :one_cycle,
       optimizer: :adam,
@@ -411,7 +412,11 @@ defmodule Soothsayer do
 
     model = %{model | config: config}
     time_span = Timestamp.days_since(List.last(all_timestamps), List.first(all_timestamps))
-    shared_normalization = shared_y_normalization(prepared, config)
+    global_normalization = global_y_normalization(prepared)
+
+    shared_normalization =
+      if Soothsayer.Series.enabled?(config) and config.series.normalize == :global,
+        do: global_normalization
 
     # One training sample per forecast origin, per series. Without AR that
     # is every timestamp on its own. With AR a sample is the origin's lags
@@ -456,9 +461,12 @@ defmodule Soothsayer do
     # What prediction needs to look up, per series: the observed values so
     # the lag positions of a forecast can reach into the training period,
     # the regressor values there, and each series' own scale.
+    # The global scale and the last observation serve a series the model
+    # never saw, see Soothsayer.Series.
     training_data = %{
       series: Map.new(samples, &{&1.id, &1.entry}),
-      event_dates: Events.frame_dates(events_df)
+      global_normalization: global_normalization,
+      last_timestamp: List.last(all_timestamps)
     }
 
     %{fitted_model | config: Map.put(config, :training_data, training_data)}
@@ -470,10 +478,9 @@ defmodule Soothsayer do
     put_in(config, [:series, :ids], Enum.map(prepared, & &1.id))
   end
 
-  # Under normalize: :global one mean and std over every series' known
-  # values; nil means each series computes its own.
-  defp shared_y_normalization(prepared, %{series: %{normalize: :global, column: column}})
-       when not is_nil(column) do
+  # One mean and std over every series' known values: every series' scale
+  # under normalize: :global, and the scale of an unknown series otherwise.
+  defp global_y_normalization(prepared) do
     known =
       prepared
       |> Enum.flat_map(fn %{data: data} ->
@@ -485,8 +492,6 @@ defmodule Soothsayer do
     {_normalized, mean, std} = normalize(Nx.new_axis(known, -1))
     %{mean: mean, std: std}
   end
-
-  defp shared_y_normalization(_prepared, _config), do: nil
 
   # Sorted timestamps, missing rows and values dropped, regridded or
   # imputed, and the condition columns read from the prepared frame.
@@ -526,6 +531,8 @@ defmodule Soothsayer do
   defp training_samples(series, model, events_df, time_span, shared_normalization) do
     %{id: id, data: data, timestamps: timestamps} = series
     config = model.config
+    series_events = Soothsayer.Series.rows_for(events_df, Soothsayer.Series.column(config), id)
+    events = %{frame: series_events, remembered: %{}}
 
     # The mean and std come from the known values only, so the NaNs left at
     # unfilled positions stay NaN and never reach a training sample.
@@ -569,7 +576,7 @@ defmodule Soothsayer do
     x =
       %{"trend" => trend_input(timestamps, config)}
       |> Map.merge(seasonality_inputs(timestamps, config, series.conditions))
-      |> put_events_input(model, timestamps, events_df)
+      |> put_events_input(model, timestamps, events)
       |> put_training_regressors_input(model, timestamps, data)
       |> Map.new(fn {key, features} -> {key, Nx.take(features, position_indices, axis: 0)} end)
       |> Map.merge(ar_inputs)
@@ -589,6 +596,7 @@ defmodule Soothsayer do
       known_values: known_values,
       last_timestamp: Enum.max(timestamps, NaiveDateTime),
       normalization: %{mean: y_mean, std: y_std},
+      event_dates: Events.frame_dates(series_events),
       regressors:
         Map.new(
           Regressors.names(config) ++ Seasonality.condition_columns(config),
@@ -641,14 +649,29 @@ defmodule Soothsayer do
   @doc false
   # The training entry of one series: timestamps, normalized values,
   # regressor values and scale. `nil` is the id of a single series model.
-  def series_entry(%Model{config: %{training_data: %{series: series}}}, id) do
-    case Map.fetch(series, id) do
+  def series_entry(%Model{config: %{training_data: training_data} = config}, id) do
+    case Map.fetch(training_data.series, id) do
       {:ok, entry} ->
         entry
 
+      :error when config.series.unknown == :global ->
+        # Nothing observed, the shared components on the global scale
+        %{
+          timestamps: [],
+          y_normalized: [],
+          known_values: %{},
+          last_timestamp: training_data.last_timestamp,
+          normalization: training_data.global_normalization,
+          event_dates: %{},
+          regressors: %{},
+          lagged_regressors: %{}
+        }
+
       :error ->
         raise ArgumentError,
-              "Unknown series #{inspect(id)}, the model was fitted on #{inspect(Map.keys(series))}"
+              "Unknown series #{inspect(id)}, the model was fitted on " <>
+                "#{inspect(Map.keys(training_data.series))}. Set series.unknown: :global to " <>
+                "forecast it with the shared components."
     end
   end
 
@@ -956,6 +979,8 @@ defmodule Soothsayer do
     end
   end
 
+  defp validate_known_ids!(%Model{config: %{series: %{unknown: :global}}}, _ids), do: :ok
+
   defp validate_known_ids!(model, ids) do
     known = Soothsayer.Series.ids(model.config)
 
@@ -965,7 +990,8 @@ defmodule Soothsayer do
 
       unknown ->
         raise ArgumentError,
-              "Unknown series #{inspect(unknown)}, the model was fitted on #{inspect(known)}"
+              "Unknown series #{inspect(unknown)}, the model was fitted on #{inspect(known)}. " <>
+                "Set series.unknown: :global to forecast them with the shared components."
     end
   end
 
@@ -998,6 +1024,18 @@ defmodule Soothsayer do
   defp series_components(model, id, prediction_timestamps, events_df, history, regressors_df) do
     entry = series_entry(model, id)
     series = %{id: id, entry: entry}
+    column = Soothsayer.Series.column(model.config)
+
+    events_df = %{
+      frame: Soothsayer.Series.rows_for(events_df, column, id),
+      remembered: entry.event_dates
+    }
+
+    if entry.timestamps == [] and ar_enabled?(model) and is_nil(history) do
+      raise ArgumentError,
+            "Series #{inspect(id)} was not seen at fit and the model uses auto-regression. " <>
+              "Pass history: with its recent values to seed the lags."
+    end
 
     regressor_values = %{
       regressors:
@@ -1118,11 +1156,13 @@ defmodule Soothsayer do
   # Built whenever events are configured, with or without a dataframe: the
   # dates come from the frame, from what the model remembers, from yearly
   # recurrence and from the country holidays.
-  defp put_events_input(x, model, timestamps, events_df) do
+  # `events` is the series' own events frame (nil for none) and the dates
+  # the fitted model remembers for it, see Soothsayer.Series.
+  defp put_events_input(x, model, timestamps, %{frame: frame, remembered: remembered}) do
     events_config = model.config[:events] || %{}
 
     if map_size(events_config) > 0 do
-      event_dates = Events.event_dates(events_df, model.config, timestamps)
+      event_dates = Events.event_dates(frame, remembered, model.config, timestamps)
 
       events_input =
         Events.build_features(

@@ -418,7 +418,7 @@ Soothsayer.new(%{
 })
 ```
 
-`local_regularization` pulls the per-series kernels toward their average, NeuralProphet's glocal mode. See the [Several series guide](guides/series.md).
+`local_regularization` pulls the per-series kernels toward their average, NeuralProphet's glocal mode. An events frame with the id column gives each series its own events, and `unknown: :global` forecasts a series the model never saw with the shared components. See the [Several series guide](guides/series.md).
 
 ### Evaluating a configuration
 

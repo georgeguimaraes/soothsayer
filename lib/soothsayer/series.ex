@@ -21,7 +21,10 @@ defmodule Soothsayer.Series do
   `Soothsayer.Model`).
 
   Prediction takes a frame with `ds` and the id column, and so do the
-  `:history` and `:regressors` frames. Ids not seen at fit raise.
+  `:history` and `:regressors` frames. An events frame applies to every
+  series unless it carries the id column, then each series gets its own
+  rows. Ids not seen at fit raise, unless `unknown: :global` lets them be
+  forecast with the shared components on the global scale.
   """
 
   alias Explorer.DataFrame
@@ -50,7 +53,8 @@ defmodule Soothsayer.Series do
       raise ArgumentError,
             "series must be %{column: nil | \"name\", normalize: :local | :global, " <>
               "trend: :global | :local, seasonality: :global | :local, " <>
-              "local_regularization: nil | number >= 0}, got #{inspect(series)}"
+              "local_regularization: nil | number >= 0, unknown: :error | :global}, " <>
+              "got #{inspect(series)}"
     end
 
     if is_nil(series.column) and :local in [series.trend, series.seasonality] do
@@ -63,6 +67,12 @@ defmodule Soothsayer.Series do
             "series.local_regularization needs a :local trend or seasonality to pull together"
     end
 
+    if series.unknown == :global and :local in [series.trend, series.seasonality] do
+      raise ArgumentError,
+            "series.unknown: :global needs a global trend and seasonality, a local kernel " <>
+              "has nothing for a series it never saw"
+    end
+
     :ok
   end
 
@@ -71,10 +81,12 @@ defmodule Soothsayer.Series do
          normalize: normalize,
          trend: trend,
          seasonality: seasonality,
-         local_regularization: local_regularization
+         local_regularization: local_regularization,
+         unknown: unknown
        }) do
     (is_nil(column) or is_binary(column)) and normalize in [:local, :global] and
       trend in [:global, :local] and seasonality in [:global, :local] and
+      unknown in [:error, :global] and
       (is_nil(local_regularization) or
          (is_number(local_regularization) and local_regularization >= 0))
   end
@@ -154,6 +166,19 @@ defmodule Soothsayer.Series do
   end
 
   @doc """
+  The rows of a frame that apply to one series: the rows with its id when
+  the frame has the id column, the whole frame when it doesn't (an events
+  frame without ids is for every series), `nil` for `nil`.
+  """
+  @spec rows_for(DataFrame.t() | nil, String.t() | nil, String.t() | nil) :: DataFrame.t() | nil
+  def rows_for(nil, _column, _id), do: nil
+  def rows_for(frame, nil, _id), do: frame
+
+  def rows_for(%DataFrame{} = frame, column, id) do
+    if column in DataFrame.names(frame), do: rows_of(frame, column, id), else: frame
+  end
+
+  @doc """
   The distinct ids of a frame's id column, sorted. Raises when the column is
   missing or holds anything but strings.
   """
@@ -186,7 +211,8 @@ defmodule Soothsayer.Series do
         x
 
       ids ->
-        index = Enum.find_index(ids, &(&1 == id))
+        # An id the model never saw selects no series: all zeros.
+        index = Enum.find_index(ids, &(&1 == id)) || -1
         one_hot = Nx.equal(Nx.iota({1, length(ids)}), index) |> Nx.as_type({:f, 32})
         %{mean: mean, std: std} = entry.normalization
         level = Nx.divide(mean, std) |> Nx.reshape({1, 1})

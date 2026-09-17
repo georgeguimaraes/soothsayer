@@ -41,6 +41,8 @@ events_df = DataFrame.new(%{
 fitted = Soothsayer.fit(model, df, events: events_df)
 ```
 
+With [several series](series.md) in one model the events frame may also carry the id column, and then each row is an event for that series only.
+
 ### Event config parameters
 
 | Parameter | Description |

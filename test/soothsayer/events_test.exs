@@ -397,7 +397,7 @@ defmodule Soothsayer.EventsTest do
       events_df = DataFrame.new(%{"event" => ["launch"], "ds" => [~D[2022-03-01]]})
       timestamps = [~N[2022-01-01 00:00:00], ~N[2023-12-31 00:00:00]]
 
-      assert Events.event_dates(events_df, config, timestamps) ==
+      assert Events.event_dates(events_df, %{}, config, timestamps) ==
                %{"launch" => [~N[2022-03-01 00:00:00], ~N[2023-03-01 00:00:00]]}
     end
 
@@ -406,27 +406,24 @@ defmodule Soothsayer.EventsTest do
       events_df = DataFrame.new(%{"event" => ["leap"], "ds" => [~N[2020-02-29 09:00:00]]})
       timestamps = Enum.map(2020..2024, &NaiveDateTime.new!(&1, 6, 1, 0, 0, 0))
 
-      assert Events.event_dates(events_df, config, timestamps) ==
+      assert Events.event_dates(events_df, %{}, config, timestamps) ==
                %{"leap" => [~N[2020-02-29 09:00:00], ~N[2024-02-29 09:00:00]]}
     end
 
     test "unions what the model remembers with the frame, and ignores unconfigured events" do
-      config = %{
-        events: %{"sale" => %{steps_before: 0, steps_after: 0}},
-        training_data: %{
-          event_dates: %{"sale" => [~N[2022-05-01 00:00:00]], "old" => [~N[2022-01-01 00:00:00]]}
-        }
-      }
+      config = %{events: %{"sale" => %{steps_before: 0, steps_after: 0}}}
+      remembered = %{"sale" => [~N[2022-05-01 00:00:00]], "old" => [~N[2022-01-01 00:00:00]]}
 
       events_df =
         DataFrame.new(%{"event" => ["sale", "other"], "ds" => [~D[2023-05-01], ~D[2023-06-01]]})
 
       timestamps = [~N[2023-01-01 00:00:00]]
 
-      assert Events.event_dates(events_df, config, timestamps) ==
+      assert Events.event_dates(events_df, remembered, config, timestamps) ==
                %{"sale" => [~N[2022-05-01 00:00:00], ~N[2023-05-01 00:00:00]]}
 
-      assert Events.event_dates(nil, config, timestamps) == %{"sale" => [~N[2022-05-01 00:00:00]]}
+      assert Events.event_dates(nil, remembered, config, timestamps) ==
+               %{"sale" => [~N[2022-05-01 00:00:00]]}
     end
 
     test "adds the country holidays named on the config as midnight timestamps" do
@@ -444,7 +441,7 @@ defmodule Soothsayer.EventsTest do
 
       timestamps = [~N[2022-06-01 12:00:00], ~N[2023-06-01 12:00:00]]
 
-      assert Events.event_dates(nil, config, timestamps) ==
+      assert Events.event_dates(nil, %{}, config, timestamps) ==
                %{"Christmas Day" => [~N[2022-12-25 00:00:00], ~N[2023-12-25 00:00:00]]}
     end
   end

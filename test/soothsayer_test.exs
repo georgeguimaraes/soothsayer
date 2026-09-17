@@ -1697,6 +1697,132 @@ defmodule SoothsayerTest do
       end
     end
 
+    test "an events frame with the id column hits one series, without it every series" do
+      start_date = ~D[2022-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      training = panel_frame([{"a", 10}, {"b", 20}], dates, start_date, 5)
+
+      model =
+        Soothsayer.new(%{
+          series: %{column: "id"},
+          events: %{"promo" => %{steps_before: 0, steps_after: 0}},
+          trend: %{changepoints: 0},
+          seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+          epochs: 1
+        })
+
+      future = DataFrame.new(%{"ds" => [~D[2023-03-01], ~D[2023-03-01]], "id" => ["a", "b"]})
+
+      per_series =
+        DataFrame.new(%{
+          "event" => ["promo", "promo"],
+          "ds" => [~D[2022-03-01], ~D[2023-03-01]],
+          "id" => ["a", "a"]
+        })
+
+      fitted = Soothsayer.fit(model, training, events: per_series)
+
+      assert Soothsayer.series_entry(fitted, "a").event_dates ==
+               %{"promo" => [~N[2022-03-01 00:00:00], ~N[2023-03-01 00:00:00]]}
+
+      assert Soothsayer.series_entry(fitted, "b").event_dates == %{}
+
+      # A zero indicator is z-scored a hair off zero, so "no event" is the
+      # value of a date with no events at all rather than 0.
+      quiet = DataFrame.new(%{"ds" => [~D[2023-05-01], ~D[2023-05-01]], "id" => ["a", "b"]})
+      [_, no_event] = Soothsayer.predict_components(fitted, quiet).events |> Nx.to_flat_list()
+
+      # at predict the frame again names the series, only "a" gets the effect
+      events = Soothsayer.predict_components(fitted, future, events: per_series).events
+      [effect_a, effect_b] = Nx.to_flat_list(events)
+      assert effect_a != no_event
+      assert_in_delta effect_b, no_event, 1.0e-6
+
+      # the same frame without ids is for everyone: now "b" gets it too (in
+      # its own units, so the two effects differ by the series' scales)
+      shared = DataFrame.select(per_series, ["event", "ds"])
+      events = Soothsayer.predict_components(fitted, future, events: shared).events
+      [shared_a, shared_b] = Nx.to_flat_list(events)
+      assert_in_delta shared_a, effect_a, 1.0e-6
+      assert abs(shared_b - no_event) > 1.0
+
+      # the backtest splits the events frame the same way
+      result = Soothsayer.backtest(model, training, validation_fraction: 0.02, events: per_series)
+      assert "id" in DataFrame.names(result.predictions)
+    end
+
+    test "an unknown id is forecast with the shared components when asked for" do
+      start_date = ~D[2020-01-01]
+      dates = Date.range(start_date, ~D[2022-12-31]) |> Enum.to_list()
+      levels = [{"a", 100}, {"b", 300}]
+      training = panel_frame(levels, dates, start_date, 6)
+
+      future =
+        DataFrame.new(%{
+          "ds" => [~D[2023-01-15], ~D[2023-01-15], ~D[2023-01-15]],
+          "id" => ["a", "b", "c"]
+        })
+
+      config = %{epochs: 10, seed: 1, trend: %{changepoints: 0}}
+
+      strict = Soothsayer.fit(Soothsayer.new(Map.put(config, :series, %{column: "id"})), training)
+
+      assert_raise ArgumentError, ~r/Unknown series \["c"\].*series.unknown: :global/, fn ->
+        Soothsayer.predict(strict, future)
+      end
+
+      lenient =
+        Soothsayer.fit(
+          Soothsayer.new(Map.put(config, :series, %{column: "id", unknown: :global})),
+          training
+        )
+
+      predictions = Soothsayer.predict(lenient, future)
+      [yhat_a, _yhat_b, yhat_c] = Series.to_list(predictions["yhat"])
+      assert Series.to_list(predictions["id"]) == ["a", "b", "c"]
+
+      # the same shared forecast in normalized space, put on the global scale
+      normalized = fn yhat, %{mean: mean, std: std} ->
+        (yhat - Nx.to_number(Nx.squeeze(mean))) / Nx.to_number(Nx.squeeze(std))
+      end
+
+      global = lenient.config.training_data.global_normalization
+
+      assert_in_delta normalized.(yhat_c, global),
+                      normalized.(yhat_a, Soothsayer.series_entry(lenient, "a").normalization),
+                      1.0e-3
+
+      # with auto-regression an unknown series needs history for its lags
+      ar_model =
+        Soothsayer.new(
+          Map.merge(config, %{
+            series: %{column: "id", unknown: :global},
+            ar: %{enabled: true, lags: 3, forecast_steps: 1},
+            epochs: 2
+          })
+        )
+
+      ar_fitted = Soothsayer.fit(ar_model, training)
+      only_c = DataFrame.new(%{"ds" => [~D[2023-01-01]], "id" => ["c"]})
+
+      assert_raise ArgumentError,
+                   ~r/was not seen at fit and the model uses auto-regression/,
+                   fn ->
+                     Soothsayer.predict(ar_fitted, only_c)
+                   end
+
+      history =
+        DataFrame.new(%{
+          "ds" => Date.range(~D[2022-12-29], ~D[2022-12-31]) |> Enum.to_list(),
+          "y" => [200.0, 201.0, 202.0],
+          "id" => ["c", "c", "c"]
+        })
+
+      with_history = Soothsayer.predict(ar_fitted, only_c, history: history)
+      assert Series.first(with_history["yhat"]) |> is_float()
+      assert abs(Series.first(with_history["yhat"]) - 200) < 40
+    end
+
     test "series with different frequencies are refused" do
       daily =
         DataFrame.new(%{

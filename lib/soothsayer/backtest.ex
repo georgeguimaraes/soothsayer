@@ -125,7 +125,9 @@ defmodule Soothsayer.Backtest do
     rows = Soothsayer.Series.rows_of(validation, column, id)
 
     opts =
-      Keyword.update(opts, :regressors, rows, &(&1 && Soothsayer.Series.rows_of(&1, column, id)))
+      opts
+      |> Keyword.update(:regressors, rows, &(&1 && Soothsayer.Series.rows_of(&1, column, id)))
+      |> Keyword.update(:events, nil, &Soothsayer.Series.rows_for(&1, column, id))
 
     predictions = series_rolling_predictions(fitted_model, id, rows, opts)
     ids = Series.from_list(List.duplicate(id, DataFrame.n_rows(predictions)))
