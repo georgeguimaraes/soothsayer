@@ -8,8 +8,14 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
 
       mix test --only benchmark
 
-  The NeuralProphet reference values come from the "Model Benchmark" comment
-  its CI posted on https://github.com/ourownstory/neural_prophet/pull/1649.
+  The NeuralProphet reference values for the first four datasets come from
+  the "Model Benchmark" comment its CI posted on
+  https://github.com/ourownstory/neural_prophet/pull/1649. The R page views,
+  US births and pedestrian panel references were measured on 2026-09-17 by
+  running NeuralProphet 1.0.0rc10 (commit 5e6b23145473) on the same split
+  with `split_df(valid_p=0.1)` and `fit(validation_df)`, seed 42; the
+  panel's metrics were recomputed in absolute units since NeuralProphet
+  reports a panel in normalized ones.
   Where Soothsayer can't match NeuralProphet's configuration yet, the notes
   column says what differs, so the comparison is a parity report, not a
   pass/fail. The assertions are regression ceilings set from Soothsayer's own
@@ -144,6 +150,78 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
       # to 1.00 / 0.88 to 1.25. Ceilings are 1.25x the worst seed.
       assert result.metrics.mean_absolute_error < 0.70
       assert result.metrics.root_mean_squared_error < 0.95
+    end
+  end
+
+  describe "R page views with outliers (daily log page views)" do
+    test "default configuration on a series with outlier spikes" do
+      result = Soothsayer.backtest(Soothsayer.new(%{seed: @seed}), load("wp_log_R_outliers.csv"))
+
+      report(
+        "RPageViewsOutliers",
+        result,
+        %{mean_absolute_error: 0.2271, root_mean_squared_error: 0.3219},
+        notes: "same config: defaults, the outlier spikes Prophet's docs use"
+      )
+
+      # Seed 42 gives 0.225 / 0.321. Across six seeds: MAE 0.225 to 0.226,
+      # RMSE 0.320 to 0.321. With the last changepoint at 0.8 exactly it was
+      # 0.399 / 0.486. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 0.29
+      assert result.metrics.root_mean_squared_error < 0.41
+    end
+  end
+
+  describe "US births (daily)" do
+    test "country holidays on twenty years of daily counts" do
+      model = Soothsayer.new(%{holidays: %{countries: ["US"]}, seed: @seed})
+      result = Soothsayer.backtest(model, load("births_us.csv"))
+
+      report(
+        "BirthsUS",
+        result,
+        %{mean_absolute_error: 446.9993, root_mean_squared_error: 532.3921},
+        notes: "same config: defaults plus US holidays (add_country_holidays)"
+      )
+
+      # Seed 42 gives 438 / 520. Across six seeds: MAE 438 to 442, RMSE 520
+      # to 525. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 555.0
+      assert result.metrics.root_mean_squared_error < 660.0
+    end
+  end
+
+  describe "Pedestrian counts at two locations (hourly panel)" do
+    test "one model over two series with shared weekly and daily seasonality" do
+      model =
+        Soothsayer.new(%{
+          series: %{column: "id"},
+          seasonality: %{
+            yearly: %{enabled: false},
+            weekly: %{enabled: true},
+            daily: %{enabled: true}
+          },
+          seed: @seed
+        })
+
+      data = load("pedestrians_panel.csv", {:naive_datetime, :microsecond})
+      result = Soothsayer.backtest(model, data)
+
+      assert result.model.config.series.ids == ["location_4", "location_41"]
+
+      report(
+        "PedestriansPanel",
+        result,
+        %{mean_absolute_error: 306.6183, root_mean_squared_error: 392.2146},
+        notes:
+          "same config: ID column, global model, local normalization, weekly and daily " <>
+            "seasonality, yearly off on one month of data"
+      )
+
+      # Seed 42 gives 303 / 386. Across six seeds: MAE 296 to 305, RMSE 380
+      # to 388. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 385.0
+      assert result.metrics.root_mean_squared_error < 490.0
     end
   end
 

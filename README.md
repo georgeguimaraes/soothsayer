@@ -516,10 +516,16 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 | Yosemite temperatures (every 5 minutes, AR 36 lags, 12 direct steps, daily seasonality) | RMSE | 0.847 | 0.689 | 0.688 to 0.719 | same |
 | Air passengers (monthly, multiplicative) | MAE | 30.1 | 23.2 | 20.3 to 26.1 | identical configuration, 130 training rows so the seed matters |
 | Air passengers (monthly, multiplicative) | RMSE | 31.1 | 24.8 | 22.1 to 27.6 | same caveat |
+| R page views with outliers (daily) | MAE | 0.227 | 0.225 | 0.225 to 0.226 | identical configuration; NeuralProphet measured locally on the same split |
+| R page views with outliers (daily) | RMSE | 0.322 | 0.321 | 0.320 to 0.321 | same |
+| US births (daily, US holidays) | MAE | 447 | 438 | 438 to 442 | identical configuration; NeuralProphet measured locally |
+| US births (daily, US holidays) | RMSE | 532 | 520 | 520 to 525 | same |
+| Pedestrians at two locations (hourly, one model over both series) | MAE | 307 | 303 | 296 to 305 | NeuralProphet's ID column and local normalization, its metrics converted to absolute units |
+| Pedestrians at two locations (hourly, one model over both series) | RMSE | 392 | 386 | 380 to 388 | same |
 
 On the shared configuration the two libraries are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Where soothsayer comes out ahead the difference is in training, the learning rate range test and the loss weights, not in the model.
 
-The datasets live in `test/fixtures/neuralprophet/`. Three of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, MIT licensed by Facebook) and the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, see the NOTICE file there.
+The datasets live in `test/fixtures/neuralprophet/`. Five of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, the R page views and the Melbourne pedestrians, MIT licensed by Facebook), the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, and the births are public US government data, see the NOTICE file there.
 
 ## Not implemented yet
 
