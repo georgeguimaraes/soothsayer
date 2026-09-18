@@ -636,7 +636,10 @@ defmodule Soothsayer.Trainer do
   with no regularization anywhere gives `[]`.
 
   `ar.regularization` covers every `ar_dense*` layer, `trend.regularization`
-  the `trend_dense` layer, `seasonality.regularization` every seasonal layer,
+  the `trend_dense` layer except its first row, the base slope, so only the
+  slope changes and jumps are pulled toward zero, the way NeuralProphet
+  penalizes its trend deltas and not `k`. `seasonality.regularization`
+  covers every seasonal layer,
   and events and regressors bring their per-column lambdas from
   `Soothsayer.Events.regularization_weights/1` and
   `Soothsayer.Regressors.regularization_weights/1`.
@@ -655,7 +658,7 @@ defmodule Soothsayer.Trainer do
           lambda != nil and lambda > 0,
           name <- layer_names,
           String.starts_with?(name, prefix) do
-        {name, uniform_weights(params.data[name]["kernel"], lambda)}
+        {name, prefix_weights(prefix, params.data[name]["kernel"], lambda)}
       end
 
     column_terms =
@@ -682,6 +685,13 @@ defmodule Soothsayer.Trainer do
   defp uniform_weights(kernel, lambda) do
     Nx.broadcast(Nx.tensor(lambda, type: :f32), {Nx.axis_size(kernel, -2), 1})
   end
+
+  # The trend kernel's first row is the base slope, which the penalty leaves alone
+  defp prefix_weights("trend_dense", kernel, lambda) do
+    Nx.put_slice(uniform_weights(kernel, lambda), [0, 0], Nx.tensor([[0.0]], type: :f32))
+  end
+
+  defp prefix_weights(_prefix, kernel, lambda), do: uniform_weights(kernel, lambda)
 
   @doc """
   The local regularization terms of a config, `{layer_name, lambda}` for

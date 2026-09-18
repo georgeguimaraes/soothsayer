@@ -227,7 +227,7 @@ defmodule Soothsayer.TrainerTest do
         data: %{
           "events_dense" => %{"kernel" => Nx.tensor([[1.0], [-2.0], [4.0]])},
           "regressors_dense" => %{"kernel" => Nx.tensor([[3.0], [-1.0]])},
-          "trend_dense" => %{"kernel" => Nx.tensor([[2.0], [2.0]])},
+          "trend_dense" => %{"kernel" => Nx.tensor([[2.0], [2.0], [3.0]])},
           "yearly_dense" => %{"kernel" => Nx.tensor([[0.5], [0.5]])}
         }
       }
@@ -250,10 +250,15 @@ defmodule Soothsayer.TrainerTest do
       weights = Map.new(terms)
       assert Nx.to_flat_list(weights["events_dense"]) == [0.5, 0.5, 0.0]
       assert Nx.to_flat_list(weights["regressors_dense"]) == [2.0, 0.0]
-      assert Nx.to_flat_list(weights["trend_dense"]) == [0.10000000149011612, 0.10000000149011612]
+      # the base slope row of the trend is left out of the penalty
+      assert Nx.to_flat_list(weights["trend_dense"]) == [
+               0.0,
+               0.10000000149011612,
+               0.10000000149011612
+             ]
 
-      # 0.5 * (1 + 2) + 2 * 3 + 0.1 * (2 + 2)
-      assert_in_delta Nx.to_number(Trainer.weighted_l1_penalty(params, weights)), 7.9, 1.0e-5
+      # 0.5 * (1 + 2) + 2 * 3 + 0.1 * (2 + 3)
+      assert_in_delta Nx.to_number(Trainer.weighted_l1_penalty(params, weights)), 8.0, 1.0e-5
     end
 
     test "seasonality regularization covers every seasonal layer and nothing gives no terms" do
