@@ -503,7 +503,7 @@ model = Soothsayer.new(%{
 
 ## Benchmarks against NeuralProphet
 
-The test suite includes a benchmark layer that fits Soothsayer on the datasets NeuralProphet uses in its own model performance tests, with the same 90/10 split, and prints validation metrics next to the numbers NeuralProphet's CI publishes. It's excluded from the default run:
+The test suite includes a benchmark layer that fits Soothsayer on the datasets NeuralProphet uses in its own model performance tests plus a few of Prophet's example series, with the same 90/10 split, and prints validation metrics next to NeuralProphet's and Prophet's numbers for the same configuration. It's excluded from the default run:
 
 ```bash
 mix test --only benchmark
@@ -527,10 +527,16 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 | US births (daily, US holidays) | RMSE | 515 | 532 | 520 | 520 to 525 | same |
 | Pedestrians at two locations (hourly, one model over both series) | MAE | 339 | 307 | 303 | 296 to 305 | NeuralProphet's ID column and local normalization, its metrics converted to absolute units, Prophet fitted per location |
 | Pedestrians at two locations (hourly, one model over both series) | RMSE | 432 | 392 | 386 | 380 to 388 | same |
+| US retail sales (monthly, multiplicative, changepoints at 2008-01 and 2009-08) | MAE | 10169 | 13798 | 4898 | 4517 to 5214 | the named recession dates given to all three, the default grids give 10041 for Prophet, 160172 for NeuralProphet and 21045 here |
+| US retail sales (monthly, multiplicative, changepoints at 2008-01 and 2009-08) | RMSE | 12119 | 17309 | 6026 | 5620 to 6396 | same |
+| Melbourne pedestrians through COVID (daily, lockdown regressor, 25 changepoints over 95%) | MAE | 4896 | 4238 | 4548 | 4541 to 4794 | the same 0/1 lockdown regressor for all three, Prophet on its default grid, without the regressor the defaults give 6971, 16396 and 17004 |
+| Melbourne pedestrians through COVID (daily, lockdown regressor, 25 changepoints over 95%) | RMSE | 5929 | 5111 | 5618 | 5610 to 5938 | same |
+| San Francisco hospital load (hourly, AR 24 lags, 24 direct steps) | MAE | 75.5 | 55.1 | 54.6 | 54.5 to 54.6 | identical configuration, NeuralProphet measured locally, Prophet without lags |
+| San Francisco hospital load (hourly, AR 24 lags, 24 direct steps) | RMSE | 94.0 | 72.6 | 72.2 | 72.1 to 72.3 | same |
 
-On the shared configuration soothsayer and NeuralProphet are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Against Prophet the picture is mixed on plain series and one-sided as soon as lags matter. Prophet places its last changepoint later in the data (at `changepoints_range` itself, where NeuralProphet and soothsayer stop at `range * n / (n + 1)`), which suits Peyton Manning, and `changepoints_range: 0.88` gives soothsayer the same tail. NeuralProphet's last release is 1.0.0rc10 from June 2024 and its repository has been quiet since, so its numbers are a fixed reference. Prophet 1.4.0 is current.
+On the shared configuration soothsayer and NeuralProphet are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Against Prophet the picture is mixed on plain series and one-sided as soon as lags matter. The two series with a structural break, retail sales and the COVID pedestrians, are lost by every evenly spaced changepoint grid and won by telling the model where the break is, with named changepoints or a regressor, see the [Trends guide](guides/trends.md#when-you-know-where-the-break-is). Prophet places its last changepoint later in the data (at `changepoints_range` itself, where NeuralProphet and soothsayer stop at `range * n / (n + 1)`), which suits Peyton Manning, and `changepoints_range: 0.88` gives soothsayer the same tail. NeuralProphet's last release is 1.0.0rc10 from June 2024 and its repository has been quiet since, so its numbers are a fixed reference. Prophet 1.4.0 is current.
 
-The datasets live in `test/fixtures/neuralprophet/`. Five of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, the R page views and the Melbourne pedestrians, MIT licensed by Facebook), the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, and the births are public US government data, see the NOTICE file there.
+The datasets live in `test/fixtures/neuralprophet/`. Seven of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, the R page views, retail sales and the Melbourne pedestrians twice, MIT licensed by Facebook), the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, and the births and the hospital load are public US government data, see the NOTICE file there.
 
 ## Not implemented yet
 

@@ -21,6 +21,9 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
   (`prophet_refs.py` in the session notes); it has no auto-regression, so on
   Yosemite and Energy it forecasts from time features alone and the number
   says what that costs.
+  The retail sales, pedestrians COVID and hospital load references were
+  measured the same way on 2026-09-17, with the configuration each test
+  describes given to both libraries.
   Where Soothsayer can't match NeuralProphet's configuration yet, the notes
   column says what differs, so the comparison is a parity report, not a
   pass/fail. The assertions are regression ceilings set from Soothsayer's own
@@ -238,6 +241,116 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
       # to 388. Ceilings are 1.25x the worst seed.
       assert result.metrics.mean_absolute_error < 385.0
       assert result.metrics.root_mean_squared_error < 490.0
+    end
+  end
+
+  describe "US retail sales (monthly) with named changepoints" do
+    test "changepoints at the start and the trough of the 2008 recession" do
+      model =
+        Soothsayer.new(%{
+          seasonality: %{mode: :multiplicative, weekly: %{enabled: false}},
+          trend: %{changepoints: [~D[2008-01-01], ~D[2009-08-01]]},
+          seed: @seed
+        })
+
+      result = Soothsayer.backtest(model, load("retail_sales.csv"))
+
+      report(
+        "RetailSales",
+        result,
+        %{mean_absolute_error: 13797.7324, root_mean_squared_error: 17309.2852},
+        prophet: %{mean_absolute_error: 10169.2, root_mean_squared_error: 12119.1},
+        notes:
+          "same config: multiplicative seasonality, changepoints at 2008-01 and 2009-08 for " <>
+            "all three; the evenly spaced default grids give 21045 here, 160172 for " <>
+            "NeuralProphet and 10041 for Prophet"
+      )
+
+      # Seed 42 gives 4898 / 6026. Across six seeds: MAE 4517 to 5214, RMSE
+      # 5620 to 6396. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 6520.0
+      assert result.metrics.root_mean_squared_error < 8000.0
+    end
+  end
+
+  describe "Melbourne pedestrians through COVID (daily)" do
+    test "a lockdown regressor with a dense changepoint grid reaching into the recovery" do
+      data = load("pedestrians_covid.csv")
+
+      lockdowns = [
+        {~D[2020-03-31], ~D[2020-05-12]},
+        {~D[2020-07-09], ~D[2020-10-27]},
+        {~D[2021-02-13], ~D[2021-02-17]},
+        {~D[2021-05-28], ~D[2021-06-10]}
+      ]
+
+      lockdown =
+        data["ds"]
+        |> Explorer.Series.to_list()
+        |> Enum.map(fn date ->
+          inside =
+            Enum.any?(lockdowns, fn {from, to} ->
+              Date.compare(date, from) != :lt and Date.compare(date, to) != :gt
+            end)
+
+          if inside, do: 1.0, else: 0.0
+        end)
+
+      data = DataFrame.put(data, "lockdown", Explorer.Series.from_list(lockdown))
+
+      model =
+        Soothsayer.new(%{
+          regressors: ["lockdown"],
+          trend: %{changepoints: 25, changepoints_range: 0.95},
+          seed: @seed
+        })
+
+      result = Soothsayer.backtest(model, data)
+
+      report(
+        "PedestriansCovid",
+        result,
+        %{mean_absolute_error: 4237.939, root_mean_squared_error: 5111.2422},
+        prophet: %{mean_absolute_error: 4896.4, root_mean_squared_error: 5928.6},
+        notes:
+          "same lockdown 0/1 regressor for all three, 25 changepoints over 95% of the data " <>
+            "here and for NeuralProphet, Prophet's default grid; without the regressor the " <>
+            "defaults give 17004 here, 16396 for NeuralProphet and 6971 for Prophet"
+      )
+
+      # Seed 42 gives 4548 / 5618. Across six seeds: MAE 4541 to 4794, RMSE
+      # 5610 to 5938. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 6000.0
+      assert result.metrics.root_mean_squared_error < 7420.0
+    end
+  end
+
+  describe "San Francisco hospital load (hourly)" do
+    test "auto-regression with 24 lags and 24 direct forecast steps on a year of hourly data" do
+      model =
+        Soothsayer.new(%{
+          ar: %{enabled: true, lags: 24, forecast_steps: 24},
+          seasonality: %{yearly: %{enabled: false}},
+          seed: @seed
+        })
+
+      data = load("hospital_load.csv", {:naive_datetime, :microsecond})
+      result = Soothsayer.backtest(model, data)
+
+      report(
+        "HospitalLoad",
+        result,
+        %{mean_absolute_error: 55.07, root_mean_squared_error: 72.64},
+        prophet: %{mean_absolute_error: 75.5485, root_mean_squared_error: 94.0147},
+        notes:
+          "same config: 24 lags, 24 steps, weekly and daily seasonality, yearly off on one " <>
+            "year of data; Prophet has no lags"
+      )
+
+      # Seed 42 gives 54.6 / 72.2. Across six seeds: MAE 54.50 to 54.62,
+      # RMSE 72.11 to 72.25. Ceilings are 1.25x the worst seed.
+      assert result.metrics.mean_absolute_error < 68.3
+      assert result.metrics.root_mean_squared_error < 90.3
     end
   end
 
