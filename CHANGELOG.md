@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.1](https://github.com/georgeguimaraes/soothsayer/compare/v1.2.0...v1.2.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* leave the base slope out of the trend penalty ([53e0f13](https://github.com/georgeguimaraes/soothsayer/commit/53e0f13e8438668f274f6737eec79b806dca2c05))
+
+
+### Miscellaneous
+
+* Pin Dependabot commit prefix to chore(deps) ([800baab](https://github.com/georgeguimaraes/soothsayer/commit/800baab6919a05c43d3e2e7a0baed73a1e8008af))
+* underscores in the retail reference numbers ([f0891cd](https://github.com/georgeguimaraes/soothsayer/commit/f0891cd626ca0412e1a1344bc94f87b210c3dfda))
+
+
+### Tests
+
+* retail sales, COVID pedestrians and hospital load benchmarks ([3a5b10e](https://github.com/georgeguimaraes/soothsayer/commit/3a5b10edb34b1b3f5c9c23256783ec3db9d02262))
+
 ## [1.2.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.1.0...v1.2.0) (2026-09-17)
 
 
