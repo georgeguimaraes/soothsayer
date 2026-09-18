@@ -258,8 +258,8 @@ defmodule Soothsayer.NeuralProphetBenchmarkTest do
       report(
         "RetailSales",
         result,
-        %{mean_absolute_error: 13797.7324, root_mean_squared_error: 17309.2852},
-        prophet: %{mean_absolute_error: 10169.2, root_mean_squared_error: 12119.1},
+        %{mean_absolute_error: 13_797.7324, root_mean_squared_error: 17_309.2852},
+        prophet: %{mean_absolute_error: 10_169.2, root_mean_squared_error: 12_119.1},
         notes:
           "same config: multiplicative seasonality, changepoints at 2008-01 and 2009-08 for " <>
             "all three; the evenly spaced default grids give 21045 here, 160172 for " <>
