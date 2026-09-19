@@ -65,6 +65,7 @@ What's here and what isn't, against [NeuralProphet's feature list](https://neura
 | Newer sample weighting | Yes | Yes |
 | Cross-validation over several cutoffs | Yes | Yes |
 | Future timestamps to predict on (`make_future_dataframe`) | Yes | Yes |
+| Choice of loss function | Yes | Yes |
 
 ## Where the numbers differ from NeuralProphet
 

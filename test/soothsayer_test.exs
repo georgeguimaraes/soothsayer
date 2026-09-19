@@ -2227,6 +2227,38 @@ defmodule SoothsayerTest do
     end
   end
 
+  describe "loss option" do
+    test "fits with :mae and with a custom elementwise loss, and refuses anything else" do
+      dates = Date.range(~D[2022-01-01], ~D[2022-06-30]) |> Enum.to_list()
+
+      df =
+        DataFrame.new(%{"ds" => dates, "y" => Enum.map(dates, &(10 + Date.day_of_year(&1) / 10))})
+
+      quiet = %{
+        trend: %{changepoints: 0},
+        seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
+        epochs: 3
+      }
+
+      for loss <- [
+            :mae,
+            :mse,
+            fn targets, predictions -> Nx.abs(Nx.subtract(targets, predictions)) end
+          ] do
+        fitted = Soothsayer.fit(Soothsayer.new(Map.put(quiet, :loss, loss)), df)
+        assert fitted.config.loss == loss
+
+        assert DataFrame.n_rows(
+                 Soothsayer.predict(fitted, Soothsayer.future_timestamps(fitted, 3))
+               ) == 3
+      end
+
+      assert_raise ArgumentError, ~r/loss must be :huber, :mae, :mse or a function/, fn ->
+        Soothsayer.new(%{loss: :rmse})
+      end
+    end
+  end
+
   describe "training defaults" do
     test "auto learning rate and epochs are resolved and recorded on the fitted model" do
       dates = Date.range(~D[2022-01-01], ~D[2022-12-31]) |> Enum.to_list()

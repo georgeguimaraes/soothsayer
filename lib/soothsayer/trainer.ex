@@ -220,13 +220,11 @@ defmodule Soothsayer.Trainer do
     end
 
     {init_optimizer_fn, update_fn} = Polaris.Optimizers.adam(learning_rate: schedule)
-    quantiles = config[:quantiles] || []
-
     # No penalty during the range test, so the weights map stays empty. The
     # sample weights do apply, as in NeuralProphet, so the curve is measured
     # on the loss that training will minimize.
     objective_fn = fn params, x_input, y_target, _weights ->
-      loss(y_target, predict_fn.(params, x_input), quantiles, Map.get(x_input, "sample_weight"))
+      loss(y_target, predict_fn.(params, x_input), config, Map.get(x_input, "sample_weight"))
     end
 
     jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
@@ -559,33 +557,39 @@ defmodule Soothsayer.Trainer do
         fn _ -> :ok end
       )
 
-    quantiles = config[:quantiles] || []
-
     network
-    |> Axon.Loop.trainer(&loss(&1, &2, quantiles), optimizer)
+    |> Axon.Loop.trainer(&loss(&1, &2, config), optimizer)
     |> Axon.Loop.run(data, initial_params, epochs: epochs, compiler: EXLA)
   end
 
   @doc """
-  The training loss: Huber loss on the median forecast plus, for each
+  The training loss: `config.loss` on the median forecast plus, for each
   configured quantile, the pinball loss on that quantile's head.
+
+  `config.loss` is `:huber` (the default, NeuralProphet's choice), `:mae`,
+  `:mse`, or a function of the targets and the predictions returning one
+  loss per element, which the sample weights then scale. `Axon.Losses`
+  functions with `reduction: :none` fit, for example
+  `&Axon.Losses.log_cosh(&1, &2, reduction: :none)`.
 
   ## Parameters
 
     * `targets` - `{samples, forecast_steps}` target values
     * `predictions` - The network output map, with `:combined` and,
       when quantiles are configured, a `:quantiles` tuple
-    * `quantiles` - The sorted quantile list from the config
+    * `config` - The model config, read for `:loss` and `:quantiles`
     * `sample_weight` - Optional `{samples, forecast_steps}` weights, see
       `recency_weights/2`. Every element of every term is multiplied by
       its weight before the mean.
 
   """
-  @spec loss(Nx.Tensor.t(), map(), list(float()), Nx.Tensor.t() | nil) :: Nx.Tensor.t()
-  def loss(targets, predictions, quantiles, sample_weight \\ nil) do
+  @spec loss(Nx.Tensor.t(), map(), map(), Nx.Tensor.t() | nil) :: Nx.Tensor.t()
+  def loss(targets, predictions, config, sample_weight \\ nil) do
+    quantiles = config[:quantiles] || []
+
     base_loss =
       targets
-      |> Axon.Losses.huber(predictions.combined, reduction: :none)
+      |> elementwise_loss(predictions.combined, config[:loss] || :huber)
       |> weighted_mean(sample_weight)
 
     quantile_predictions =
@@ -600,6 +604,18 @@ defmodule Soothsayer.Trainer do
       Nx.add(total, Quantiles.pinball_loss(targets, prediction, quantile, sample_weight))
     end)
   end
+
+  defp elementwise_loss(targets, predictions, :huber),
+    do: Axon.Losses.huber(targets, predictions, reduction: :none)
+
+  defp elementwise_loss(targets, predictions, :mae),
+    do: Axon.Losses.mean_absolute_error(targets, predictions, reduction: :none)
+
+  defp elementwise_loss(targets, predictions, :mse),
+    do: Axon.Losses.mean_squared_error(targets, predictions, reduction: :none)
+
+  defp elementwise_loss(targets, predictions, loss_fn) when is_function(loss_fn, 2),
+    do: loss_fn.(targets, predictions)
 
   @doc false
   def weighted_mean(elementwise, nil), do: Nx.mean(elementwise)
@@ -616,7 +632,7 @@ defmodule Soothsayer.Trainer do
     {_init_fn, predict_fn} = Axon.build(network)
     {init_optim_fn, update_fn} = optimizer
 
-    objective_fn = build_objective_fn(predict_fn, config[:quantiles] || [])
+    objective_fn = build_objective_fn(predict_fn, config)
     jit_train_step = EXLA.jit(build_train_step_fn(objective_fn, update_fn))
 
     train_step = fn params, opt_state, x_batch, y_batch ->
@@ -754,10 +770,10 @@ defmodule Soothsayer.Trainer do
     end
   end
 
-  defp build_objective_fn(predict_fn, quantiles) do
+  defp build_objective_fn(predict_fn, config) do
     fn params, x_input, y_target, {weights, local_weights} ->
       predictions = predict_fn.(params, x_input)
-      base_loss = loss(y_target, predictions, quantiles, Map.get(x_input, "sample_weight"))
+      base_loss = loss(y_target, predictions, config, Map.get(x_input, "sample_weight"))
 
       base_loss
       |> Nx.add(weighted_l1_penalty(params, weights))

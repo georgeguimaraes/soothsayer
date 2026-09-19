@@ -90,6 +90,7 @@ defmodule Soothsayer do
       },
       schedule: :one_cycle,
       optimizer: :adam,
+      loss: :huber,
       batch_size: nil,
       seed: nil
     }
@@ -286,7 +287,15 @@ defmodule Soothsayer do
       raise ArgumentError, "optimizer must be :adam or :adamw, got #{inspect(config.optimizer)}"
     end
 
-    :ok
+    validate_loss!(config.loss)
+  end
+
+  defp validate_loss!(loss) when loss in [:huber, :mae, :mse] or is_function(loss, 2), do: :ok
+
+  defp validate_loss!(loss) do
+    raise ArgumentError,
+          "loss must be :huber, :mae, :mse or a function of the targets and predictions, " <>
+            "got #{inspect(loss)}"
   end
 
   defp validate_lagged_regressors!(%{lagged_regressors: lagged}) when lagged == %{}, do: :ok

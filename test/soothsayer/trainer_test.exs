@@ -295,14 +295,36 @@ defmodule Soothsayer.TrainerTest do
     test "weights the loss of each target position before the mean" do
       targets = Nx.tensor([[0.0, 0.0], [0.0, 0.0]])
       predictions = %{combined: Nx.tensor([[0.2, 0.2], [0.4, 0.4]])}
-      plain = Trainer.loss(targets, predictions, []) |> Nx.to_number()
+      plain = Trainer.loss(targets, predictions, %{}) |> Nx.to_number()
 
       # Huber on the small errors is 0.5 * e^2: 0.02 for the first row, 0.08 for the second
       weight = Nx.tensor([[1.0, 1.0], [2.0, 2.0]])
-      weighted = Trainer.loss(targets, predictions, [], weight) |> Nx.to_number()
+      weighted = Trainer.loss(targets, predictions, %{}, weight) |> Nx.to_number()
 
       assert_in_delta plain, (0.02 + 0.08) / 2, 1.0e-6
       assert_in_delta weighted, (0.02 + 0.16) / 2, 1.0e-6
+    end
+
+    test "the loss option picks the elementwise loss on the median" do
+      targets = Nx.tensor([[0.0, 0.0]])
+      predictions = %{combined: Nx.tensor([[2.0, 4.0]])}
+
+      # Huber is linear past 1: |e| - 0.5. MAE is |e|, MSE is e^2.
+      assert_in_delta Nx.to_number(Trainer.loss(targets, predictions, %{loss: :huber})),
+                      (1.5 + 3.5) / 2,
+                      1.0e-6
+
+      assert_in_delta Nx.to_number(Trainer.loss(targets, predictions, %{loss: :mae})), 3.0, 1.0e-6
+
+      assert_in_delta Nx.to_number(Trainer.loss(targets, predictions, %{loss: :mse})),
+                      10.0,
+                      1.0e-6
+
+      cubed = fn t, p -> Nx.pow(Nx.abs(Nx.subtract(t, p)), 3) end
+
+      assert_in_delta Nx.to_number(Trainer.loss(targets, predictions, %{loss: cubed})),
+                      (8.0 + 64.0) / 2,
+                      1.0e-6
     end
 
     test "a sample_weight input routes training through the custom loop" do

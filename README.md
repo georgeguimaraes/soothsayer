@@ -307,6 +307,7 @@ Soothsayer.new(%{
   learning_rate: :auto,  # or a number (default: found by a range test)
   schedule: :one_cycle,  # or :constant (default: one-cycle)
   optimizer: :adam,      # or :adamw
+  loss: :huber,          # or :mae, :mse, or your own function of targets and predictions
   batch_size: nil,       # rows per gradient step (default: from the data size)
   recency: %{enabled: true, weight: 2, start: 0.0},  # recent rows weigh more in the loss
   seed: nil              # integer for reproducible fits (default: random)
@@ -316,6 +317,8 @@ Soothsayer.new(%{
 `ds` can be a `:date` or a `{:naive_datetime, _}` column, so hourly or 5-minute data works the same as daily. The frequency is inferred from the most common gap between rows and drives auto-regression lags, forecast blocks and event windows.
 
 The defaults follow NeuralProphet. Training runs in shuffled minibatches, so one epoch is one pass over the data, and `batch_size` and `epochs` are picked from the number of rows when left at their defaults: small datasets get more passes, large ones fewer.
+
+The forecast trains on the Huber loss, which behaves like squared error on small misses and like absolute error on large ones, so a few outliers don't drag the fit. `loss: :mae` makes every miss count the same, `loss: :mse` makes large misses count more, and a two-argument function of the targets and the predictions that returns one loss per element plugs in anything else, for example `&Axon.Losses.log_cosh(&1, &2, reduction: :none)`. Quantile heads keep their pinball loss whatever you pick.
 
 With `learning_rate: :auto`, Soothsayer runs a learning rate range test before training: about a hundred steps with the rate climbing from `1.0e-6` to `10`, watching the training loss, and picking the rate where the loss falls fastest. That rate is the peak of the one-cycle schedule, which warms up from a tenth of it, peaks at 30% of training, and cools down to a hundredth by the end. The values actually used are recorded on the fitted model's config.
 
@@ -544,12 +547,6 @@ Results as of September 2026 (lower is better). The Soothsayer column is the ben
 On the shared configuration soothsayer and NeuralProphet are the same model: Peyton Manning lands on NeuralProphet's number to the third digit. Against Prophet the picture is mixed on plain series and one-sided as soon as lags matter. The two series with a structural break, retail sales and the COVID pedestrians, are lost by every evenly spaced changepoint grid and won by telling the model where the break is, with named changepoints or a regressor, see the [Trends guide](guides/trends.md#when-you-know-where-the-break-is). Prophet places its last changepoint later in the data (at `changepoints_range` itself, where NeuralProphet and soothsayer stop at `range * n / (n + 1)`), which suits Peyton Manning, and `changepoints_range: 0.88` gives soothsayer the same tail. NeuralProphet's last release is 1.0.0rc10 from June 2024 and its repository has been quiet since, so its numbers are a fixed reference. Prophet 1.4.0 is current.
 
 The datasets live in `test/fixtures/neuralprophet/`. Seven of them are Prophet's example series (Peyton Manning, Yosemite, air passengers, the R page views, retail sales and the Melbourne pedestrians twice, MIT licensed by Facebook), the energy price one is a cut of a CC0 Kaggle dataset prepared by NeuralProphet, and the births and the hospital load are public US government data, see the NOTICE file there.
-
-## Not implemented yet
-
-From NeuralProphet, still missing here:
-
-- a choice of loss function (it's Huber)
 
 ## Contributing
 

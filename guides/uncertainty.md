@@ -38,7 +38,7 @@ Heads are trained with the pinball loss for their quantile:
 loss = max(q * error, (q - 1) * error)     where error = y - prediction
 ```
 
-For `q = 0.9` under-predicting costs nine times more than over-predicting, which pushes the head up until only 10% of points sit above it. The median keeps training on the Huber loss and is detached before the heads are added, so the quantile losses don't move it.
+For `q = 0.9` under-predicting costs nine times more than over-predicting, which pushes the head up until only 10% of points sit above it. The median keeps training on its own loss (Huber by default, see `loss` in [the basics](basics.md#default-configuration)) and is detached before the heads are added, so the quantile losses don't move it.
 
 At prediction time upper quantiles are clipped to never fall below the median and lower quantiles to never rise above it, matching NeuralProphet's non-crossing rule.
 

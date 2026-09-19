@@ -82,6 +82,7 @@ model = Soothsayer.new(%{
 | `recency` | `%{enabled: true, weight: 2, start: 0.0}` | Recent rows weigh more in the loss, the last one `weight` times the oldest, see [Trends](trends.md#recent-data-first) |
 | `schedule` | `:one_cycle` | Learning rate schedule, `:one_cycle` or `:constant` |
 | `optimizer` | `:adam` | `:adam` or `:adamw` |
+| `loss` | `:huber` | Loss on the forecast, `:huber`, `:mae`, `:mse` or a function of targets and predictions returning one loss per element |
 | `batch_size` | `nil` | Rows per gradient step, picked from the data size when `nil` |
 | `seed` | `nil` | Integer seed for reproducible fits, random when `nil` |
 
