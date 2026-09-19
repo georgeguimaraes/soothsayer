@@ -51,12 +51,11 @@
   <div class="legend">
     <span><svg viewBox="0 0 26 18"><polygon points="4,2 26,2 22,16 0,16" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>input tensor built by fit</span>
     <span><svg viewBox="0 0 26 18"><rect x="1" y="2" width="24" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>dense layer, in → out features</span>
-    <span><svg viewBox="0 0 26 18"><rect x="1" y="2" width="24" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="4" y="5" width="18" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1"/></svg>network of dense layers with ReLU between them</span>
     <span><svg viewBox="0 0 26 18"><circle cx="13" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>elementwise op</span>
     <span><svg viewBox="0 0 26 18"><rect x="1" y="2" width="24" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="3 2"/></svg>only with some configurations</span>
     <span>edges carry tensor shapes. One color per component.</span>
   </div>
-  <p class="note">Everything with a dashed outline depends on the config: the logistic saturation on <code>growth: :logistic</code>, the × trend step on multiplicative seasonality, events or regressors, the ReLU layers on <code>ar.layers</code>, <code>regressors</code> with <code>layers</code> and <code>lagged_regressors_layers</code>, the series one-hot on <code>series.column</code>, and the whole quantile region on <code>quantiles</code>.</p>
+  <p class="note">Everything with a dashed outline depends on the config: the logistic saturation on <code>growth: :logistic</code>, the × trend step on multiplicative seasonality, events or regressors, the ReLU nets on <code>ar.layers</code>, a regressor's <code>layers</code> and <code>lagged_regressors_layers</code>, the series one-hot on <code>series.column</code>, and the whole quantile region on <code>quantiles</code>.</p>
 </div>
 
 <script>
@@ -151,12 +150,10 @@
   edge(sliceL, minus, "[B, L]", { from: bottom, to: top, path: "M 945 340 L 945 495 L 600 495 L 600 526", lx: 975, ly: 420 });
   text(600, 573, "residuals of y: the lags minus the time", "sub", "middle");
   text(600, 587, "components at those same timestamps", "sub", "middle");
-  const arNet = dense(680, 520, 190, 46, "ReLU layers", "ar.layers", "var(--ar)", { mlp: true, optional: true });
-  edge(minus, arNet, "[B, L]", { lx: 648, ly: 536 });
-  const arOut = dense(910, 520, 170, 46, "Dense → S", "AR, one output per step ahead", "var(--ar)");
-  edge(arNet, arOut, null);
+  const arOut = dense(910, 520, 200, 46, "Dense L → S", "AR, one per step ahead, or a ReLU net", "var(--ar)");
+  edge(minus, arOut, "[B, L]", { lx: 760, ly: 536 });
   const lagReg = input(300, 597, 260, 32, "lagged regressors", "e.g. temperature on the days before the origin");
-  const lagDense = dense(910, 595, 170, 36, "Dense Lr → S", "raw lags, nothing subtracted", "var(--lagged)");
+  const lagDense = dense(910, 595, 200, 36, "Dense Lr → S", "raw lags, nothing subtracted", "var(--lagged)");
   edge(lagReg, lagDense, "[B, Lr]", { lx: 800, ly: 607 });
 
   // forecast
