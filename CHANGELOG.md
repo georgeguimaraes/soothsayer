@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.2.1...v1.3.0) (2026-09-19)
+
+
+### Features
+
+* a choice of loss for the forecast ([75b01af](https://github.com/georgeguimaraes/soothsayer/commit/75b01af697bd051547a4c0e80f7a74cc04e065b9))
+
+
+### Documentation
+
+* a figure of the network in the README and the introduction ([7fbfa59](https://github.com/georgeguimaraes/soothsayer/commit/7fbfa59765e10216c2587c7f8aca9d2a1ec48019))
+* one way to show the optional ReLU nets in the figure ([b02ce24](https://github.com/georgeguimaraes/soothsayer/commit/b02ce24f32735a9d7bb10eafa3fc8e5e18c5a711))
+
 ## [1.2.1](https://github.com/georgeguimaraes/soothsayer/compare/v1.2.0...v1.2.1) (2026-09-18)
 
 
