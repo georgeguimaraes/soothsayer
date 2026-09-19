@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside a Soothsayer Forecast</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f6f7f8; --panel: #ffffff; --ink: #1b2430; --muted: #62707e; --rule: #d3d9df; --op: #eef1f4;
+    --trend: #0072b2; --season: #e69f00; --events: #cc79a7; --regress: #009e73; --ar: #d55e00; --lagged: #56b4e9; --quant: #6b7580;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper: #14191f; --panel: #1b222b; --ink: #e9edf1; --muted: #9eabb8; --rule: #33404c; --op: #253039; --trend: #4aa3e3; --season: #f2b84b; --events: #e39ac6; --regress: #2fc596; --ar: #ff8a45; --lagged: #7cc9f2; --quant: #9aa6b2; } }
+  :root[data-theme="dark"] { --paper: #14191f; --panel: #1b222b; --ink: #e9edf1; --muted: #9eabb8; --rule: #33404c; --op: #253039; --trend: #4aa3e3; --season: #f2b84b; --events: #e39ac6; --regress: #2fc596; --ar: #ff8a45; --lagged: #7cc9f2; --quant: #9aa6b2; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif; font-size: 15px; line-height: 1.5; }
+  .wrap { max-width: 1880px; margin: 0 auto; padding-block: 36px 48px; padding-inline: 24px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 32px; margin-bottom: 18px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .example { font-size: 13.5px; color: var(--muted); margin: 0; }
+  .example code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink); }
+  .figure { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 1000px; height: auto; font-family: "IBM Plex Sans", sans-serif; }
+  .label { font-size: 13px; font-weight: 600; fill: var(--ink); }
+  .sub { font-size: 11px; fill: var(--muted); }
+  .shape { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); }
+  .shape-bg { fill: var(--panel); }
+  .edge { fill: none; stroke: var(--ink); stroke-width: 1.3; opacity: 0.6; }
+  .input { fill: var(--panel); stroke: var(--ink); stroke-width: 1.3; }
+  .dense { stroke-width: 1.5; }
+  .mlp { stroke-width: 1.5; }
+  .optional { stroke-dasharray: 4 3; }
+  .op { fill: var(--op); stroke: var(--ink); stroke-width: 1.3; }
+  .opsym { font-size: 16px; font-weight: 600; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+  .out { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
+  .region { fill: none; stroke: var(--rule); stroke-dasharray: 4 4; }
+  .region-title { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; fill: var(--muted); font-weight: 600; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; font-size: 12.5px; color: var(--muted); align-items: center; }
+  .legend svg { width: 26px; min-width: 0; height: 18px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .note { margin: 14px 0 0; font-size: 13px; color: var(--muted); max-width: 90ch; }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Inside a Soothsayer Forecast</h1>
+    <p class="example">One training sample. It covers P = L + S positions, the L lags the model looks back on and the S steps it forecasts, and B samples train at once. The letters in the shapes are sizes set by your config: C changepoints, K Fourier terms of a period, E event window columns, R future regressors, Lr lag columns over all lagged regressors, Q quantiles, N series. Without auto-regression L = 0, P = 1 and the middle region does not exist.</p>
+  </header>
+  <div class="figure"><svg id="graph" viewBox="0 0 1860 850" role="img" aria-label="Computation graph of one soothsayer sample, inputs on the left, yhat and the quantile columns on the right"></svg></div>
+  <div class="legend">
+    <span><svg viewBox="0 0 26 18"><polygon points="4,2 26,2 22,16 0,16" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>input tensor built by fit</span>
+    <span><svg viewBox="0 0 26 18"><rect x="1" y="2" width="24" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>dense layer, in → out features</span>
+    <span><svg viewBox="0 0 26 18"><rect x="1" y="2" width="24" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="4" y="5" width="18" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1"/></svg>network of dense layers with ReLU between them</span>
+    <span><svg viewBox="0 0 26 18"><circle cx="13" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>elementwise op</span>
+    <span><svg viewBox="0 0 26 18"><rect x="1" y="2" width="24" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="3 2"/></svg>only with some configurations</span>
+    <span>edges carry tensor shapes. One color per component.</span>
+  </div>
+  <p class="note">Everything with a dashed outline depends on the config: the logistic saturation on <code>growth: :logistic</code>, the × trend step on multiplicative seasonality, events or regressors, the ReLU layers on <code>ar.layers</code>, <code>regressors</code> with <code>layers</code> and <code>lagged_regressors_layers</code>, the series one-hot on <code>series.column</code>, and the whole quantile region on <code>quantiles</code>.</p>
+</div>
+
+<script>
+(function () {
+  const svg = document.getElementById("graph");
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (name, attrs, parent) => { const n = document.createElementNS(NS, name); for (const k in attrs) n.setAttribute(k, attrs[k]); (parent || svg).appendChild(n); return n; };
+  const text = (x, y, str, cls, anchor) => { const t = el("text", { x, y, class: cls, "text-anchor": anchor || "start" }); t.textContent = str; return t; };
+
+  const defs = el("defs", {});
+  const marker = el("marker", { id: "arrow", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto" }, defs);
+  el("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "var(--ink)", opacity: "0.75" }, marker);
+
+  const region = (x, y, w, h, title) => { el("rect", { x, y, width: w, height: h, rx: 6, class: "region" }); text(x + 10, y + 16, title, "region-title"); };
+  region(20, 22, 1010, 425, "time components, computed at all P positions");
+  region(20, 470, 1200, 160, "auto-regression and lagged regressors, from the L values before the origin");
+  region(20, 650, 1560, 190, "quantile heads, one per configured quantile");
+  region(1600, 22, 240, 818, "output");
+
+  const labelled = (x, y, w, h, label, sub) => {
+    text(x + w / 2, y + h / 2 - (sub ? 3 : -4), label, "label", "middle");
+    if (sub) text(x + w / 2, y + h / 2 + 12, sub, "sub", "middle");
+  };
+  const input = (x, y, w, h, label, sub, optional) => { el("polygon", { points: `${x + 8},${y} ${x + w},${y} ${x + w - 8},${y + h} ${x},${y + h}`, class: "input" + (optional ? " optional" : "") }); labelled(x, y, w, h, label, sub); return { x, y, w, h }; };
+  const dense = (x, y, w, h, label, sub, color, opts) => {
+    opts = opts || {};
+    if (opts.stacked) { el("rect", { x: x + 6, y: y - 6, width: w, height: h, rx: 5, fill: "var(--panel)", stroke: color, "stroke-width": 1, opacity: 0.6 }); el("rect", { x: x + 3, y: y - 3, width: w, height: h, rx: 5, fill: "var(--panel)", stroke: color, "stroke-width": 1, opacity: 0.8 }); }
+    el("rect", { x, y, width: w, height: h, rx: 5, fill: `color-mix(in srgb, ${color} 14%, var(--panel))`, stroke: color, class: "dense" + (opts.optional ? " optional" : "") });
+    if (opts.mlp) el("rect", { x: x + 5, y: y + 5, width: w - 10, height: h - 10, rx: 3, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.6 });
+    labelled(x, y, w, h, label, sub); return { x, y, w, h };
+  };
+  const op = (cx, cy, sym, r, optional) => { r = r || 15; el("circle", { cx, cy, r, class: "op" + (optional ? " optional" : "") }); const t = el("text", { x: cx, y: cy, class: "opsym" }); t.textContent = sym; return { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r }; };
+  const out = (x, y, w, h, label, sub) => { el("rect", { x, y, width: w, height: h, rx: 5, class: "out" }); labelled(x, y, w, h, label, sub); return { x, y, w, h }; };
+
+  const right = n => [n.x + n.w, n.y + n.h / 2], left = n => [n.x, n.y + n.h / 2], top = n => [n.x + n.w / 2, n.y], bottom = n => [n.x + n.w / 2, n.y + n.h];
+  const edge = (from, to, shape, opts) => {
+    opts = opts || {};
+    const [x1, y1] = (opts.from || right)(from), [x2, y2] = (opts.to || left)(to);
+    let d;
+    if (opts.path) d = opts.path;
+    else if (opts.straight) d = `M ${x1} ${y1} L ${x2} ${y2}`;
+    else { const dx = Math.max(40, (x2 - x1) / 2); d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`; }
+    el("path", { d, class: "edge", "marker-end": "url(#arrow)" });
+    if (shape) {
+      const lx = opts.lx != null ? opts.lx : (x1 + x2) / 2, ly = opts.ly != null ? opts.ly : (y1 + y2) / 2 - 7;
+      const t = text(lx, ly, shape, "shape", "middle");
+      const bb = t.getBBox(); const bg = el("rect", { x: bb.x - 3, y: bb.y - 1, width: bb.width + 6, height: bb.height + 2, class: "shape-bg" }); svg.insertBefore(bg, t);
+    }
+  };
+
+  // time components
+  const trendIn = input(40, 50, 250, 46, "trend features", "t and C hinges, e.g. t = 0.81 of the span");
+  const trendDense = dense(370, 50, 180, 46, "Dense 1+C → 1", "trend, the only layer with a bias", "var(--trend)");
+  edge(trendIn, trendDense, "[B, P, 1+C]", { lx: 330, ly: 64 });
+  const saturate = dense(580, 50, 130, 46, "logistic", "floor + (cap − floor) · σ", "var(--trend)", { optional: true });
+  edge(trendDense, saturate, null);
+
+  const seasIn = input(40, 134, 250, 46, "Fourier terms of a period", "e.g. sin and cos of 2π · day / 365.25");
+  const seasDense = dense(370, 134, 180, 46, "Dense 2K → 1", "one layer per period, no bias", "var(--season)", { stacked: true });
+  edge(seasIn, seasDense, "[B, P, 2K]", { lx: 330, ly: 148 });
+  const evIn = input(40, 214, 250, 46, "event windows", "e.g. black_friday at −1, 0, +1 as 0/1");
+  const evDense = dense(370, 214, 180, 46, "Dense E → 1", "events", "var(--events)");
+  edge(evIn, evDense, "[B, P, E]", { lx: 330, ly: 228 });
+  const regIn = input(40, 294, 250, 46, "future regressors", "e.g. a temperature forecast, z-scored");
+  const regDense = dense(370, 294, 180, 46, "Dense R → 1", "or a ReLU net per regressor", "var(--regress)");
+  edge(regIn, regDense, "[B, P, R]", { lx: 330, ly: 308 });
+
+  const times = op(760, 237, "×", 15, true);
+  text(760, 272, "× trend, multiplicative", "sub", "middle");
+  text(760, 286, "mode only", "sub", "middle");
+  const sum1 = op(830, 160, "+", 17);
+  edge(saturate, sum1, "[B, P, 1]", { lx: 770, ly: 100 });
+  edge(saturate, times, null, { from: n => [n.x + n.w, n.y + n.h / 2 + 8], path: "M 710 81 L 730 81 L 730 237 L 745 237" });
+  edge(seasDense, times, "[B, P, 1] each", { lx: 650, ly: 175 });
+  edge(evDense, times, null);
+  edge(regDense, times, null);
+  edge(times, sum1, null);
+
+  const series = input(40, 380, 250, 46, "series one-hot", "e.g. store_b of 3 stores → [0, 1, 0]", true);
+  edge(series, seasDense, null, { path: "M 290 403 L 340 403 L 340 380", to: bottom });
+  text(350, 396, "local mode: each sample uses its own series' weights", "sub");
+  text(350, 410, "in the trend and seasonality layers", "sub");
+  const sliceT = dense(880, 100, 130, 40, "slice positions", "L..P−1, the targets", "var(--quant)");
+  const sliceL = dense(880, 300, 130, 40, "slice positions", "0..L−1, the lags", "var(--quant)");
+  edge(sum1, sliceT, null, { from: n => [n.x + n.w, n.y + n.h / 2 - 6] });
+  edge(sum1, sliceL, "[B, P, 1]", { from: n => [n.x + n.w, n.y + n.h / 2 + 6], lx: 875, ly: 230 });
+
+  // auto-regression
+  const lags = input(40, 520, 250, 46, "lags of y", "e.g. the last 7 days of sales, z-scored");
+  const minus = op(600, 543, "−", 17);
+  edge(lags, minus, "[B, L]");
+  edge(sliceL, minus, "[B, L]", { from: bottom, to: top, path: "M 945 340 L 945 495 L 600 495 L 600 526", lx: 975, ly: 420 });
+  text(600, 573, "residuals of y: the lags minus the time", "sub", "middle");
+  text(600, 587, "components at those same timestamps", "sub", "middle");
+  const arNet = dense(680, 520, 190, 46, "ReLU layers", "ar.layers", "var(--ar)", { mlp: true, optional: true });
+  edge(minus, arNet, "[B, L]", { lx: 648, ly: 536 });
+  const arOut = dense(910, 520, 170, 46, "Dense → S", "AR, one output per step ahead", "var(--ar)");
+  edge(arNet, arOut, null);
+  const lagReg = input(300, 597, 260, 32, "lagged regressors", "e.g. temperature on the days before the origin");
+  const lagDense = dense(910, 595, 170, 36, "Dense Lr → S", "raw lags, nothing subtracted", "var(--lagged)");
+  edge(lagReg, lagDense, "[B, Lr]", { lx: 800, ly: 607 });
+
+  // forecast
+  const sum2 = op(1180, 320, "+", 19);
+  edge(sliceT, sum2, "[B, S, 1] → [B, S]", { lx: 1080, ly: 200 });
+  edge(arOut, sum2, "[B, S]", { lx: 1112, ly: 532 });
+  edge(lagDense, sum2, "[B, S]", { lx: 1112, ly: 602 });
+  const yhat = out(1240, 296, 150, 48, "yhat", "[B, S], the forecast");
+  edge(sum2, yhat, null);
+  // the DataFrame predict returns
+  const tableX = 1612, tableW = 216, rowH = 34, tableY = 60;
+  const columns = [
+    ["ds", "and the id column with several series", false],
+    ["yhat", "the forecast", false],
+    ["yhat_10, yhat_90", "one per quantile", true],
+    ["yhat_lower, yhat_upper", "after calibrate/3", true],
+    ["trend", "", false],
+    ["yearly_seasonality", "one per period", false],
+    ["events", "", false],
+    ["regressors", "", false],
+    ["ar", "", false],
+    ["lagged_regressors", "", false]
+  ];
+  el("rect", { x: tableX, y: tableY, width: tableW, height: 28 + rowH * columns.length, rx: 5, class: "out" });
+  text(tableX + tableW / 2, tableY + 19, "DataFrame", "label", "middle");
+  const rowCenter = i => tableY + 28 + rowH * i + rowH / 2;
+  columns.forEach(([name, sub, optional], i) => {
+    const y = tableY + 28 + rowH * i;
+    el("line", { x1: tableX, y1: y, x2: tableX + tableW, y2: y, stroke: "var(--rule)", "stroke-dasharray": optional ? "3 3" : "none" });
+    const t = text(tableX + tableW / 2, y + (sub ? 15 : 21), name, "shape", "middle"); t.setAttribute("fill", "var(--ink)");
+    if (sub) text(tableX + tableW / 2, y + 28, sub, "sub", "middle");
+  });
+  text(1720, tableY + 28 + rowH * 10 + 22, "one row per requested timestamp,", "sub", "middle");
+  text(1720, tableY + 28 + rowH * 10 + 36, "everything in the units of y", "sub", "middle");
+  const rowPort = i => ({ x: tableX, y: rowCenter(i) - 1, w: 0, h: 2 });
+  edge(sum2, rowPort(1), null, { from: n => [1360, 320], path: `M 1360 320 L 1470 320 L 1470 ${rowCenter(1)} L ${tableX} ${rowCenter(1)}` });
+  edge(sum1, rowPort(4), "every summand, sliced at the targets", { path: `M 1010 120 L 1530 120 L 1530 ${rowCenter(4)} L ${tableX} ${rowCenter(4)}`, lx: 1290, ly: 112 });
+  edge(sum1, rowPort(5), null, { path: `M 1530 ${rowCenter(4)} L 1530 ${rowCenter(5)} L ${tableX} ${rowCenter(5)}` });
+  edge(sum1, rowPort(6), null, { path: `M 1530 ${rowCenter(5)} L 1530 ${rowCenter(6)} L ${tableX} ${rowCenter(6)}` });
+  edge(sum1, rowPort(7), null, { path: `M 1530 ${rowCenter(6)} L 1530 ${rowCenter(7)} L ${tableX} ${rowCenter(7)}` });
+  edge(sum1, rowPort(8), null, { path: `M 1530 ${rowCenter(7)} L 1530 ${rowCenter(8)} L ${tableX} ${rowCenter(8)}` });
+  edge(sum1, rowPort(9), null, { path: `M 1530 ${rowCenter(8)} L 1530 ${rowCenter(9)} L ${tableX} ${rowCenter(9)}` });
+
+  // quantile heads
+  const stop = dense(1255, 590, 120, 30, "stop gradient", null, "var(--quant)");
+  edge(yhat, stop, null, { from: bottom, to: top, straight: true });
+  text(1388, 610, "yhat is fixed while the heads train", "sub");
+  const qIn = input(40, 715, 300, 46, "every input above, flattened", "plus the series one-hot if any");
+  const qDense = dense(640, 705, 200, 66, "Dense → S", "Q heads, one per quantile", "var(--quant)", { stacked: true });
+  edge(qIn, qDense, "[B, F]", { lx: 490, ly: 731 });
+  const qsum = op(1315, 738, "+", 17);
+  edge(stop, qsum, null, { from: bottom, to: top, straight: true });
+  edge(qDense, qsum, "Q × [B, S]", { lx: 1080, ly: 731 });
+  const q = out(1360, 714, 200, 48, "quantile columns", "yhat_10 and yhat_90 for [0.1, 0.9]");
+  edge(qsum, q, null);
+  edge(q, rowPort(2), null, { path: `M 1560 738 L 1580 738 L 1580 ${rowCenter(2)} L ${tableX} ${rowCenter(2)}` });
+  text(1360, 785, "each head trains on the pinball loss, which", "sub");
+  text(1360, 801, "puts it above the truth the right share of the", "sub");
+  text(1360, 817, "time, and is clipped so it never crosses yhat", "sub");
+})();
+</script>
+
+</body>
+</html>

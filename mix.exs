@@ -59,6 +59,7 @@ defmodule Soothsayer.MixProject do
     [
       main: "readme",
       authors: ["George Guimarães"],
+      assets: %{"assets" => "assets"},
       source_url: @source_url,
       source_ref: "v#{@version}",
       before_closing_body_tag: fn _format ->

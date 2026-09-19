@@ -83,7 +83,14 @@ Soothsayer models time series as a sum of components:
 y(t) = trend(t) + seasonality(t) + ar(t) + events(t) + regressors(t)
 ```
 
-Each component can be enabled or disabled depending on your data.
+Each component can be enabled or disabled depending on your data. This is the whole network for one training sample, with the tensor shapes on the edges and the optional parts dashed:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/network_dark.png">
+  <img alt="The soothsayer network: inputs on the left feed one dense layer per component, their sum is sliced into lag and target positions, the lag positions are subtracted from the lags before the AR branch, everything is summed into yhat, and quantile heads add offsets to a frozen copy of yhat. The predicted DataFrame lists yhat, the quantile columns and every component." src="assets/network_light.png">
+</picture>
+
+The source of the figure is `assets/network.html`, a page that draws it from a list of nodes and edges. Open it in a browser to read it at any size.
 
 ### Trend
 

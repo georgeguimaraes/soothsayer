@@ -16,6 +16,11 @@ y(t) = trend(t) + seasonality(t) + ar(t) + events(t) + regressors(t)
 - events(t) is holidays and promotions on known dates
 - regressors(t) is other columns you know ahead of time
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/network_dark.png">
+  <img alt="The soothsayer network: inputs on the left feed one dense layer per component, their sum is sliced into lag and target positions, the lag positions are subtracted from the lags before the AR branch, everything is summed into yhat, and quantile heads add offsets to a frozen copy of yhat. The predicted DataFrame lists yhat, the quantile columns and every component." src="assets/network_light.png">
+</picture>
+
 Every component can be turned off, and prediction returns each one separately, so you can see what drives a forecast. The networks are [Axon](https://hexdocs.pm/axon), the data goes through [Explorer](https://hexdocs.pm/explorer) and [Nx](https://hexdocs.pm/nx), and if you've used Prophet or NeuralProphet the configuration will look familiar.
 
 ## Compared with NeuralProphet
