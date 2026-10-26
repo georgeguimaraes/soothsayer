@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/georgeguimaraes/soothsayer/compare/v1.3.0...v1.3.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* seed the events test and bump decimal past its advisories ([2b33f97](https://github.com/georgeguimaraes/soothsayer/commit/2b33f974eea3094e160cd1c5b2a8f8a09f000a1e))
+
 ## [1.3.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.2.1...v1.3.0) (2026-10-26)
 
 
