@@ -1890,7 +1890,8 @@ defmodule SoothsayerTest do
           events: %{"promo" => %{steps_before: 0, steps_after: 0}},
           trend: %{changepoints: 0},
           seasonality: %{yearly: %{enabled: false}, weekly: %{enabled: false}},
-          epochs: 1
+          epochs: 1,
+          seed: 3
         })
 
       future = DataFrame.new(%{"ds" => [~D[2023-03-01], ~D[2023-03-01]], "id" => ["a", "b"]})
