@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.1](https://github.com/georgeguimaraes/soothsayer/compare/v1.3.0...v1.3.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* seed the events test and bump decimal past its advisories ([2b33f97](https://github.com/georgeguimaraes/soothsayer/commit/2b33f974eea3094e160cd1c5b2a8f8a09f000a1e))
+
+
+### Miscellaneous
+
+* **ci:** Publish to Hex with a workload identity instead of an API key ([198a4f8](https://github.com/georgeguimaraes/soothsayer/commit/198a4f816bba6c1b327ad3c4bd1722cba81a9b90))
+* **deps:** Bump all dependencies and move to Nx 1.0 ([cdfb45c](https://github.com/georgeguimaraes/soothsayer/commit/cdfb45c31174729e2c1d4d44c0237a996fa8635d))
+
 ## [1.3.0](https://github.com/georgeguimaraes/soothsayer/compare/v1.2.1...v1.3.0) (2026-10-26)
 
 
