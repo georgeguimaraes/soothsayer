@@ -18,11 +18,7 @@ end
 
 Then run `mix deps.get` to install the dependencies.
 
-Soothsayer accepts Nx 0.13 or 1.0. The current Axon release still declares `nx ~> 0.10`, so you get 0.13 by default. To run on Nx 1.0 until Axon ships a release that allows it, add Nx to your own deps with an override:
-
-```elixir
-{:nx, "~> 1.0", override: true}
-```
+Soothsayer runs on Nx 1.0, EXLA 1.0 and Axon 0.9.
 
 ## Quick start
 

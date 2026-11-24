@@ -213,7 +213,7 @@ defmodule Soothsayer.ARTest do
       initial_params = init_fn.(input, Axon.ModelState.empty())
 
       # Train model WITHOUT regularization using standard loop
-      trained_no_reg =
+      %Axon.Loop.State{step_state: %{model_state: trained_no_reg}} =
         network
         |> Axon.Loop.trainer(
           &Axon.Losses.huber(&1, &2.combined, reduction: :mean),

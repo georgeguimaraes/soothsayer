@@ -30,11 +30,9 @@ defmodule Soothsayer.MixProject do
   defp deps do
     [
       {:explorer, "~> 0.13.0"},
-      # Hex refuses packages with an overridden dependency, and axon 0.8.x still declares
-      # nx ~> 0.10, so the range lets the resolver pick 0.13 today and 1.0 once axon moves.
-      {:nx, "~> 0.13 or ~> 1.0"},
-      {:axon, "~> 0.8.0"},
-      {:exla, "~> 0.13 or ~> 1.0"},
+      {:nx, "~> 1.0"},
+      {:axon, "~> 0.9.0"},
+      {:exla, "~> 1.0"},
       # Country holidays for holidays: %{countries: [...]}.
       {:dayoff, "~> 0.2"},
       {:ex_doc, ">= 0.0.0", only: :docs},

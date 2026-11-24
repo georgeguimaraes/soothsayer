@@ -557,9 +557,12 @@ defmodule Soothsayer.Trainer do
         fn _ -> :ok end
       )
 
-    network
-    |> Axon.Loop.trainer(&loss(&1, &2, config), optimizer)
-    |> Axon.Loop.run(data, initial_params, epochs: epochs, compiler: EXLA)
+    %Axon.Loop.State{step_state: %{model_state: model_state}} =
+      network
+      |> Axon.Loop.trainer(&loss(&1, &2, config), optimizer)
+      |> Axon.Loop.run(data, initial_params, epochs: epochs, compiler: EXLA)
+
+    model_state
   end
 
   @doc """
